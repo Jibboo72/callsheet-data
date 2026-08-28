@@ -2,6 +2,7 @@ name: Build receiver data
 
 on:
   schedule:
+    # Tuesdays 11:00 UTC (~7am ET) — after Monday night games are final.
     - cron: "0 11 * * 2"
   workflow_dispatch:
     inputs:
@@ -23,8 +24,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install pandas
-        run: pip install --quiet pandas
+      # pyarrow is required: power_ratings.py reads nflverse parquet files.
+      - name: Install dependencies
+        run: pip install --quiet pandas pyarrow
 
       - name: Work out which season to build
         id: season
@@ -47,10 +49,43 @@ jobs:
             echo "Offseason - nothing to rebuild."
           fi
 
-      - name: Build
+      # Team pass-defense ratings and pace. build_receivers.py looks for
+      # matchup.json NEXT TO its output file, so it has to land in data/.
+      # Without this step every player comes out with no "mu" block.
+      # export_matchup.py only honours the season argument when BOTH season
+      # and week are passed; with one argument it falls back to a hardcoded
+      # 2025. So work out the next unplayed week here and pass both.
+      - name: Build matchup ratings
         if: steps.season.outputs.run == 'yes'
         run: |
           mkdir -p data
+          SEASON="${{ steps.season.outputs.season }}"
+          WEEK=$(python - "$SEASON" <<'PY'
+          import sys, pandas as pd
+          s = sys.argv[1]
+          url = ("https://github.com/nflverse/nflverse-data/releases/download/"
+                 f"pbp/play_by_play_{s}.csv")
+          df = pd.read_csv(url, usecols=["season_type", "week"], low_memory=False)
+          print(int(df[df.season_type == "REG"].week.max()) + 1)
+          PY
+          )
+          echo "building matchup for $SEASON week $WEEK"
+          python export_matchup.py "$SEASON" "$WEEK"
+          mv matchup.json data/matchup.json
+
+      # Point-in-time pass-defense ratings, one snapshot per week. This is
+      # what lets a 150-yard day against the #2 defense count for more than
+      # the same line against the #31. Must land in data/ alongside
+      # matchup.json, where build_receivers.py looks for it.
+      - name: Build weekly defense history
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          python export_def_history.py "${{ steps.season.outputs.season }}" \
+            data/def_history.json
+
+      - name: Build
+        if: steps.season.outputs.run == 'yes'
+        run: |
           python build_receivers.py "${{ steps.season.outputs.season }}" \
             "data/receivers-${{ steps.season.outputs.season }}.json"
 
