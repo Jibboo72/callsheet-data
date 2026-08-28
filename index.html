@@ -320,6 +320,59 @@ function slipMath(cid){
 const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const initials=n=>String(n).trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
 
+/* ---------------- matchup ---------------- */
+const MU=pid=>{const p=P(pid);return p&&p.mu&&p.mu.opp?p.mu:null;};
+
+/* rank 1 = toughest pass defense, 32 = softest.
+   Green flags a soft draw, red a hard one. */
+function rankColor(r){
+  r=Number(r);
+  if(!r)return 'var(--ink-soft)';
+  if(r>=23)return 'var(--win)';
+  if(r<=10)return 'var(--loss)';
+  return 'var(--ink-soft)';
+}
+
+/* Pace is deliberately separate from defensive quality: a tough, slow
+   defense suppresses volume far harder than a tough, fast one. Scale is
+   built from the opponents actually in the file rather than hardcoded
+   league averages, so it survives the numbers shifting week to week. */
+let _paceCache=null;
+function paceScale(){
+  if(_paceCache)return _paceCache;
+  const byTeam={};
+  Object.values(S.players||{}).forEach(p=>{
+    const m=p.mu;
+    if(m&&m.opp&&m.plays==null&&m.prate==null)return;
+    if(m&&m.opp&&Number(m.plays)&&Number(m.prate)) byTeam[m.opp]=Number(m.plays)*Number(m.prate);
+  });
+  const vals=Object.values(byTeam).sort((a,b)=>a-b);
+  _paceCache = vals.length>=3
+    ? {lo:vals[Math.floor(vals.length/3)], hi:vals[Math.floor(vals.length*2/3)], n:vals.length}
+    : {lo:null,hi:null,n:vals.length};
+  return _paceCache;
+}
+function paceOf(m){
+  if(!m||!Number(m.plays)||!Number(m.prate))return null;
+  const v=Number(m.plays)*Number(m.prate);
+  const s=paceScale();
+  let label='average', color='var(--ink-soft)';
+  if(s.lo!=null){
+    if(v<=s.lo){label='slow';color='var(--loss)';}
+    else if(v>=s.hi){label='fast';color='var(--win)';}
+  }
+  return {v, label, color, per:v.toFixed(1)};
+}
+/* one line for a card row: "@ PHI · pass D #4 · slow" */
+function muLine(pid){
+  const m=MU(pid); if(!m)return '';
+  const pc=paceOf(m);
+  const where=m.home?'vs ':'@ ';
+  const rank=m.d_rank?` · <span style="color:${rankColor(m.d_rank)};font-weight:600">pass D #${m.d_rank}</span>`:'';
+  const pace=pc?` · <span style="color:${pc.color};font-weight:600">${pc.label}</span>`:'';
+  return `<div class="what">${where}${esc(m.opp)}${rank}${pace}</div>`;
+}
+
 function chipHTML(pid){
   const p=P(pid)||{name:'?'};
   const col=teamColor(p.team);
@@ -333,13 +386,22 @@ function renderCards(){
     const cd=card(c.id),m=slipMath(c.id),collapsed=!!S.collapsed[c.id];
     const el=document.createElement('div');el.className='cat';
     let rows='';
+    // Fade card is for unders, so the toughest pass defenses (rank 1) are the
+    // best spots — those sort to the top. Anyone with no matchup data sinks.
+    let order=cd.picks.map((_,i)=>i);
+    if(c.id==='fade') order.sort((a,b)=>{
+      const ra=(MU(cd.picks[a].pid)||{}).d_rank||99;
+      const rb=(MU(cd.picks[b].pid)||{}).d_rank||99;
+      return ra-rb;
+    });
     if(!cd.picks.length)rows=`<div class="empty">Nothing on this card yet.</div>`;
-    else cd.picks.forEach((p,i)=>{
+    else order.map(i=>[cd.picks[i],i]).forEach(([p,i])=>{
       rows+=`<div class="row${p.benched?' off':''}">
         <button class="av" data-open="${p.pid}" aria-label="Open ${esc(p.who)}">${chipHTML(p.pid)}</button>
         <div class="pick" data-bench="${c.id}:${i}">
           <div class="who">${esc(p.who)}</div>
           <div class="what">${esc(p.what)}</div>
+          ${muLine(p.pid)}
         </div>
         <div class="meta"><div class="odds">${fmtAm(p.odds)}</div><div class="book">${esc(p.book||'')}</div></div>
         <button class="x" data-del="${c.id}:${i}" aria-label="Remove ${esc(p.who)}">×</button>
@@ -467,6 +529,8 @@ function mergeImport(raw){
     if(Array.isArray(inc.log)&&inc.log.length) p.log=inc.log;
     p.gsis=gsis;
     ['team','pos','ht','wt','college','exp'].forEach(f=>{ if(inc[f]) p[f]=inc[f]; });
+    if(inc.mu) p.mu=inc.mu; else delete p.mu;
+    if(inc.adj) p.adj=inc.adj; else delete p.adj;
     if(existed)updated++; else added++;
   });
   save();renderAll();syncSampleBtn();
@@ -570,6 +634,44 @@ function renderPlayer(){
     </div>
     <div class="wrap" style="padding-top:16px">
 
+      ${(()=>{
+        const a=p.adj; if(!a)return '';
+        const d=(v,r)=>v-r, sgn=v=>(v>0?'+':'')+v.toFixed(1);
+        const sosLbl = a.sos>0.75?'tougher than average':(a.sos<-0.75?'easier than average':'about average');
+        const sosCol = a.sos>0.75?'var(--win)':(a.sos<-0.75?'var(--loss)':'var(--ink-soft)');
+        const cell=(lbl,raw,adjv)=>{
+          const dv=adjv-raw;
+          const col=Math.abs(dv)<0.05?'var(--ink)':(dv>0?'var(--win)':'var(--loss)');
+          return `<div class="stat"><div class="n" style="color:${col}">${adjv.toFixed(1)}</div>
+            <div class="l">${lbl}<br>raw ${raw.toFixed(1)} · ${sgn(dv)}</div></div>`;
+        };
+        return `<div class="pblock"><div class="pbh">Adjusted for who he faced</div><div class="pbody">
+          <div class="stats">
+            <div class="stat"><div class="n" style="color:${sosCol}">${a.sos>0?'+':''}${a.sos.toFixed(2)}</div><div class="l">Schedule faced<br>${sosLbl}</div></div>
+            ${cell('Yards / game', a.raw_yds, a.yds)}
+            ${cell('Rec / game', a.raw_rec, a.rec)}
+          </div>
+          <div class="note" style="margin-bottom:0">Restates his production as if every game had come against a league-average pass defense, using each opponent's rating as it stood entering that week. Based on ${a.n} rated games. Targets and longest reception aren't adjusted — neither moves with opponent strength by enough to trust.</div>
+        </div></div>`;
+      })()}
+
+      ${(()=>{
+        const m=MU(openPid); if(!m)return '';
+        const pc=paceOf(m);
+        const rk=m.d_rank?`#${m.d_rank} of 32`:'—';
+        return `<div class="pblock"><div class="pbh">Next up · ${m.home?'vs':'at'} ${esc(m.opp)}</div><div class="pbody">
+          <div class="stats">
+            <div class="stat"><div class="n" style="color:${rankColor(m.d_rank)}">${rk}</div><div class="l">Pass defense${m.d_rank?(m.d_rank>=23?' — soft draw':(m.d_rank<=10?' — tough draw':'')):''}</div></div>
+            ${m.d_rating!=null?`<div class="stat"><div class="n">${Number(m.d_rating).toFixed(2)}</div><div class="l">Defense rating</div></div>`:''}
+            ${pc?`<div class="stat"><div class="n" style="color:${pc.color}">${pc.label}</div><div class="l">Pace — ${pc.per} pass plays/g</div></div>`:''}
+            ${m.plays!=null?`<div class="stat"><div class="n">${Number(m.plays).toFixed(1)}</div><div class="l">Opponent plays / game</div></div>`:''}
+            ${m.prate!=null?`<div class="stat"><div class="n">${Math.round(Number(m.prate)*100)}%</div><div class="l">Opponent pass rate</div></div>`:''}
+            <div class="stat"><div class="n">${m.home?'Home':'Away'}</div><div class="l">Site</div></div>
+          </div>
+          <div class="note" style="margin-bottom:0">Rank and pace are separate reads. A tough, slow defense caps volume far harder than a tough, fast one — the first kills a receptions over, the second often doesn't.</div>
+        </div></div>`;
+      })()}
+
       ${st?`<div class="pblock"><div class="pbh">What the log says</div><div class="pbody">
         <div class="stats">
           <div class="stat"><div class="n">${st.recPerG}</div><div class="l">Rec / game</div></div>
@@ -586,12 +688,14 @@ function renderPlayer(){
 
       <div class="pblock"><div class="pbh">Game log</div><div class="pbody">
         <table class="logtbl">
-          <thead><tr><th>Wk</th><th>Tgt</th><th>Rec</th><th>Yds</th><th>Long</th><th></th></tr></thead>
+          <thead><tr><th>Wk</th><th style="text-align:left">Opp</th><th>Tgt</th><th>Rec</th><th>Yds</th><th>Long</th><th></th></tr></thead>
           <tbody>${(p.log||[]).length?p.log.map((g,i)=>`<tr>
-            <td style="font-weight:600">${esc(g.wk)}</td><td>${esc(g.tgt)}</td><td>${esc(g.rec)}</td>
+            <td style="font-weight:600">${esc(g.wk)}</td>
+            <td style="text-align:left;color:${g.dp==null?'var(--ink-soft)':(g.dp>=2?'var(--win)':(g.dp<=-2?'var(--loss)':'var(--ink-soft)'))};font-weight:${g.dp!=null&&Math.abs(g.dp)>=2?'600':'400'}">${esc(g.opp||'—')}${g.dp!=null?`<span style="font-size:9px;opacity:.75"> ${g.dp>0?'+':''}${g.dp}</span>`:''}</td>
+            <td>${esc(g.tgt)}</td><td>${esc(g.rec)}</td>
             <td>${esc(g.yds)}</td><td class="big">${esc(g.lng)}</td>
             <td><button class="x" data-logdel="${i}" aria-label="Remove week ${esc(g.wk)}">×</button></td>
-          </tr>`).join(''):`<tr><td colspan="6" style="text-align:left;color:var(--ink-soft);font-style:italic;font-size:11px;padding:10px 0">No games logged yet.</td></tr>`}</tbody>
+          </tr>`).join(''):`<tr><td colspan="7" style="text-align:left;color:var(--ink-soft);font-style:italic;font-size:11px;padding:10px 0">No games logged yet.</td></tr>`}</tbody>
         </table>
         <div class="logadd">
           <input data-lg="wk" placeholder="Wk" inputmode="numeric">
@@ -662,7 +766,7 @@ function pickPhoto(){
 }
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.dataset.on='1';clearTimeout(t._t);t._t=setTimeout(()=>t.dataset.on='0',1600);}
-function renderAll(){document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderRoster();renderLedger();}
+function renderAll(){_paceCache=null;document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderRoster();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{

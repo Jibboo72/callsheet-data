@@ -83,6 +83,70 @@ def next_opponents(season, played_through):
     return out, wk
 
 
+def load_def_history(cache_dir):
+    """Point-in-time pass-defense ratings from export_def_history.py. Optional."""
+    p = os.path.join(cache_dir or ".", "def_history.json")
+    if not os.path.exists(p):
+        print("no def_history.json found - skipping opponent adjustment",
+              file=sys.stderr)
+        return None
+    with open(p) as f:
+        return json.load(f)
+
+
+def fit_sensitivity(players, weeks):
+    """
+    How much does a point of opponent pass defense cost a receiver?
+
+    Estimated WITHIN player: each man is compared against his own average,
+    so the slope isn't contaminated by good receivers happening to draw
+    easier schedules. Fit fresh from the season being built rather than
+    carrying a hardcoded constant.
+
+    Returns {metric: (slope, t_stat)}. A metric whose t-stat is weak gets
+    a slope of 0 by the caller -- better to leave a number alone than to
+    adjust it by noise.
+    """
+    import numpy as np
+
+    metrics = {"yds": lambda g: float(g["yds"]),
+               "rec": lambda g: float(g["rec"]),
+               "tgt": lambda g: float(g["tgt"]),
+               "lng": lambda g: float(g["lng"])}
+    cols = {k: ([], []) for k in metrics}
+
+    for p in players.values():
+        rated = [(weeks.get(g["wk"], {}).get(g["opp"]), g) for g in p["log"]]
+        rated = [(dp, g) for dp, g in rated if dp is not None]
+        if len(rated) < 4:          # too few games to demean meaningfully
+            continue
+        x = np.array([dp for dp, _ in rated], dtype=float)
+        x = x - x.mean()
+        for k, f in metrics.items():
+            y = np.array([f(g) for _, g in rated], dtype=float)
+            cols[k][0].append(x)
+            cols[k][1].append(y - y.mean())
+
+    out = {}
+    for k, (xs, ys) in cols.items():
+        if not xs:
+            out[k] = (0.0, 0.0)
+            continue
+        x = np.concatenate(xs)
+        y = np.concatenate(ys)
+        b = np.polyfit(x, y, 1)
+        resid = y - (b[0] * x + b[1])
+        denom = ((x - x.mean()) ** 2).sum()
+        se = np.sqrt((resid ** 2).sum() / max(1, len(y) - 2) / denom) if denom else 0.0
+        out[k] = (float(b[0]), float(b[0] / se) if se else 0.0)
+    return out
+
+
+# Below this |t| the relationship isn't distinguishable from noise, so the
+# metric is reported raw rather than adjusted by a slope we don't trust.
+MIN_T = 2.0
+
+
 def _height(v):
     """Roster height may be inches (71) or already formatted (6-1)."""
     try:
@@ -163,12 +227,59 @@ def build(season, cache_dir=None):
 
         players[pid] = rec
 
+    # ---- opponent adjustment -----------------------------------------
+    # Attach the opponent's point-in-time pass-defense rating to each game,
+    # then restate production as what it would have been against a league-
+    # average defense. A 150-yard day against the #2 pass defense is worth
+    # more than the same line against the #31, and this is where that gets
+    # priced in rather than left to the eye.
+    hist = load_def_history(cache_dir)
+    adj_meta = None
+    if hist:
+        weeks = hist.get("weeks", {})
+        for p in players.values():
+            for g in p["log"]:
+                dp = weeks.get(g["wk"], {}).get(g["opp"])
+                if dp is not None:
+                    g["dp"] = round(float(dp), 2)
+
+        sens = fit_sensitivity(players, weeks)
+        slopes = {k: (s if abs(t) >= MIN_T else 0.0) for k, (s, t) in sens.items()}
+        adj_meta = {
+            "slopes": {k: round(s, 4) for k, s in slopes.items()},
+            "t": {k: round(t, 2) for k, (_, t) in sens.items()},
+            "min_t": MIN_T,
+            "first_rated_week": hist.get("first_rated_week"),
+        }
+        for k, (s, t) in sens.items():
+            kept = "applied" if abs(t) >= MIN_T else "NOT applied (weak)"
+            print(f"  {k}: {s:+.4f} per point of def_pass  t={t:+.2f}  {kept}",
+                  file=sys.stderr)
+
+        for p in players.values():
+            rated = [g for g in p["log"] if "dp" in g]
+            if not rated:
+                continue
+            n = len(rated)
+            sos = sum(g["dp"] for g in rated) / n
+            a = {"n": n, "sos": round(sos, 2)}
+            for k in ("yds", "rec", "tgt", "lng"):
+                raw = sum(float(g[k]) for g in rated) / n
+                # Remove the schedule effect. slope is negative (tough defense
+                # costs production), so subtracting slope*sos ADDS back for a
+                # hard schedule (sos > 0) and takes away for an easy one.
+                adjusted = raw - slopes[k] * sos
+                a["raw_" + k] = round(raw, 2)
+                a[k] = round(adjusted, 2)
+            p["adj"] = a
+
     return {
         "season": int(season),
         "count": len(players),
         "through_week": played_through,
         "next_week": next_week,
         "teams": teams,
+        "adj": adj_meta,
         "players": players,
     }
 
