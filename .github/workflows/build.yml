@@ -52,11 +52,29 @@ jobs:
       # Team pass-defense ratings and pace. build_receivers.py looks for
       # matchup.json NEXT TO its output file, so it has to land in data/.
       # Without this step every player comes out with no "mu" block.
+      # Play-by-play only exists once games have been played. Before a season
+      # kicks off, the ratings/receivers steps have nothing to chew on — but
+      # game lines DO exist (nflverse posts them weeks ahead), so that step
+      # still runs and a preseason build is useful rather than a hard failure.
+      - name: Check for play-by-play
+        id: pbp
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          URL="https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_${{ steps.season.outputs.season }}.csv"
+          CODE=$(curl -sI -L -o /dev/null -w '%{http_code}' "$URL")
+          if [ "$CODE" = "200" ]; then
+            echo "has=yes" >> $GITHUB_OUTPUT
+            echo "play-by-play available"
+          else
+            echo "has=no" >> $GITHUB_OUTPUT
+            echo "no play-by-play for this season yet (HTTP $CODE) - lines only"
+          fi
+
       # export_matchup.py only honours the season argument when BOTH season
       # and week are passed; with one argument it falls back to a hardcoded
       # 2025. So work out the next unplayed week here and pass both.
       - name: Build matchup ratings
-        if: steps.season.outputs.run == 'yes'
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
         run: |
           mkdir -p data
           SEASON="${{ steps.season.outputs.season }}"
@@ -78,13 +96,13 @@ jobs:
       # the same line against the #31. Must land in data/ alongside
       # matchup.json, where build_receivers.py looks for it.
       - name: Build weekly defense history
-        if: steps.season.outputs.run == 'yes'
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
         run: |
           python export_def_history.py "${{ steps.season.outputs.season }}" \
             data/def_history.json
 
-      - name: Build
-        if: steps.season.outputs.run == 'yes'
+      - name: Build receivers
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
         run: |
           python build_receivers.py "${{ steps.season.outputs.season }}" \
             "data/receivers-${{ steps.season.outputs.season }}.json"
