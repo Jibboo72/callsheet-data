@@ -89,6 +89,15 @@ jobs:
           python build_receivers.py "${{ steps.season.outputs.season }}" \
             "data/receivers-${{ steps.season.outputs.season }}.json"
 
+      # Schedule, lines, totals, weather and results for the Sides board.
+      # Lines come from nflverse games.csv, which posts upcoming numbers
+      # weeks ahead — so this is useful before a season starts.
+      - name: Build game lines
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          python export_games.py "${{ steps.season.outputs.season }}" \
+            "data/games-${{ steps.season.outputs.season }}.json"
+
       - name: Commit if the numbers changed
         if: steps.season.outputs.run == 'yes'
         run: |
