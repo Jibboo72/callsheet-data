@@ -1,0 +1,130 @@
+name: Build receiver data
+
+on:
+  schedule:
+    # Tuesdays 11:00 UTC (~7am ET) — after Monday night games are final.
+    - cron: "0 11 * * 2"
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season to build (blank = current)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pyarrow is required: power_ratings.py reads nflverse parquet files.
+      - name: Install dependencies
+        run: pip install --quiet pandas pyarrow
+
+      - name: Work out which season to build
+        id: season
+        run: |
+          if [ -n "${{ github.event.inputs.season }}" ]; then
+            echo "season=${{ github.event.inputs.season }}" >> $GITHUB_OUTPUT
+            echo "run=yes" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          MONTH=$(date -u +%m)
+          YEAR=$(date -u +%Y)
+          if [ "$MONTH" -ge 09 ]; then
+            echo "season=$YEAR" >> $GITHUB_OUTPUT
+            echo "run=yes" >> $GITHUB_OUTPUT
+          elif [ "$MONTH" -le 02 ]; then
+            echo "season=$((YEAR-1))" >> $GITHUB_OUTPUT
+            echo "run=yes" >> $GITHUB_OUTPUT
+          else
+            echo "run=no" >> $GITHUB_OUTPUT
+            echo "Offseason - nothing to rebuild."
+          fi
+
+      # Team pass-defense ratings and pace. build_receivers.py looks for
+      # matchup.json NEXT TO its output file, so it has to land in data/.
+      # Without this step every player comes out with no "mu" block.
+      # Play-by-play only exists once games have been played. Before a season
+      # kicks off, the ratings/receivers steps have nothing to chew on — but
+      # game lines DO exist (nflverse posts them weeks ahead), so that step
+      # still runs and a preseason build is useful rather than a hard failure.
+      - name: Check for play-by-play
+        id: pbp
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          URL="https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_${{ steps.season.outputs.season }}.csv"
+          CODE=$(curl -sI -L -o /dev/null -w '%{http_code}' "$URL")
+          if [ "$CODE" = "200" ]; then
+            echo "has=yes" >> $GITHUB_OUTPUT
+            echo "play-by-play available"
+          else
+            echo "has=no" >> $GITHUB_OUTPUT
+            echo "no play-by-play for this season yet (HTTP $CODE) - lines only"
+          fi
+
+      # export_matchup.py only honours the season argument when BOTH season
+      # and week are passed; with one argument it falls back to a hardcoded
+      # 2025. So work out the next unplayed week here and pass both.
+      - name: Build matchup ratings
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
+        run: |
+          mkdir -p data
+          SEASON="${{ steps.season.outputs.season }}"
+          WEEK=$(python - "$SEASON" <<'PY'
+          import sys, pandas as pd
+          s = sys.argv[1]
+          url = ("https://github.com/nflverse/nflverse-data/releases/download/"
+                 f"pbp/play_by_play_{s}.csv")
+          df = pd.read_csv(url, usecols=["season_type", "week"], low_memory=False)
+          print(int(df[df.season_type == "REG"].week.max()) + 1)
+          PY
+          )
+          echo "building matchup for $SEASON week $WEEK"
+          python export_matchup.py "$SEASON" "$WEEK"
+          mv matchup.json data/matchup.json
+
+      # Point-in-time pass-defense ratings, one snapshot per week. This is
+      # what lets a 150-yard day against the #2 defense count for more than
+      # the same line against the #31. Must land in data/ alongside
+      # matchup.json, where build_receivers.py looks for it.
+      - name: Build weekly defense history
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
+        run: |
+          python export_def_history.py "${{ steps.season.outputs.season }}" \
+            data/def_history.json
+
+      - name: Build receivers
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
+        run: |
+          python build_receivers.py "${{ steps.season.outputs.season }}" \
+            "data/receivers-${{ steps.season.outputs.season }}.json"
+
+      # Schedule, lines, totals, weather and results for the Sides board.
+      # Lines come from nflverse games.csv, which posts upcoming numbers
+      # weeks ahead — so this is useful before a season starts.
+      - name: Build game lines
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          python export_games.py "${{ steps.season.outputs.season }}" \
+            "data/games-${{ steps.season.outputs.season }}.json"
+
+      - name: Commit if the numbers changed
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add data/*.json
+          if git diff --staged --quiet; then
+            echo "No change this week."
+          else
+            git commit -m "Data through $(date -u +%Y-%m-%d)"
+            git push
+          fi
