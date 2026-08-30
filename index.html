@@ -164,14 +164,25 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 </header>
 
 <nav class="tabs" role="tablist">
-  <button role="tab" id="tabCards" aria-selected="true">Cards</button>
+  <button role="tab" id="tabCards" aria-selected="true">Props</button>
+  <button role="tab" id="tabSides" aria-selected="false">Sides</button>
   <button role="tab" id="tabRoster" aria-selected="false">Roster</button>
+  <button role="tab" id="tabBank" aria-selected="false">Bank</button>
   <button role="tab" id="tabLedger" aria-selected="false">Ledger</button>
 </nav>
 
 <section id="paneCards">
   <div id="cats"></div>
   <p class="note">Tap the color chip to open a player. Tap the pick text to bench it — benched legs stay on the card but drop out of the slip math. Tap the band to collapse a market.</p>
+</section>
+
+<section id="paneSides" hidden>
+  <div id="sidesBoard"></div>
+</section>
+
+<section id="paneBank" hidden>
+  <div id="bankSummary"></div>
+  <div id="bankList"></div>
 </section>
 
 <section id="paneRoster" hidden>
@@ -446,6 +457,15 @@ function renderCards(){
           ${m.bets>1?`<div class="tline"><span class="k">Range</span><span class="v">${fmtAm(m.shortest)} / ${fmtAm(m.longest)}</span></div>`:''}
           <div class="tline"><span class="k">Return if everything hits</span><span class="v">${m.bets?money(m.maxRet):'—'}</span></div>
           ${flags.map(f=>`<div class="flag">${f}</div>`).join('')}
+          ${(()=>{
+            const s=propSettlement(c.id);
+            const done=(S.bank&&S.bank.bets||[]).some(b=>b.kind==='prop'&&b.card===c.id&&Number(b.wk)===Number(S.week));
+            if(done)return `<div class="note" style="margin:8px 0 0">Settled to bankroll.</div>`;
+            if(!s)return m.bets?`<div class="note" style="margin:8px 0 0">Grade every leg to settle this card to the bankroll.</div>`:'';
+            const col=s.pl>=0?'var(--win)':'var(--loss)';
+            return `<div class="note" style="margin:8px 0 6px">${s.won} of ${s.bets} bets won · staked ${money(s.staked)} · returned ${money(s.ret)} · <strong style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</strong></div>
+              <button class="btn ghost" data-settle="${c.id}">Settle to bankroll</button>`;
+          })()}
         </div>
       </div>`;
     host.appendChild(el);
@@ -517,7 +537,13 @@ function mergeImport(raw){
   try{ data=typeof raw==='string'?JSON.parse(raw):raw; }
   catch(e){ impSay("That file isn't valid JSON.",true); return; }
   const src=data&&data.players;
-  if(!src||typeof src!=='object'){ impSay('No "players" object in that file.',true); return; }
+  if(Array.isArray(data&&data.games)){
+    S.games=data; save(); renderAll();
+    const wl=data.games.filter(g=>g.spread!=null).length;
+    impSay(`Loaded ${data.games.length} games for ${data.season}, ${wl} with lines.`);
+    return;
+  }
+  if(!src||typeof src!=='object'){ impSay('No "players" or "games" in that file.',true); return; }
 
   let added=0,updated=0;
   Object.entries(src).forEach(([gsis,inc])=>{
@@ -567,6 +593,151 @@ document.getElementById('impFetch').addEventListener('click',async()=>{
 document.getElementById('rosterSearch').addEventListener('input',e=>{
   rosterQuery=e.target.value; renderRoster();
 });
+
+/* ---------------- sides & bankroll ---------------- */
+const BANKKEY=()=>{S.bank=S.bank||{start:500,bets:[]};S.bank.bets=S.bank.bets||[];return S.bank;};
+const GM=()=>S.games&&Array.isArray(S.games.games)?S.games.games:[];
+
+function payout(stake,odds,bet){
+  if(bet&&bet.fixedReturn!=null)return Number(bet.fixedReturn);
+  const d=toDec(odds); return d?stake*d:stake;
+}
+function bankRows(){
+  const b=BANKKEY();
+  return b.bets.slice().sort((x,y)=>(Number(y.wk)-Number(x.wk))||(y.ts-x.ts));
+}
+function bankStats(){
+  const b=BANKKEY();
+  let staked=0,ret=0,open=0,w=0,l=0,p=0;
+  b.bets.forEach(x=>{
+    const st=Number(x.stake)||0;
+    if(x.result==="W"){staked+=st;ret+=payout(st,x.odds,x);w++;}
+    else if(x.result==='L'){staked+=st;l++;}
+    else if(x.result==='P'){staked+=st;ret+=st;p++;}
+    else open+=st;
+  });
+  const pl=ret-staked;
+  return {staked,ret,pl,open,w,l,p,
+    bal:Number(b.start||0)+pl,
+    roi:staked?pl/staked:0,
+    settled:w+l+p};
+}
+function addBet(rec){
+  const b=BANKKEY();
+  b.bets.push(Object.assign({id:'b'+Date.now()+Math.random().toString(36).slice(2,6),
+    wk:S.week,result:null,ts:Date.now()},rec));
+  save();
+}
+
+/* how many round-robin combos actually won, from the graded legs */
+function propSettlement(cid){
+  const c=card(cid),legs=activeLegs(cid),stake=Number(c.stake)||0;
+  const graded=legs.filter(p=>p.grade==='W'||p.grade==='L');
+  if(!graded.length||graded.length<legs.length)return null;   // not fully graded
+  const decs=legs.map(p=>({d:toDec(p.odds),win:p.grade==='W'}));
+  let bets=[];
+  if(c.mode==='single')bets=decs.map(x=>[x]);
+  else if(c.mode==='parlay'){if(decs.length>=2)bets=[decs];}
+  else{const k=Math.max(2,Math.min(Number(c.size)||2,decs.length));if(decs.length>=k)bets=combosOf(decs,k);}
+  let staked=0,ret=0,won=0;
+  bets.forEach(bt=>{
+    staked+=stake;
+    if(bt.every(x=>x.win)){ret+=stake*bt.reduce((a,x)=>a*x.d,1);won++;}
+  });
+  return {bets:bets.length,won,staked,ret,pl:ret-staked};
+}
+
+function renderSides(){
+  const host=document.getElementById('sidesBoard');
+  const all=GM();
+  if(!all.length){
+    host.innerHTML=`<div class="pblock"><div class="pbh">Game lines</div><div class="pbody">
+      <div class="note" style="margin:0">No schedule loaded. Import a games file on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
+    return;
+  }
+  const wk=S.week;
+  const games=all.filter(g=>Number(g.wk)===Number(wk));
+  const cal=(S.games.calibration)||{};
+  let html=`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
+    <div class="note" style="margin:0 0 4px">Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.</div>
+  </div></div>`;
+
+  if(!games.length){
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">No games that week.</div></div></div>`;
+    host.innerHTML=html; return;
+  }
+
+  games.forEach(g=>{
+    const hasLine=g.spread!=null;
+    const edge=(g.proj!=null&&hasLine)?(g.proj-g.spread):null;
+    const eCol=edge==null?'var(--ink-soft)':(Math.abs(edge)>=2?(edge>0?'var(--win)':'var(--loss)'):'var(--ink-soft)');
+    const fav=hasLine?(g.spread>0?g.home:g.away):null;
+    const line=hasLine?`${esc(fav)} -${Math.abs(g.spread).toFixed(1)}`:'no line';
+    const played='margin' in g;
+    const wx=[g.roof&&g.roof!=='outdoors'?g.roof:null, g.wind?g.wind+' mph':null].filter(Boolean).join(' · ');
+    html+=`<div class="cat">
+      <div class="band" style="background:var(--stock-2);cursor:default">
+        <span class="tag">${esc(g.away)} @ ${esc(g.home)}</span>
+        <span class="cnt">${esc(String(g.date||'').slice(5))}${g.div?' · div':''}</span>
+      </div>
+      <div class="pbody" style="padding:9px 10px">
+        <div class="stats">
+          <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
+          <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
+          <div class="stat"><div class="n" style="color:${eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
+        </div>
+        ${played?`<div class="note" style="margin:8px 0 0">Final ${esc(g.away)} ${g.as} – ${esc(g.home)} ${g.hs} · total ${g.pts} ${g.total!=null?(g.pts>g.total?'(over)':'(under)'):''}</div>`:''}
+        ${wx?`<div class="note" style="margin:6px 0 0">${esc(wx)}</div>`:''}
+        <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
+          <input data-gs="pick" data-g="${esc(g.id)}" placeholder="Bet — e.g. ${esc(g.home)} -3.5" style="grid-column:1/-1">
+          <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text">
+          <input data-gs="stake" data-g="${esc(g.id)}" placeholder="Stake" inputmode="decimal">
+          <button class="btn" data-gadd="${esc(g.id)}" style="grid-column:1/-1">Add to bankroll</button>
+        </div>
+      </div></div>`;
+  });
+  host.innerHTML=html;
+}
+
+function renderBank(){
+  const b=BANKKEY(), s=bankStats();
+  const col=s.pl>0?'var(--win)':(s.pl<0?'var(--loss)':'var(--ink)');
+  document.getElementById('bankSummary').innerHTML=`
+    <div class="pblock"><div class="pbh">Bankroll</div><div class="pbody">
+      <div class="stats">
+        <div class="stat"><div class="n" style="color:${col}">${money(s.bal)}</div><div class="l">Balance</div></div>
+        <div class="stat"><div class="n" style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</div><div class="l">Profit / loss</div></div>
+        <div class="stat"><div class="n" style="color:${col}">${s.staked?(100*s.roi).toFixed(1)+'%':'—'}</div><div class="l">ROI on ${money(s.staked)}</div></div>
+        <div class="stat"><div class="n">${s.w}-${s.l}${s.p?'-'+s.p:''}</div><div class="l">Settled bets</div></div>
+        <div class="stat"><div class="n">${money(s.open)}</div><div class="l">At risk, open</div></div>
+        <div class="stat"><div class="n">${b.bets.length}</div><div class="l">Total logged</div></div>
+      </div>
+      <div style="height:10px"></div>
+      <span class="lab">Starting bankroll</span>
+      <input id="bankStart" type="number" step="10" inputmode="decimal" value="${Number(b.start||0)}">
+    </div></div>`;
+
+  const rows=bankRows();
+  document.getElementById('bankList').innerHTML=`
+    <div class="cat"><div class="band" style="background:var(--stock-2);cursor:default"><span class="tag">Bet log</span><span class="cnt">${rows.length}</span></div>
+    ${rows.length?rows.map(x=>{
+      const st=Number(x.stake)||0;
+      const ret=x.result==='W'?payout(st,x.odds,x)-st:(x.result==='L'?-st:0);
+      const rc=x.result==='W'?'var(--win)':(x.result==='L'?'var(--loss)':'var(--ink-soft)');
+      return `<div class="row">
+        <div class="pick" style="cursor:default">
+          <div class="who">${esc(x.desc)}</div>
+          <div class="what">Wk ${esc(x.wk)} · ${esc(x.kind||'side')} · ${fmtAm(x.odds)} · ${money(st)}</div>
+        </div>
+        <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
+        <button class="x" data-bdel="${esc(x.id)}" aria-label="Remove">×</button>
+        <div class="grade">
+          <button data-bg="W" data-bid="${esc(x.id)}" data-on="${x.result==='W'?1:0}">W</button>
+          <button data-bg="L" data-bid="${esc(x.id)}" data-on="${x.result==='L'?1:0}">L</button>
+        </div></div>`;
+    }).join(''):`<div class="empty">Nothing logged yet. Add bets from the Sides board, or settle a prop card.</div>`}
+    </div>`;
+}
 
 function renderLedger(){
   const body=document.getElementById('ledBody');body.innerHTML='';
@@ -766,12 +937,59 @@ function pickPhoto(){
 }
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.dataset.on='1';clearTimeout(t._t);t._t=setTimeout(()=>t.dataset.on='0',1600);}
-function renderAll(){_paceCache=null;document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderRoster();renderLedger();}
+/* sides board */
+document.getElementById('sidesBoard').addEventListener('click',e=>{
+  const a=e.target.closest('[data-gadd]'); if(!a)return;
+  const id=a.dataset.gadd, box=a.closest('.add');
+  const v=f=>box.querySelector(`[data-gs="${f}"]`);
+  const desc=v('pick').value.trim(), odds=parseInt(v('odds').value,10)||-110, stake=Number(v('stake').value);
+  if(!desc){toast('Describe the bet first');return;}
+  if(!stake||stake<=0){toast('Needs a stake');return;}
+  const g=GM().find(x=>x.id===id)||{};
+  addBet({desc,odds,stake,kind:'side',game:id,wk:g.wk||S.week});
+  v('pick').value='';v('odds').value='';v('stake').value='';
+  renderBank();toast('Added to bankroll');
+});
+
+/* bankroll */
+document.getElementById('bankList').addEventListener('click',e=>{
+  const g=e.target.closest('[data-bg]');
+  if(g){
+    const b=BANKKEY(), x=b.bets.find(y=>y.id===g.dataset.bid);
+    if(x){x.result=x.result===g.dataset.bg?null:g.dataset.bg;save();renderBank();}
+    return;
+  }
+  const d=e.target.closest('[data-bdel]');
+  if(d){
+    const b=BANKKEY(); const i=b.bets.findIndex(y=>y.id===d.dataset.bdel);
+    if(i>=0){b.bets.splice(i,1);save();renderBank();}
+  }
+});
+document.getElementById('bankSummary').addEventListener('change',e=>{
+  if(e.target.id==='bankStart'){BANKKEY().start=Number(e.target.value)||0;save();renderBank();}
+});
+
+function renderAll(){_paceCache=null;document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
   const op=e.target.closest('[data-open]');
   if(op){ openPlayer(op.dataset.open); return; }
+  const st=e.target.closest('[data-settle]');
+  if(st){
+    const cid=st.dataset.settle, s=propSettlement(cid);
+    if(!s)return;
+    // Logged as one net line so the bankroll math matches the card exactly,
+    // rather than trying to reconstruct each combo as its own bet.
+    const b=BANKKEY();
+    b.bets.push({id:'b'+Date.now(),wk:S.week,kind:'prop',card:cid,
+      desc:`${catById(cid).name} · ${s.won}/${s.bets} won`,
+      odds:s.ret>0?toAm(s.ret/s.staked):-100,
+      stake:s.staked, result:s.pl>=0?'W':'L', ts:Date.now(),
+      fixedReturn:s.ret});
+    save();renderCards();renderBank();toast('Settled');
+    return;
+  }
   const fold=e.target.closest('[data-fold]');
   if(fold){const id=fold.dataset.fold;S.collapsed[id]=!S.collapsed[id];save();renderCards();return;}
   const add=e.target.closest('[data-add]');
@@ -918,14 +1136,14 @@ document.getElementById('clearAll').addEventListener('click',()=>{
   S.ledger={};save();renderLedger();toast('Ledger reset');});
 
 function showTab(name){
-  const map={Cards:'paneCards',Roster:'paneRoster',Ledger:'paneLedger'};
+  const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Bank:'paneBank',Ledger:'paneLedger'};
   Object.entries(map).forEach(([k,v])=>{
     document.getElementById(v).hidden=(k!==name);
     document.getElementById('tab'+k).setAttribute('aria-selected',String(k===name));
   });
   window.scrollTo(0,0);
 }
-['Cards','Roster','Ledger'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
+['Cards','Sides','Roster','Bank','Ledger'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openPid)closePlayer();});
 
 load();
