@@ -80,6 +80,20 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .btn.ghost{background:transparent;color:var(--ink)}
 .btn:active{transform:translateY(1px)}
 
+.units{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.ubtn{
+  font-family:Oswald,sans-serif;font-weight:700;font-size:13px;letter-spacing:.04em;
+  border:2px solid var(--ink);background:var(--stock);color:var(--ink);
+  padding:8px 2px 7px;cursor:pointer;line-height:1.1;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+}
+.ubtn span{
+  font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:10px;
+  letter-spacing:0;opacity:.7;
+}
+.ubtn:active span{opacity:.9}
+.ubtn:active{background:var(--ink);color:var(--stock);transform:translateY(1px)}
+.custom{margin-top:6px}
 .slip{border-top:2px solid var(--ink);padding:10px}
 .slipcfg{display:grid;grid-template-columns:1fr 84px 84px;gap:6px;margin-bottom:10px}
 .lab{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);display:block;margin-bottom:4px}
@@ -393,6 +407,9 @@ function chipHTML(pid){
 
 function renderCards(){
   const host=document.getElementById('cats');host.innerHTML='';
+  // autocomplete source so a typed name matches the roster slug
+  const dl=Object.values(S.players||{}).map(p=>`<option value="${esc(p.name)}">`).join('');
+  host.innerHTML=`<datalist id="rosterNames">${dl}</datalist>`;
   CATS.forEach(c=>{
     const cd=card(c.id),m=slipMath(c.id),collapsed=!!S.collapsed[c.id];
     const el=document.createElement('div');el.className='cat';
@@ -412,6 +429,7 @@ function renderCards(){
         <div class="pick" data-bench="${c.id}:${i}">
           <div class="who">${esc(p.who)}</div>
           <div class="what">${esc(p.what)}</div>
+          ${hitLine(p)}
           ${muLine(p.pid)}
         </div>
         <div class="meta"><div class="odds">${fmtAm(p.odds)}</div><div class="book">${esc(p.book||'')}</div></div>
@@ -438,10 +456,13 @@ function renderCards(){
         <div class="blurb">${c.blurb}</div>
         ${rows}
         <div class="add">
-          <input class="full" data-f="who" placeholder="Player or team" style="grid-column:1/-1">
-          <input class="full" data-f="what" placeholder="Prop — e.g. 3+ receptions" style="grid-column:1/-1">
+          <input class="full" data-f="who" placeholder="Player" style="grid-column:1/-1" list="rosterNames">
+          <select data-f="mkt" style="grid-column:1/-1">${MKT.map(m=>`<option value="${m.v}">${m.label}</option>`).join('')}</select>
+          <select data-f="side">${SIDES.map(s=>`<option value="${s.v}">${s.label}</option>`).join('')}</select>
+          <input data-f="line" placeholder="Line" inputmode="decimal">
           <input data-f="odds" placeholder="-150" inputmode="text">
           <input data-f="book" placeholder="Book">
+          <div class="full" data-preview="${c.id}" style="grid-column:1/-1"></div>
           <button class="btn" data-add="${c.id}" style="grid-column:1/-1">Add to card</button>
         </div>
         <div class="slip">
@@ -594,9 +615,115 @@ document.getElementById('rosterSearch').addEventListener('input',e=>{
   rosterQuery=e.target.value; renderRoster();
 });
 
+/* ---------------- structured props ---------------- */
+const MKT=[
+  {v:'rec', label:'Receptions',        short:'rec',  step:0.5},
+  {v:'yds', label:'Receiving yards',   short:'yds',  step:0.5},
+  {v:'lng', label:'Longest reception', short:'long', step:0.5},
+  {v:'tgt', label:'Targets',           short:'tgt',  step:0.5}
+];
+const SIDES=[
+  {v:'atleast', label:'at least (N+)'},
+  {v:'over',    label:'over'},
+  {v:'under',   label:'under'}
+];
+const mktById=v=>MKT.find(m=>m.v===v);
+
+/* the label shown on the card — generated, so it always matches the numbers */
+function propLabel(mkt,side,line){
+  const m=mktById(mkt); if(!m||line==null||line==='')return '';
+  if(side==='atleast')return `${line}+ ${m.label.toLowerCase()}`;
+  return `${m.label} ${side} ${line}`;
+}
+function meets(val,side,line){
+  const v=Number(val), n=Number(line);
+  if(isNaN(v)||isNaN(n))return false;
+  if(side==='under')return v<n;
+  if(side==='atleast')return v>=n;
+  return v>n;
+}
+
+/* How often has this actually happened? Straight from his own game log. */
+function propHit(pid,mkt,side,line){
+  const p=P(pid); if(!p||!p.log||!p.log.length||line===''||line==null)return null;
+  const log=p.log.filter(g=>g[mkt]!=null);
+  if(!log.length)return null;
+  const hits=log.filter(g=>meets(g[mkt],side,line));
+  const recent=log.slice(-5);
+  const rHits=recent.filter(g=>meets(g[mkt],side,line));
+  // split by opponent strength where a rating exists
+  const rated=log.filter(g=>g.dp!=null);
+  const tough=rated.filter(g=>g.dp>=1.5), soft=rated.filter(g=>g.dp<=-1.5);
+  return {
+    n:log.length, hits:hits.length, rate:hits.length/log.length,
+    rn:recent.length, rhits:rHits.length,
+    tough: tough.length>=3?{n:tough.length,h:tough.filter(g=>meets(g[mkt],side,line)).length}:null,
+    soft:  soft.length>=3?{n:soft.length,h:soft.filter(g=>meets(g[mkt],side,line)).length}:null
+  };
+}
+/* implied probability from american odds, for comparing against the hit rate */
+function implied(odds){const d=toDec(odds);return d?1/d:null;}
+
+function hitLine(p){
+  if(!p.mkt||p.line==null)return '';
+  const h=propHit(p.pid,p.mkt,p.side,p.line);
+  if(!h)return '';
+  const pct=Math.round(h.rate*100);
+  const imp=implied(p.odds);
+  let edge='';
+  if(imp!=null){
+    const diff=h.rate-imp;
+    const col=diff>0.05?'var(--win)':(diff<-0.05?'var(--loss)':'var(--ink-soft)');
+    edge=` · <span style="color:${col}">line implies ${Math.round(imp*100)}%</span>`;
+  }
+  const splits=[];
+  if(h.tough)splits.push(`${h.tough.h}/${h.tough.n} vs tough D`);
+  if(h.soft)splits.push(`${h.soft.h}/${h.soft.n} vs soft D`);
+  return `<div class="what" style="opacity:.9">hit ${h.hits}/${h.n} (${pct}%) · last 5: ${h.rhits}/${h.rn}${edge}${splits.length?'<br>'+splits.join(' · '):''}</div>`;
+}
+
+/* live preview: show the hit rate before the bet is even added */
+function previewProp(box){
+  const cid=box.querySelector('[data-add]').dataset.add;
+  const g=f=>box.querySelector(`[data-f="${f}"]`);
+  const host=box.querySelector('[data-preview]');
+  const who=g('who').value.trim(), line=g('line').value.trim();
+  if(!who||line===''){host.innerHTML='';return;}
+  const pid=slug(who), p=P(pid);
+  if(!p){host.innerHTML=`<div class="note" style="margin:0">No game log for "${esc(who)}" yet — check the spelling against the Roster tab.</div>`;return;}
+  const mkt=g('mkt').value, side=g('side').value, odds=parseInt(g('odds').value,10);
+  const h=propHit(pid,mkt,side,line);
+  if(!h){host.innerHTML=`<div class="note" style="margin:0">${esc(p.name)} has no ${esc(mktById(mkt).label.toLowerCase())} logged.</div>`;return;}
+  const pct=Math.round(h.rate*100), imp=odds?implied(odds):null;
+  let verdict='';
+  if(imp!=null){
+    const diff=h.rate-imp;
+    const col=diff>0.05?'var(--win)':(diff<-0.05?'var(--loss)':'var(--ink-soft)');
+    verdict=`<br><span style="color:${col};font-weight:600">${fmtAm(odds)} implies ${Math.round(imp*100)}% — history says ${pct}%</span>`;
+  }
+  const sp=[];
+  if(h.tough)sp.push(`${h.tough.h}/${h.tough.n} vs tough D`);
+  if(h.soft)sp.push(`${h.soft.h}/${h.soft.n} vs soft D`);
+  host.innerHTML=`<div class="note" style="margin:0"><strong>${esc(propLabel(mkt,side,line))}</strong> — hit ${h.hits} of ${h.n} games (${pct}%), last 5: ${h.rhits}/${h.rn}${sp.length?'<br>'+sp.join(' · '):''}${verdict}
+    <br><span style="opacity:.75">Past rate isn't a forecast — role, health and matchup all move it.</span></div>`;
+}
+document.getElementById('cats').addEventListener('input',e=>{
+  const box=e.target.closest('.add'); if(box)previewProp(box);
+});
+document.getElementById('cats').addEventListener('change',e=>{
+  const box=e.target.closest('.add'); if(box)previewProp(box);
+});
+
 /* ---------------- sides & bankroll ---------------- */
-const BANKKEY=()=>{S.bank=S.bank||{start:500,bets:[]};S.bank.bets=S.bank.bets||[];return S.bank;};
+const BANKKEY=()=>{S.bank=S.bank||{start:500,unit:14,bets:[]};S.bank.bets=S.bank.bets||[];if(S.bank.unit==null)S.bank.unit=14;return S.bank;};
 const GM=()=>S.games&&Array.isArray(S.games.games)?S.games.games:[];
+const U=()=>Number((S.bank&&S.bank.unit)||14);
+/* stakes read in units, with the dollar figure alongside */
+function unitStr(v){
+  const u=Number(v)/U();
+  const clean=Math.abs(u-Math.round(u))<0.01;
+  return (clean?`${Math.round(u)}u`:`${u.toFixed(2)}u`)+` (${money(v)})`;
+}
 
 function payout(stake,odds,bet){
   if(bet&&bet.fixedReturn!=null)return Number(bet.fixedReturn);
@@ -690,9 +817,19 @@ function renderSides(){
         ${wx?`<div class="note" style="margin:6px 0 0">${esc(wx)}</div>`:''}
         <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
           <input data-gs="pick" data-g="${esc(g.id)}" placeholder="Bet — e.g. ${esc(g.home)} -3.5" style="grid-column:1/-1">
-          <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text">
-          <input data-gs="stake" data-g="${esc(g.id)}" placeholder="Stake" inputmode="decimal">
-          <button class="btn" data-gadd="${esc(g.id)}" style="grid-column:1/-1">Add to bankroll</button>
+          <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text" style="grid-column:1/-1">
+          <div class="units" style="grid-column:1/-1">
+            <button class="ubtn" data-u="1" data-g="${esc(g.id)}">1 unit<span>${money(U())}</span></button>
+            <button class="ubtn" data-u="2" data-g="${esc(g.id)}">2 units<span>${money(2*U())}</span></button>
+            <button class="ubtn" data-u="3" data-g="${esc(g.id)}">3 units<span>${money(3*U())}</span></button>
+            <button class="ubtn" data-u="x" data-g="${esc(g.id)}">✱<span>custom</span></button>
+          </div>
+          <div class="custom" data-custom="${esc(g.id)}" hidden style="grid-column:1/-1">
+            <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
+              <input data-gs="stake" data-g="${esc(g.id)}" placeholder="Custom $" inputmode="decimal">
+              <button class="btn" data-u="c" data-g="${esc(g.id)}">Add</button>
+            </div>
+          </div>
         </div>
       </div></div>`;
   });
@@ -706,15 +843,20 @@ function renderBank(){
     <div class="pblock"><div class="pbh">Bankroll</div><div class="pbody">
       <div class="stats">
         <div class="stat"><div class="n" style="color:${col}">${money(s.bal)}</div><div class="l">Balance</div></div>
-        <div class="stat"><div class="n" style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</div><div class="l">Profit / loss</div></div>
+        <div class="stat"><div class="n" style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</div><div class="l">Profit / loss<br>${s.pl>=0?'+':''}${(s.pl/U()).toFixed(1)}u</div></div>
         <div class="stat"><div class="n" style="color:${col}">${s.staked?(100*s.roi).toFixed(1)+'%':'—'}</div><div class="l">ROI on ${money(s.staked)}</div></div>
         <div class="stat"><div class="n">${s.w}-${s.l}${s.p?'-'+s.p:''}</div><div class="l">Settled bets</div></div>
-        <div class="stat"><div class="n">${money(s.open)}</div><div class="l">At risk, open</div></div>
+        <div class="stat"><div class="n">${money(s.open)}</div><div class="l">At risk, open<br>${(s.open/U()).toFixed(1)}u</div></div>
         <div class="stat"><div class="n">${b.bets.length}</div><div class="l">Total logged</div></div>
       </div>
       <div style="height:10px"></div>
-      <span class="lab">Starting bankroll</span>
-      <input id="bankStart" type="number" step="10" inputmode="decimal" value="${Number(b.start||0)}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><span class="lab">Starting bankroll</span>
+          <input id="bankStart" type="number" step="10" inputmode="decimal" value="${Number(b.start||0)}"></div>
+        <div><span class="lab">Unit size</span>
+          <input id="bankUnit" type="number" step="1" inputmode="decimal" value="${Number(b.unit||14)}"></div>
+      </div>
+      <div class="note" style="margin:8px 0 0">Every unit is ${money(U())}. The buttons on the Sides board stake 1, 2 or 3 units; ✱ takes any amount.</div>
     </div></div>`;
 
   const rows=bankRows();
@@ -727,7 +869,7 @@ function renderBank(){
       return `<div class="row">
         <div class="pick" style="cursor:default">
           <div class="who">${esc(x.desc)}</div>
-          <div class="what">Wk ${esc(x.wk)} · ${esc(x.kind||'side')} · ${fmtAm(x.odds)} · ${money(st)}</div>
+          <div class="what">Wk ${esc(x.wk)} · ${esc(x.kind||'side')} · ${fmtAm(x.odds)} · ${unitStr(st)}</div>
         </div>
         <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
         <button class="x" data-bdel="${esc(x.id)}" aria-label="Remove">×</button>
@@ -939,16 +1081,28 @@ function pickPhoto(){
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.dataset.on='1';clearTimeout(t._t);t._t=setTimeout(()=>t.dataset.on='0',1600);}
 /* sides board */
 document.getElementById('sidesBoard').addEventListener('click',e=>{
-  const a=e.target.closest('[data-gadd]'); if(!a)return;
-  const id=a.dataset.gadd, box=a.closest('.add');
+  const u=e.target.closest('[data-u]'); if(!u)return;
+  const id=u.dataset.g, box=u.closest('.add');
   const v=f=>box.querySelector(`[data-gs="${f}"]`);
-  const desc=v('pick').value.trim(), odds=parseInt(v('odds').value,10)||-110, stake=Number(v('stake').value);
+
+  if(u.dataset.u==='x'){                       // reveal custom amount
+    const c=box.querySelector('[data-custom]');
+    c.hidden=!c.hidden;
+    if(!c.hidden)v('stake').focus();
+    return;
+  }
+  const unit=U();
+  const stake = u.dataset.u==='c' ? Number(v('stake').value) : Number(u.dataset.u)*unit;
+  const desc=v('pick').value.trim(), odds=parseInt(v('odds').value,10)||-110;
   if(!desc){toast('Describe the bet first');return;}
   if(!stake||stake<=0){toast('Needs a stake');return;}
   const g=GM().find(x=>x.id===id)||{};
   addBet({desc,odds,stake,kind:'side',game:id,wk:g.wk||S.week});
-  v('pick').value='';v('odds').value='';v('stake').value='';
-  renderBank();toast('Added to bankroll');
+  v('pick').value='';v('odds').value='';
+  if(v('stake'))v('stake').value='';
+  const c=box.querySelector('[data-custom]'); if(c)c.hidden=true;
+  const un=(stake/U());
+  renderBank();toast((Math.abs(un-Math.round(un))<0.01?Math.round(un)+(Math.round(un)===1?' unit':' units'):money(stake))+' logged');
 });
 
 /* bankroll */
@@ -967,6 +1121,7 @@ document.getElementById('bankList').addEventListener('click',e=>{
 });
 document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankStart'){BANKKEY().start=Number(e.target.value)||0;save();renderBank();}
+  if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
 function renderAll(){_paceCache=null;document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
@@ -995,10 +1150,12 @@ document.getElementById('main').addEventListener('click',e=>{
   const add=e.target.closest('[data-add]');
   if(add){
     const cid=add.dataset.add,box=add.closest('.add'),g=f=>box.querySelector(`[data-f="${f}"]`);
-    const who=g('who').value.trim(),what=g('what').value.trim(),odds=parseInt(g('odds').value,10),book=g('book').value.trim();
-    if(!who||!what||!odds){toast('Needs a name, a prop, and a price');return;}
+    const who=g('who').value.trim(), mkt=g('mkt').value, side=g('side').value;
+    const line=g('line').value.trim(), odds=parseInt(g('odds').value,10), book=g('book').value.trim();
+    if(!who||line===''||!odds){toast('Needs a player, a line, and a price');return;}
     const pid=slug(who); ensurePlayer(pid,who);
-    card(cid).picks.push({who,what,odds,book,pid});
+    card(cid).picks.push({who,what:propLabel(mkt,side,line),mkt,side,line:Number(line),odds,book,pid});
+    ['line','odds','book'].forEach(f=>g(f).value='');
     save();renderCards();renderRoster();return;
   }
   const del=e.target.closest('[data-del]');
