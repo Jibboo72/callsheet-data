@@ -1,0 +1,52 @@
+name: Weekly odds pull
+
+# Separate from the data build on purpose: this one spends API quota, so it
+# should never fire as a side effect of rebuilding stats.
+on:
+  schedule:
+    # Saturday 15:00 UTC (~11am ET) — prices you can still act on before
+    # Sunday. For CLOSING lines instead, change to Sunday 22:00 UTC
+    # (~6pm ET, after the afternoon window has kicked off).
+    - cron: "0 15 * * 6"
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season"
+        required: false
+        default: "2026"
+
+permissions:
+  contents: write
+
+jobs:
+  odds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pull odds
+        env:
+          SGO_KEY: ${{ secrets.SGO_KEY }}
+        run: |
+          if [ -z "$SGO_KEY" ]; then
+            echo "SGO_KEY secret not set — add it under Settings > Secrets"
+            exit 1
+          fi
+          mkdir -p data
+          SEASON="${{ github.event.inputs.season || '2026' }}"
+          python pull_odds.py "$SEASON" "data/odds-$SEASON.json"
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add data/odds-*.json
+          if git diff --staged --quiet; then
+            echo "No change."
+          else
+            git commit -m "Odds snapshot $(date -u +%Y-%m-%d\ %H:%M)"
+            git push
+          fi
