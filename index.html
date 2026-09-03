@@ -559,9 +559,14 @@ function mergeImport(raw){
   catch(e){ impSay("That file isn't valid JSON.",true); return; }
   const src=data&&data.players;
   if(Array.isArray(data&&data.games)){
-    S.games=data; save(); renderAll();
-    const wl=data.games.filter(g=>g.spread!=null).length;
-    impSay(`Loaded ${data.games.length} games for ${data.season}, ${wl} with lines.`);
+    if(data.kind==='cfb'){
+      S.cfb=data; save(); renderAll();
+      impSay(`Loaded ${data.games.length} FBS games for ${data.season}. No lines in this feed — type them in when you bet.`);
+    } else {
+      S.games=data; save(); renderAll();
+      const wl=data.games.filter(g=>g.spread!=null).length;
+      impSay(`Loaded ${data.games.length} NFL games for ${data.season}, ${wl} with lines.`);
+    }
     return;
   }
   if(!src||typeof src!=='object'){ impSay('No "players" or "games" in that file.',true); return; }
@@ -749,7 +754,9 @@ document.getElementById('cats').addEventListener('change',e=>{
 
 /* ---------------- sides & bankroll ---------------- */
 const BANKKEY=()=>{S.bank=S.bank||{start:500,unit:14,bets:[]};S.bank.bets=S.bank.bets||[];if(S.bank.unit==null)S.bank.unit=14;return S.bank;};
-const GM=()=>S.games&&Array.isArray(S.games.games)?S.games.games:[];
+const LG=()=>S.league||'nfl';
+const SRC=()=>LG()==='cfb'?S.cfb:S.games;
+const GM=()=>{const d=SRC();return d&&Array.isArray(d.games)?d.games:[];};
 const U=()=>Number((S.bank&&S.bank.unit)||14);
 /* stakes read in units, with the dollar figure alongside */
 function unitStr(v){
@@ -809,17 +816,24 @@ function propSettlement(cid){
 
 function renderSides(){
   const host=document.getElementById('sidesBoard');
+  const cfb=LG()==='cfb';
+  const toggle=`<nav class="tabs" style="margin-bottom:14px">
+      <button data-lg="nfl" aria-selected="${!cfb}">NFL Sunday</button>
+      <button data-lg="cfb" aria-selected="${cfb}">College Saturday</button>
+    </nav>`;
   const all=GM();
   if(!all.length){
-    host.innerHTML=`<div class="pblock"><div class="pbh">Game lines</div><div class="pbody">
-      <div class="note" style="margin:0">No schedule loaded. Import a games file on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
+    host.innerHTML=toggle+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
+      <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Import <code>${cfb?'cfb':'games'}-2026.json</code> on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
     return;
   }
   const wk=S.week;
   const games=all.filter(g=>Number(g.wk)===Number(wk));
-  const cal=(S.games.calibration)||{};
-  let html=`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
-    <div class="note" style="margin:0 0 4px">Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.</div>
+  const cal=(SRC().calibration)||{};
+  let html=toggle+`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
+    <div class="note" style="margin:0 0 4px">${cfb
+      ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
+      : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
   </div></div>`;
 
   if(!games.length){
@@ -835,21 +849,27 @@ function renderSides(){
     const line=hasLine?`${esc(fav)} -${Math.abs(g.spread).toFixed(1)}`:'no line';
     const played='margin' in g;
     const wx=[g.roof&&g.roof!=='outdoors'?g.roof:null, g.wind?g.wind+' mph':null].filter(Boolean).join(' · ');
-    html+=`<div class="cat">
-      <div class="band" style="background:var(--stock-2);cursor:default">
-        <span class="tag">${esc(g.away)} @ ${esc(g.home)}</span>
-        <span class="cnt">${esc(String(g.date||'').slice(5))}${g.div?' · div':''}</span>
-      </div>
-      <div class="pbody" style="padding:9px 10px">
-        <div class="stats">
+    const meta = cfb
+      ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':''].filter(Boolean).join(' · ')
+      : String(g.date||'').slice(5)+(g.div?' · div':'');
+    const statBlock = cfb
+      ? `<div class="note" style="margin:0 0 4px">${esc(g.aconf||'')}${g.aconf&&g.hconf?' at ':''}${esc(g.hconf||'')}</div>`
+      : `<div class="stats">
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
           <div class="stat"><div class="n" style="color:${eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
-        </div>
+        </div>`;
+    html+=`<div class="cat">
+      <div class="band" style="background:var(--stock-2);cursor:default">
+        <span class="tag">${esc(g.away)} @ ${esc(g.home)}</span>
+        <span class="cnt">${esc(meta)}</span>
+      </div>
+      <div class="pbody" style="padding:9px 10px">
+        ${statBlock}
         ${played?`<div class="note" style="margin:8px 0 0">Final ${esc(g.away)} ${g.as} – ${esc(g.home)} ${g.hs} · total ${g.pts} ${g.total!=null?(g.pts>g.total?'(over)':'(under)'):''}</div>`:''}
         ${wx?`<div class="note" style="margin:6px 0 0">${esc(wx)}</div>`:''}
         <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
-          <input data-gs="pick" data-g="${esc(g.id)}" placeholder="Bet — e.g. ${esc(g.home)} -3.5" style="grid-column:1/-1">
+          <input data-gs="pick" data-g="${esc(g.id)}" placeholder="${cfb?`Bet — e.g. ${esc(g.home)} -7 or over 52.5`:`Bet — e.g. ${esc(g.home)} -3.5`}" style="grid-column:1/-1">
           <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text" style="grid-column:1/-1">
           <div class="units" style="grid-column:1/-1">
             <button class="ubtn" data-u="1" data-g="${esc(g.id)}">1 unit<span>${money(U())}</span></button>
@@ -1122,6 +1142,8 @@ function pickPhoto(){
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.dataset.on='1';clearTimeout(t._t);t._t=setTimeout(()=>t.dataset.on='0',1600);}
 /* sides board */
 document.getElementById('sidesBoard').addEventListener('click',e=>{
+  const lg=e.target.closest('[data-lg]');
+  if(lg){ S.league=lg.dataset.lg; save(); renderSides(); return; }
   const u=e.target.closest('[data-u]'); if(!u)return;
   const id=u.dataset.g, box=u.closest('.add');
   const v=f=>box.querySelector(`[data-gs="${f}"]`);
@@ -1138,7 +1160,7 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   if(!desc){toast('Describe the bet first');return;}
   if(!stake||stake<=0){toast('Needs a stake');return;}
   const g=GM().find(x=>x.id===id)||{};
-  addBet({desc,odds,stake,kind:'side',game:id,wk:g.wk||S.week});
+  addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',game:id,wk:g.wk||S.week});
   v('pick').value='';v('odds').value='';
   if(v('stake'))v('stake').value='';
   const c=box.querySelector('[data-custom]'); if(c)c.hidden=true;
