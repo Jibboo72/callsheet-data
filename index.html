@@ -780,6 +780,19 @@ function payout(stake,odds,bet){
   if(bet&&bet.fixedReturn!=null)return Number(bet.fixedReturn);
   const d=toDec(odds); return d?stake*d:stake;
 }
+/* A bet stores a game id; this finds that game no matter which league or
+   source it came from, so the log can show the matchup even when you're
+   looking at the other board. */
+function gameById(id){
+  if(!id)return null;
+  const pools=[
+    (S.games&&S.games.games)||[], (S.cfb&&S.cfb.games)||[],
+    (S.mine&&S.mine.nfl)||[], (S.mine&&S.mine.cfb)||[]
+  ];
+  for(const p of pools){ const g=p.find(x=>x.id===id); if(g)return g; }
+  return null;
+}
+
 function bankRows(){
   const b=BANKKEY();
   // Open bets first — those are the ones still worth looking at. Graded bets
@@ -976,10 +989,24 @@ function renderBank(){
       const st=Number(x.stake)||0;
       const ret=x.result==='W'?payout(st,x.odds,x)-st:(x.result==='L'?-st:0);
       const rc=x.result==='W'?'var(--win)':(x.result==='L'?'var(--loss)':'var(--ink-soft)');
+      const g=gameById(x.game);
+      // matchup: stored on the bet, or recovered from the game it points at
+      const match=x.match||(g?`${g.away} @ ${g.home}`:'');
+      const league=x.kind==='cfb'?'NCAA':(x.kind==='prop'?'prop':'NFL');
+      // once the game is final, show the score right on the row so grading
+      // doesn't mean going and looking it up somewhere else
+      let outcome='';
+      if(g&&('margin' in g)){
+        const tot=g.pts!=null?` · total ${g.pts}`:'';
+        outcome=`<div class="what">Final ${esc(g.away)} ${g.as} – ${esc(g.home)} ${g.hs}${tot}</div>`;
+      }
+      const when=x.gdate||(g&&g.date)||'';
       return `<div class="row">
         <div class="pick" style="cursor:default">
-          <div class="who">${esc(x.desc)}</div>
-          <div class="what">Wk ${esc(x.wk)} · ${esc(x.kind||'side')} · ${fmtAm(x.odds)} · ${unitStr(st)}</div>
+          ${match?`<div class="who">${esc(match)}</div>`:''}
+          <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${esc(x.desc)}</div>
+          ${outcome}
+          <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''} · ${fmtAm(x.odds)} · ${unitStr(st)}</div>
         </div>
         <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
         <button class="x" data-bdel="${esc(x.id)}" aria-label="Remove">×</button>
@@ -1248,7 +1275,8 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   if(!desc){toast('Describe the bet first');return;}
   if(!stake||stake<=0){toast('Needs a stake');return;}
   const g=GM().find(x=>x.id===id)||{};
-  addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',game:id,wk:g.wk||S.week});
+  addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',game:id,wk:g.wk||S.week,
+    match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', gdate:g.date||''});
   v('pick').value='';v('odds').value='';
   if(v('stake'))v('stake').value='';
   const c=box.querySelector('[data-custom]'); if(c)c.hidden=true;
