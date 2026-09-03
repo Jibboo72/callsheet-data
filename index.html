@@ -475,9 +475,19 @@ function screenPanel(cid){
   const cfg=SCREEN[cid];
   if(!cfg)return '';
   if(!open)return `<div style="height:8px"></div><button class="btn ghost" data-screen="${cid}">Find candidates</button>`;
+  const sc=screenCfg(cid);
   const list=screen(cid)||[];
+  const label=propLabel(sc.mkt,sc.side,sc.line);
   return `<div style="height:10px"></div>
-    <div class="pblock"><div class="pbh">Candidates · ${esc(cfg.label)}</div><div class="pbody">
+    <div class="pblock"><div class="pbh">Candidates · ${esc(label)}</div><div class="pbody">
+      <div style="display:grid;grid-template-columns:1fr 1fr 70px;gap:6px;margin-bottom:8px">
+        <div><span class="lab">Market</span>
+          <select data-sc="mkt" data-c="${cid}">${MKT.map(m=>`<option value="${m.v}"${sc.mkt===m.v?' selected':''}>${m.label}</option>`).join('')}</select></div>
+        <div><span class="lab">Side</span>
+          <select data-sc="side" data-c="${cid}">${SIDES.map(o=>`<option value="${o.v}"${sc.side===o.v?' selected':''}>${o.label}</option>`).join('')}</select></div>
+        <div><span class="lab">Line</span>
+          <input data-sc="line" data-c="${cid}" value="${esc(String(sc.line))}" inputmode="decimal"></div>
+      </div>
       <div class="note" style="margin:0 0 8px">${cfg.note}</div>
       ${list.length?list.map(x=>`<div class="hist">
           <span class="pill" style="background:${x.mp>=.7?'var(--win)':(x.mp<=.4?'var(--loss)':'var(--ink-soft)')}">${Math.round(x.mp*100)}%</span>
@@ -848,6 +858,18 @@ function previewProp(box){
     <br><span style="opacity:.75">Past rate isn't a forecast — role, health and matchup all move it.</span></div>`;
 }
 document.getElementById('cats').addEventListener('input',e=>{
+  const scl=e.target.closest('[data-sc="line"]');
+  if(scl){
+    const v=Number(scl.value);
+    if(!isNaN(v)&&scl.value!==''){
+      screenCfg(scl.dataset.c).line=v; save();
+      const cid=scl.dataset.c, pos=scl.selectionStart;
+      renderCards();
+      const again=document.querySelector(`[data-sc="line"][data-c="${cid}"]`);
+      if(again){again.focus();try{again.setSelectionRange(pos,pos);}catch(e){}}
+    }
+    return;
+  }
   const fo=e.target.closest('[data-fodds]');
   if(fo){
     S.flyerOdds=S.flyerOdds||{};
@@ -869,6 +891,13 @@ document.getElementById('cats').addEventListener('input',e=>{
   const box=e.target.closest('.add'); if(box)previewProp(box);
 });
 document.getElementById('cats').addEventListener('change',e=>{
+  const sc=e.target.closest('[data-sc]');
+  if(sc){
+    const c=screenCfg(sc.dataset.c), f=sc.dataset.sc;
+    if(f==='line'){ const v=Number(sc.value); if(!isNaN(v)) c.line=v; }
+    else c[f]=sc.value;
+    save(); renderCards(); return;
+  }
   const box=e.target.closest('.add'); if(box)previewProp(box);
 });
 
@@ -973,17 +1002,27 @@ function hitRate(p,f,th,side){
   const h=L.filter(g=>meets(g[f],side,th)).length;
   return {h,n:L.length,rate:h/L.length};
 }
+function screenCfg(cid){
+  S.screenCfg=S.screenCfg||{};
+  if(!S.screenCfg[cid]){
+    const d=SCREEN[cid]; if(!d)return null;
+    S.screenCfg[cid]={mkt:d.mkt.f, line:d.mkt.th, side:d.mkt.side};
+  }
+  return S.screenCfg[cid];
+}
 function screen(cid){
   const cfg=SCREEN[cid]; if(!cfg)return null;
+  const sc=screenCfg(cid);
   const out=[];
   Object.keys(S.players||{}).forEach(pid=>{
     const p=P(pid), st=seasonStats(p);
     if(!st||!cfg.ok(st))return;
     const hr=cfg.rate(p); if(!hr||hr.n<6)return;
     const m=MU(pid);
-    const mk=cfg.mkt, mp=modelProb(pid,mk.f,mk.th,mk.side);
+    const mp=modelProb(pid,sc.mkt,sc.line,sc.side);
     if(!mp)return;
-    out.push({pid,name:p.name,team:p.team,st,hr,mp:mp.prob,mu:m,prior:priorTeam(pid)});
+    const hr2=hitRate(p,sc.mkt,sc.line,sc.side);
+    out.push({pid,name:p.name,team:p.team,st,hr:hr2||hr,mp:mp.prob,mu:m,prior:priorTeam(pid)});
   });
   out.sort((a,b)=>{
     if(cfg.useDef&&a.mu&&b.mu&&a.mu.d_rank&&b.mu.d_rank){
