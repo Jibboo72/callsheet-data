@@ -771,7 +771,13 @@ function payout(stake,odds,bet){
 }
 function bankRows(){
   const b=BANKKEY();
-  return b.bets.slice().sort((x,y)=>(Number(y.wk)-Number(x.wk))||(y.ts-x.ts));
+  // Open bets first — those are the ones still worth looking at. Graded bets
+  // fall below, newest week first.
+  return b.bets.slice().sort((x,y)=>{
+    const sx=x.result?1:0, sy=y.result?1:0;
+    if(sx!==sy)return sx-sy;
+    return (Number(y.wk)-Number(x.wk))||(y.ts-x.ts);
+  });
 }
 function bankStats(){
   const b=BANKKEY();
@@ -828,7 +834,13 @@ function renderSides(){
     return;
   }
   const wk=S.week;
-  const games=all.filter(g=>Number(g.wk)===Number(wk));
+  // Finished games sink to the bottom — what's still bettable stays on top.
+  const games=all.filter(g=>Number(g.wk)===Number(wk)).slice().sort((a,b)=>{
+    const fa=('margin' in a)?1:0, fb=('margin' in b)?1:0;
+    if(fa!==fb)return fa-fb;
+    return String(a.date||'').localeCompare(String(b.date||''))
+        || String(a.kick||'').localeCompare(String(b.kick||''));
+  });
   const cal=(SRC().calibration)||{};
   let html=toggle+`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
     <div class="note" style="margin:0 0 4px">${cfb
@@ -841,7 +853,17 @@ function renderSides(){
     host.innerHTML=html; return;
   }
 
+  let markedFinal=false;
   games.forEach(g=>{
+    const played0=('margin' in g);
+    if(played0&&!markedFinal){
+      markedFinal=true;
+      const n=games.filter(x=>'margin' in x).length;
+      html+=`<div class="pblock" style="border-style:dashed;background:transparent;margin-bottom:14px">
+        <div class="pbody" style="padding:7px 10px">
+          <div class="lab" style="margin:0">Final · ${n} game${n===1?'':'s'}</div>
+        </div></div>`;
+    }
     const hasLine=g.spread!=null;
     const edge=(g.proj!=null&&hasLine)?(g.proj-g.spread):null;
     const eCol=edge==null?'var(--ink-soft)':(Math.abs(edge)>=2?(edge>0?'var(--win)':'var(--loss)'):'var(--ink-soft)');
