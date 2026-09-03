@@ -566,23 +566,33 @@ function mergeImport(raw){
   }
   if(!src||typeof src!=='object'){ impSay('No "players" or "games" in that file.',true); return; }
 
-  let added=0,updated=0;
+  let added=0,updated=0,moved=[],kept=0;
   Object.entries(src).forEach(([gsis,inc])=>{
     if(!inc||!inc.name)return;
     const pid=slug(inc.name);
     const existed=!!S.players[pid];
     const p=ensurePlayer(pid,inc.name);
+    const oldTeam=p.team;
     // incoming stats always win; anything you typed yourself is preserved
     if(Array.isArray(inc.log)&&inc.log.length) p.log=inc.log;
+    else if(existed&&p.log&&p.log.length) kept++;
     p.gsis=gsis;
     ['team','pos','ht','wt','college','exp'].forEach(f=>{ if(inc[f]) p[f]=inc[f]; });
     if(inc.mu) p.mu=inc.mu; else delete p.mu;
     if(inc.adj) p.adj=inc.adj; else delete p.adj;
+    if(existed&&oldTeam&&inc.team&&oldTeam!==inc.team) moved.push(`${p.name} ${oldTeam}→${inc.team}`);
     if(existed)updated++; else added++;
   });
   save();renderAll();syncSampleBtn();
   const season=data.season?` (${data.season})`:'';
-  impSay(`Imported${season}: ${added} new, ${updated} updated. ${Object.keys(S.players).length} on the roster.`);
+  if(data.kind==='roster'){
+    let msg=`Roster${season}: ${updated} updated, ${added} added. `;
+    msg+=kept?`${kept} game logs kept. `:'';
+    msg+=moved.length?`${moved.length} changed teams: ${moved.slice(0,4).join(', ')}${moved.length>4?'…':''}`:'No team changes.';
+    impSay(msg);
+  } else {
+    impSay(`Imported${season}: ${added} new, ${updated} updated. ${Object.keys(S.players).length} on the roster.`);
+  }
 }
 
 document.getElementById('impFile').addEventListener('click',()=>{
