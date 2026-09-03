@@ -484,19 +484,6 @@ function screenPanel(cid){
   const label=propLabel(sc.mkt,sc.side,sc.line);
   const byValue=S.screenValue!==false;
   const havePrices=!!(S.odds&&S.odds.games&&S.odds.games.length);
-  // attach whatever the book has posted, and the best-value line on it
-  list.forEach(x=>{
-    x.posted=postedAt(x.pid,sc.mkt,sc.line,sc.side);
-    x.best=bestValue(x.pid,sc.mkt);
-    x.ev=x.posted?(edgeOf(x.mp,x.posted.odds)||{}).ev:null;
-  });
-  if(byValue&&havePrices){
-    list.sort((a,b)=>{
-      const av=(a.ev!=null?a.ev:(a.best?a.best.ev:-99));
-      const bv=(b.ev!=null?b.ev:(b.best?b.best.ev:-99));
-      return bv-av;
-    });
-  }
   return `<div style="height:10px"></div>
     <div class="pblock"><div class="pbh">Candidates · ${esc(label)}</div><div class="pbody">
       <div style="display:grid;grid-template-columns:1fr 1fr 70px;gap:6px;margin-bottom:8px">
@@ -505,11 +492,15 @@ function screenPanel(cid){
         <div><span class="lab">Side</span>
           <select data-sc="side" data-c="${cid}">${SIDES.map(o=>`<option value="${o.v}"${sc.side===o.v?' selected':''}>${o.label}</option>`).join('')}</select></div>
         <div><span class="lab">Line</span>
-          <input data-sc="line" data-c="${cid}" value="${esc(String(sc.line))}" inputmode="decimal"></div>
+          <input data-sc="line" data-c="${cid}" value="${esc(sc.lineRaw!=null?sc.lineRaw:String(sc.line))}" inputmode="decimal"></div>
       </div>
-      ${havePrices?`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+      ${havePrices?`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:6px">
         <button class="sgbtn" data-sv="1" aria-selected="${byValue}">By value</button>
         <button class="sgbtn" data-sv="0" aria-selected="${!byValue}">By probability</button>
+      </div>
+      <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+        <button class="sgbtn" data-po="1" aria-selected="${S.screenPricedOnly!==false}">Priced only</button>
+        <button class="sgbtn" data-po="0" aria-selected="${S.screenPricedOnly===false}">Everyone</button>
       </div>`:`<div class="note" style="margin:0 0 8px;color:var(--hl-long)">No odds snapshot imported — ranking on probability only. Import <code>odds-2026.json</code> to see prices and EV.</div>`}
       <div class="note" style="margin:0 0 8px">${cfg.note}</div>
       ${list.length?list.map(x=>`<div class="hist">
@@ -929,14 +920,18 @@ function previewProp(box){
 document.getElementById('cats').addEventListener('input',e=>{
   const scl=e.target.closest('[data-sc="line"]');
   if(scl){
+    const c=screenCfg(scl.dataset.c);
+    // keep exactly what was typed. Re-rendering with the parsed number was
+    // eating the decimal point the moment you typed it, so "2." became "2"
+    // and 2.5 was unreachable.
+    c.lineRaw=scl.value;
     const v=Number(scl.value);
-    if(!isNaN(v)&&scl.value!==''){
-      screenCfg(scl.dataset.c).line=v; save();
-      const cid=scl.dataset.c, pos=scl.selectionStart;
-      renderCards();
-      const again=document.querySelector(`[data-sc="line"][data-c="${cid}"]`);
-      if(again){again.focus();try{again.setSelectionRange(pos,pos);}catch(e){}}
-    }
+    if(scl.value!==''&&!isNaN(v)) c.line=v;
+    save();
+    const cid=scl.dataset.c, pos=scl.selectionStart;
+    renderCards();
+    const again=document.querySelector(`[data-sc="line"][data-c="${cid}"]`);
+    if(again){again.focus();try{again.setSelectionRange(pos,pos);}catch(e){}}
     return;
   }
   const fo=e.target.closest('[data-fodds]');
@@ -1140,10 +1135,19 @@ function screenCfg(cid){
 function screen(cid){
   const cfg=SCREEN[cid]; if(!cfg)return null;
   const sc=screenCfg(cid);
-  const out=[];
+  let out=[];
+  const havePrices=!!(S.odds&&S.odds.games&&S.odds.games.length);
+  const pricedOnly=havePrices&&S.screenPricedOnly!==false;
   Object.keys(S.players||{}).forEach(pid=>{
     const p=P(pid), st=seasonStats(p);
-    if(!st||!cfg.ok(st))return;
+    if(!st)return;
+    // The profile filter (catch rate, depth, volume) is the right gate when
+    // you're hunting names. But once real prices are loaded it was throwing
+    // away the very players you can actually bet — a deep threat has the
+    // wrong profile for Slot Floor yet still has a posted receptions line.
+    // So in priced-only mode a posted price IS the filter.
+    const hasPrice=havePrices&&(postedAt(pid,sc.mkt,sc.line,sc.side)||bestValue(pid,sc.mkt));
+    if(pricedOnly ? !hasPrice : !cfg.ok(st))return;
     const hr=cfg.rate(p); if(!hr||hr.n<6)return;
     const m=MU(pid);
     const mp=modelProb(pid,sc.mkt,sc.line,sc.side);
@@ -1151,15 +1155,31 @@ function screen(cid){
     const hr2=hitRate(p,sc.mkt,sc.line,sc.side);
     out.push({pid,name:p.name,team:p.team,st,hr:hr2||hr,mp:mp.prob,mu:m,prior:priorTeam(pid)});
   });
-  out.sort((a,b)=>{
-    if(cfg.useDef&&a.mu&&b.mu&&a.mu.d_rank&&b.mu.d_rank){
-      // same hit rate band? let the softer draw win
-      const diff=b.mp-a.mp;
-      if(Math.abs(diff)>0.08)return diff;
-      return (cid==='fade')?(a.mu.d_rank-b.mu.d_rank):(b.mu.d_rank-a.mu.d_rank);
-    }
-    return b.mp-a.mp;
+  // attach posted prices first — sorting by value after trimming to 12 meant
+  // priced players never made the cut
+  out.forEach(x=>{
+    x.posted=postedAt(x.pid,sc.mkt,sc.line,sc.side);
+    x.best=bestValue(x.pid,sc.mkt);
+    x.ev=x.posted?(edgeOf(x.mp,x.posted.odds)||{}).ev:null;
   });
+  // with prices loaded, anyone without one isn't bettable this week
+  const byValue=S.screenValue!==false;
+  if(havePrices&&byValue){
+    out.sort((a,b)=>{
+      const av=(a.ev!=null?a.ev:(a.best?a.best.ev:-99));
+      const bv=(b.ev!=null?b.ev:(b.best?b.best.ev:-99));
+      return bv-av;
+    });
+  } else {
+    out.sort((a,b)=>{
+      if(cfg.useDef&&a.mu&&b.mu&&a.mu.d_rank&&b.mu.d_rank){
+        const diff=b.mp-a.mp;
+        if(Math.abs(diff)>0.08)return diff;
+        return (cid==='fade')?(a.mu.d_rank-b.mu.d_rank):(b.mu.d_rank-a.mu.d_rank);
+      }
+      return b.mp-a.mp;
+    });
+  }
   return out.slice(0,12);
 }
 
@@ -2055,6 +2075,8 @@ function renderAll(){_paceCache=null;_oddsIdx=null;renderQuota&&renderQuota();do
 document.getElementById('main').addEventListener('click',e=>{
   const op=e.target.closest('[data-open]');
   if(op){ openPlayer(op.dataset.open); return; }
+  const po=e.target.closest('[data-po]');
+  if(po){ S.screenPricedOnly = po.dataset.po==='1'; save(); renderCards(); return; }
   const sv=e.target.closest('[data-sv]');
   if(sv){ S.screenValue = sv.dataset.sv==='1'; save(); renderCards(); return; }
   const sc=e.target.closest('[data-screen]');
