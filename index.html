@@ -440,14 +440,15 @@ function screenPanel(cid){
           <div class="note" style="margin:10px 0 4px">Type each posted price. Model probability already includes the +13 point injury lift.</div>
           ${pool.mates.slice(0,10).map(m=>{
             const mp=modelProb(m.pid,'rec',3,'atleast',{injury:true});
-            const odds=(S.flyerOdds||{})[m.pid];
+            const post=postedAt(m.pid,'rec',3,'atleast')||postedAt(m.pid,'rec',2.5,'over');
+            const odds=(S.flyerOdds||{})[m.pid] ?? (post?post.odds:undefined);
             const e=(mp&&odds)?edgeOf(mp.prob,odds):null;
             const col=e?(e.ev>0.05?'var(--win)':(e.ev<-0.05?'var(--loss)':'var(--ink-soft)')):'var(--ink-soft)';
             return `<div class="row" style="border-bottom:1px dashed rgba(22,21,15,.3)">
               <div class="pick" style="cursor:default;padding-left:0">
                 <div class="who">${esc(m.name)} <span style="font-weight:400;color:var(--ink-soft)">${esc(m.pos||'')}</span></div>
                 <div class="what">${m.st.tgtpg.toFixed(1)} tgt/g · raw 3+ in ${Math.round(m.hr.rate*100)}%${mp?` · <strong>model ${Math.round(mp.prob*100)}%</strong>`:''}</div>
-                ${e?`<div class="what" style="color:${col};font-weight:600">${fmtAm(odds)} implies ${Math.round(e.imp*100)}% — ${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV${e.ev>0.05?' · value':''}</div>`:''}
+                ${e?`<div class="what" style="color:${col};font-weight:600">${fmtAm(odds)}${((S.flyerOdds||{})[m.pid]==null&&post)?' (posted)':''} implies ${Math.round(e.imp*100)}% — ${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV${e.ev>0.05?' · value':''}</div>`:''}
               </div>
               <div style="width:80px;flex:none;padding:6px 0">
                 <input data-fodds="${esc(m.pid)}" value="${odds!=null?esc(String(odds)):''}" placeholder="+180" inputmode="text" style="padding:6px;text-align:center;font-size:12px">
@@ -481,6 +482,21 @@ function screenPanel(cid){
   const sc=screenCfg(cid);
   const list=screen(cid)||[];
   const label=propLabel(sc.mkt,sc.side,sc.line);
+  const byValue=S.screenValue!==false;
+  const havePrices=!!(S.odds&&S.odds.games&&S.odds.games.length);
+  // attach whatever the book has posted, and the best-value line on it
+  list.forEach(x=>{
+    x.posted=postedAt(x.pid,sc.mkt,sc.line,sc.side);
+    x.best=bestValue(x.pid,sc.mkt);
+    x.ev=x.posted?(edgeOf(x.mp,x.posted.odds)||{}).ev:null;
+  });
+  if(byValue&&havePrices){
+    list.sort((a,b)=>{
+      const av=(a.ev!=null?a.ev:(a.best?a.best.ev:-99));
+      const bv=(b.ev!=null?b.ev:(b.best?b.best.ev:-99));
+      return bv-av;
+    });
+  }
   return `<div style="height:10px"></div>
     <div class="pblock"><div class="pbh">Candidates · ${esc(label)}</div><div class="pbody">
       <div style="display:grid;grid-template-columns:1fr 1fr 70px;gap:6px;margin-bottom:8px">
@@ -491,11 +507,27 @@ function screenPanel(cid){
         <div><span class="lab">Line</span>
           <input data-sc="line" data-c="${cid}" value="${esc(String(sc.line))}" inputmode="decimal"></div>
       </div>
+      ${havePrices?`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+        <button class="sgbtn" data-sv="1" aria-selected="${byValue}">By value</button>
+        <button class="sgbtn" data-sv="0" aria-selected="${!byValue}">By probability</button>
+      </div>`:`<div class="note" style="margin:0 0 8px;color:var(--hl-long)">No odds snapshot imported — ranking on probability only. Import <code>odds-2026.json</code> to see prices and EV.</div>`}
       <div class="note" style="margin:0 0 8px">${cfg.note}</div>
       ${list.length?list.map(x=>`<div class="hist">
           <span class="pill" style="background:${x.mp>=.7?'var(--win)':(x.mp<=.4?'var(--loss)':'var(--ink-soft)')}">${Math.round(x.mp*100)}%</span>
           <span class="t"><strong>${esc(x.name)}</strong> ${esc(x.team||'')}<br>
             <span style="color:var(--ink-soft)">raw ${x.hr.h}/${x.hr.n} · ${x.st.recpg.toFixed(1)} rec/g · ${Math.round(x.st.cr*100)}% catch · ${x.st.ypr.toFixed(1)} ypc</span>
+            ${(()=>{
+              if(x.posted){
+                const e=edgeOf(x.mp,x.posted.odds);
+                const col=e.ev>0.05?'var(--win)':(e.ev<-0.05?'var(--loss)':'var(--ink-soft)');
+                return `<br><strong>${fmtAm(x.posted.odds)}</strong> at ${esc(String(sc.line))} · implies ${Math.round(e.imp*100)}% · <span style="color:${col};font-weight:600">${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV</span>`;
+              }
+              if(x.best){
+                const col=x.best.ev>0.05?'var(--win)':(x.best.ev<-0.05?'var(--loss)':'var(--ink-soft)');
+                return `<br><span style="color:var(--ink-soft)">no ${esc(String(sc.line))} posted — best is ${esc(x.best.side)} ${x.best.line} at ${fmtAm(x.best.odds)} · <span style="color:${col};font-weight:600">${x.best.ev>=0?'+':''}${(x.best.ev*100).toFixed(0)}% EV</span></span>`;
+              }
+              return havePrices?`<br><span style="color:var(--ink-soft)">no price posted</span>`:'';
+            })()}
             ${x.mu?`<br><span style="color:${rankColor(x.mu.d_rank)}">vs ${esc(x.mu.opp)} · pass D #${x.mu.d_rank}</span>`:''}
             ${x.prior?`<br><span style="color:var(--hl-long)">all ${x.prior.n} with ${esc(x.prior.from)}</span>`:''}
           </span></div>`).join('')
@@ -867,7 +899,12 @@ function previewProp(box){
   if(!who||line===''){host.innerHTML='';return;}
   const pid=slug(who), p=P(pid);
   if(!p){host.innerHTML=`<div class="note" style="margin:0">No game log for "${esc(who)}" yet — check the spelling against the Roster tab.</div>`;return;}
-  const mkt=g('mkt').value, side=g('side').value, odds=parseInt(g('odds').value,10);
+  const mkt=g('mkt').value, side=g('side').value;
+  let odds=parseInt(g('odds').value,10);
+  // if the book has this exact line and you haven't typed a price, use theirs
+  const post=postedAt(pid,mkt,line,side);
+  let auto=false;
+  if(isNaN(odds)&&post){ odds=post.odds; auto=true; }
   const h=propHit(pid,mkt,side,line);
   if(!h){host.innerHTML=`<div class="note" style="margin:0">${esc(p.name)} has no ${esc(mktById(mkt).label.toLowerCase())} logged.</div>`;return;}
   const pct=Math.round(h.rate*100);
@@ -876,7 +913,7 @@ function previewProp(box){
   if(mp&&odds){
     const e=edgeOf(mp.prob,odds);
     const col=e.ev>0.05?'var(--win)':(e.ev<-0.05?'var(--loss)':'var(--ink-soft)');
-    verdict=`<br><strong>Model ${Math.round(mp.prob*100)}%</strong> vs ${fmtAm(odds)} implying ${Math.round(e.imp*100)}% —
+    verdict=`<br><strong>Model ${Math.round(mp.prob*100)}%</strong> vs ${fmtAm(odds)}${auto?' (posted)':''} implying ${Math.round(e.imp*100)}% —
       <span style="color:${col};font-weight:600">${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV</span>
       <br><span style="opacity:.75">${mp.parts.map(x=>x.delta?`${x.label} ${x.v>0?'+':''}${Math.round(x.v*100)}pts`:x.label).join(' · ')}</span>`;
   } else if(mp){
@@ -932,6 +969,64 @@ document.getElementById('cats').addEventListener('change',e=>{
   }
   const box=e.target.closest('.add'); if(box)previewProp(box);
 });
+
+/* ---------------- posted odds ----------------
+   The weekly pull writes prices keyed by SGO player IDs like
+   JAXON_SMITHNJIGBA_1_NFL — hyphens and punctuation stripped. Match on
+   letters and digits only so "Jaxon Smith-Njigba" lines up. */
+const OMKT={receiving_receptions:'rec', receiving_yards:'yds',
+            receiving_longestReception:'lng', receiving_targets:'tgt'};
+const mkey=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function sgoKey(pid){
+  // TRAVIS_KELCE_1_NFL -> traviskelce
+  return mkey(String(pid||'').replace(/_\d+_[A-Z]+$/,''));
+}
+let _oddsIdx=null;
+function oddsIndex(){
+  if(_oddsIdx)return _oddsIdx;
+  const idx={};
+  const games=(S.odds&&S.odds.games)||[];
+  games.forEach(g=>{
+    (g.props||[]).forEach(pr=>{
+      const mk=OMKT[pr.market]; if(!mk)return;
+      if(pr.line==null||pr.side==null)return;          // skip yes/no markets
+      if(pr.side!=='over'&&pr.side!=='under')return;
+      const k=sgoKey(pr.player); if(!k)return;
+      const odds=parseInt(pr.odds,10); if(isNaN(odds))return;
+      idx[k]=idx[k]||{};
+      (idx[k][mk]=idx[k][mk]||[]).push({
+        side:pr.side, line:Number(pr.line), odds,
+        game:`${g.away} @ ${g.home}`, start:g.start
+      });
+    });
+  });
+  _oddsIdx=idx;
+  return idx;
+}
+/* every posted line for this player in this market */
+function postedFor(pid,mkt){
+  const p=P(pid); if(!p)return [];
+  return (oddsIndex()[mkey(p.name)]||{})[mkt]||[];
+}
+/* the posted price at a specific line and side, if the book has it */
+function postedAt(pid,mkt,line,side){
+  const want = side==='under' ? 'under' : 'over';
+  return postedFor(pid,mkt).find(x=>x.side===want&&Math.abs(x.line-Number(line))<0.01)||null;
+}
+/* best value available on this player in this market, judged by the model */
+function bestValue(pid,mkt,opts){
+  let best=null;
+  postedFor(pid,mkt).forEach(x=>{
+    // an "over 4.5" prop is the same event as "at least 5"
+    const side = x.side==='under' ? 'under' : 'over';
+    const mp=modelProb(pid,mkt,x.line,side,opts);
+    if(!mp)return;
+    const e=edgeOf(mp.prob,x.odds);
+    if(!e)return;
+    if(!best||e.ev>best.ev) best={...x,side,prob:mp.prob,ev:e.ev,imp:e.imp};
+  });
+  return best;
+}
 
 /* ---------------- probability model ----------------
    Raw hit rate is a terrible probability: 6-for-6 is not 100%. This shrinks
@@ -1954,12 +2049,14 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;_oddsIdx=null;renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
   const op=e.target.closest('[data-open]');
   if(op){ openPlayer(op.dataset.open); return; }
+  const sv=e.target.closest('[data-sv]');
+  if(sv){ S.screenValue = sv.dataset.sv==='1'; save(); renderCards(); return; }
   const sc=e.target.closest('[data-screen]');
   if(sc){
     S.screenOpen = sc.dataset.screen==='close' ? null : sc.dataset.screen;
