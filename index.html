@@ -119,7 +119,8 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 
 .led{width:100%;border-collapse:collapse;border:2px solid var(--ink);background:var(--stock-2)}
 .led th,.led td{border-bottom:1px solid rgba(22,21,15,.3);padding:8px 9px;text-align:left;font-size:12px}
-.led th{font-family:Oswald,sans-serif;font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-bottom:2px solid var(--ink)}
+.led th{font-family:Oswald,sans-serif;font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-bottom:2px solid var(--ink);cursor:pointer;user-select:none}
+.led th[data-on]{background:var(--ink);color:var(--stock)}
 .led td.n,.led th.n{text-align:right}
 .led td.n{font-family:Oswald,sans-serif;font-weight:700;font-size:15px}
 .swatch{display:inline-block;width:9px;height:9px;margin-right:7px;border:1px solid var(--ink)}
@@ -229,7 +230,11 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 
 <section id="paneLedger" hidden>
   <table class="led">
-    <thead><tr><th>Market</th><th class="n">W</th><th class="n">L</th><th class="n">Hit%</th><th class="n">P/L</th></tr></thead>
+    <thead><tr>
+      <th data-sort="label">Market</th><th class="n" data-sort="w">W</th>
+      <th class="n" data-sort="l">L</th><th class="n" data-sort="hit">Hit%</th>
+      <th class="n" data-sort="pl">P/L</th>
+    </tr></thead>
     <tbody id="ledBody"></tbody>
   </table>
   <p class="note">Every graded leg lands here. After six or seven weeks you'll see which market is carrying the sheet and which one only looked clever.</p>
@@ -526,6 +531,7 @@ function propHistory(pid){
 
 let rosterQuery='';
 let sidesQuery='';
+let ledSort={key:null,dir:'desc'};
 let bankQuery='';
 function renderRoster(){
   const host=document.getElementById('rosterList');
@@ -811,6 +817,25 @@ function gameById(id){
   return null;
 }
 
+/* ---------------- parlay slip ----------------
+   Straight-bet parlays, kept entirely separate from the five prop cards.
+   Legs can come off either board or be typed in (anytime TD, etc), so a
+   slip can mix NFL and college. */
+function slip(){ S.slip=S.slip||{legs:[]}; S.slip.legs=S.slip.legs||[]; return S.slip; }
+function slipOdds(){
+  const dec=slip().legs.map(l=>toDec(l.odds)).filter(Boolean);
+  if(!dec.length)return null;
+  return dec.reduce((a,d)=>a*d,1);
+}
+function slipLeague(){
+  // A custom leg (anytime TD and the like) doesn't decide the league — only
+  // an actual NFL+college combination counts as mixed.
+  const k=new Set(slip().legs.map(l=>l.kind).filter(x=>x==='nfl'||x==='cfb'));
+  if(k.size>1)return 'mixed';
+  if(k.has('cfb'))return 'cfb';
+  return 'nfl';
+}
+
 function bankRows(){
   const b=BANKKEY();
   // Open bets first — those are the ones still worth looking at. Graded bets
@@ -862,6 +887,45 @@ function propSettlement(cid){
   return {bets:bets.length,won,staked,ret,pl:ret-staked};
 }
 
+function slipPanel(){
+  const legs=slip().legs;
+  const d=slipOdds();
+  const am=d?toAm(d):null;
+  return `<div class="pblock" style="margin-bottom:16px;${legs.length?'border-width:3px':''}">
+    <div class="pbh">Parlay slip${legs.length?` · ${legs.length} leg${legs.length===1?'':'s'} · ${fmtAm(am)}`:''}</div>
+    <div class="pbody">
+      ${legs.length?legs.map((l,i)=>`<div class="hist">
+          <span class="pill" style="background:${l.kind==='cfb'?'var(--hl-long)':(l.kind==='custom'?'var(--hl-flyer)':'var(--ink-soft)')}">${l.kind==='cfb'?'NCAA':(l.kind==='custom'?'PROP':'NFL')}</span>
+          <span class="t">${l.match?`<strong>${esc(l.match)}</strong><br>`:''}${esc(l.desc)} <strong>${fmtAm(l.odds)}</strong></span>
+          <button class="x" data-sliprm="${i}" aria-label="Remove leg">×</button>
+        </div>`).join(''):`<div class="note" style="margin:0 0 8px">Empty. Tap <strong>+ Parlay</strong> on any game below, or add a leg by hand for something not on the board.</div>`}
+
+      <div style="display:grid;grid-template-columns:1fr 84px;gap:6px;margin-top:10px">
+        <input data-sl="desc" placeholder="Custom leg — e.g. Nabers anytime TD" style="grid-column:1/-1">
+        <input data-sl="odds" placeholder="+140" inputmode="text">
+        <button class="btn ghost" data-slipadd="custom">Add leg</button>
+      </div>
+
+      ${legs.length>=2?`
+        <div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)} — 1 unit returns ${money(U()*d)}. Every leg has to land.</div>
+        <div class="units">
+          <button class="ubtn" data-slipu="1">1 unit<span>${money(U())}</span></button>
+          <button class="ubtn" data-slipu="2">2 units<span>${money(2*U())}</span></button>
+          <button class="ubtn" data-slipu="3">3 units<span>${money(3*U())}</span></button>
+          <button class="ubtn" data-slipu="x">✱<span>custom</span></button>
+        </div>
+        <div class="custom" data-slipcustom hidden>
+          <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
+            <input data-sl="stake" placeholder="Custom $" inputmode="decimal">
+            <button class="btn" data-slipu="c">Place</button>
+          </div>
+        </div>
+        <div style="height:8px"></div>
+        <button class="btn ghost" data-slipclear="1">Clear slip</button>`
+      :(legs.length===1?`<div class="note" style="margin:10px 0 0">One more leg and you can place it.</div>`:'')}
+    </div></div>`;
+}
+
 /* Any game the feed doesn't carry — FCS, a bowl, a Tuesday MAC game.
    Added by hand, stored per-league, survives re-imports. */
 function addGameForm(){
@@ -894,7 +958,7 @@ function renderSides(){
     </nav>`;
   const all=GM();
   if(!all.length){
-    host.innerHTML=toggle+addGameForm()+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
+    host.innerHTML=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
       <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Import <code>${cfb?'cfb':'games'}-2026.json</code> on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
     return;
   }
@@ -917,7 +981,7 @@ function renderSides(){
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
-  let html=toggle+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`:`Week ${wk} · ${games.length} games`}</div><div class="pbody">
+  let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`:`Week ${wk} · ${games.length} games`}</div><div class="pbody">
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
@@ -981,6 +1045,7 @@ function renderSides(){
             <button class="ubtn" data-u="3" data-g="${esc(g.id)}">3 units<span>${money(3*U())}</span></button>
             <button class="ubtn" data-u="x" data-g="${esc(g.id)}">✱<span>custom</span></button>
           </div>
+          <button class="btn ghost" data-parlay="${esc(g.id)}" style="grid-column:1/-1;margin-top:6px">+ Parlay</button>
           <div class="custom" data-custom="${esc(g.id)}" hidden style="grid-column:1/-1">
             <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
               <input data-gs="stake" data-g="${esc(g.id)}" placeholder="Custom $" inputmode="decimal">
@@ -1071,21 +1136,27 @@ function betMarket(b){
   return 'side';
 }
 const BUCKETS=[
-  {id:'nfl-side',  label:'NFL side',      kind:'side', market:'side'},
-  {id:'nfl-total', label:'NFL total',     kind:'side', market:'total'},
-  {id:'nfl-ml',    label:'NFL moneyline', kind:'side', market:'ml'},
-  {id:'cfb-side',  label:'College side',  kind:'cfb',  market:'side'},
-  {id:'cfb-total', label:'College total', kind:'cfb',  market:'total'},
-  {id:'cfb-ml',    label:'College ML',    kind:'cfb',  market:'ml'}
+  {id:'nfl-side',  label:'NFL side',        kind:'side', market:'side'},
+  {id:'nfl-total', label:'NFL total',       kind:'side', market:'total'},
+  {id:'nfl-ml',    label:'NFL moneyline',   kind:'side', market:'ml'},
+  {id:'cfb-side',  label:'College side',    kind:'cfb',  market:'side'},
+  {id:'cfb-total', label:'College total',   kind:'cfb',  market:'total'},
+  {id:'cfb-ml',    label:'College ML',      kind:'cfb',  market:'ml'},
+  {id:'par-nfl',   label:'NFL parlay',      kind:'parlay', market:'nfl'},
+  {id:'par-cfb',   label:'College parlay',  kind:'parlay', market:'cfb'},
+  {id:'par-mix',   label:'Mixed parlay',    kind:'parlay', market:'mixed'}
 ];
 
 function bucketStats(kind,market){
   const b=BANKKEY();
   let w=0,l=0,staked=0,ret=0,open=0;
   b.bets.forEach(x=>{
-    const k=x.kind==='cfb'?'cfb':(x.kind==='prop'?'prop':'side');
+    const k=x.kind==='parlay'?'parlay'
+           :(x.kind==='cfb'?'cfb':(x.kind==='prop'?'prop':'side'));
     if(k!==kind)return;
-    if(betMarket(x)!==market)return;
+    // parlays bucket by which league(s) they touch, not by side/total
+    const m=kind==='parlay'?(x.league||'nfl'):betMarket(x);
+    if(m!==market)return;
     const st=Number(x.stake)||0;
     if(x.result==='W'){w++;staked+=st;ret+=payout(st,x.odds,x);}
     else if(x.result==='L'){l++;staked+=st;}
@@ -1115,13 +1186,25 @@ function renderLedger(){
   // ---- straight bets ----
   body.appendChild(head('Straight bets'));
   let any=false, T={w:0,l:0,staked:0,pl:0,open:0,n:0};
+  const used=[];
   BUCKETS.forEach(bk=>{
     const st=bucketStats(bk.kind,bk.market);
     if(!st.n&&!st.open)return;          // hide buckets you've never used
     any=true;
     ['w','l','staked','pl','open','n'].forEach(k=>T[k]+=st[k]);
-    body.appendChild(row(bk.label,st));
+    used.push({label:bk.label,st});
   });
+  const sk=ledSort.key, dir=ledSort.dir;
+  if(sk){
+    used.sort((a,b)=>{
+      const val=x=>sk==='label'?x.label.toLowerCase()
+        :sk==='hit'?(x.st.n?x.st.w/x.st.n:-1):x.st[sk];
+      const va=val(a),vb=val(b);
+      const c=(typeof va==='string')?va.localeCompare(vb):(va-vb);
+      return dir==='asc'?c:-c;
+    });
+  }
+  used.forEach(u=>body.appendChild(row(u.label,u.st)));
   if(!any){
     const tr=document.createElement('tr');
     tr.innerHTML=`<td colspan="5" style="font-size:11px;font-style:italic;color:var(--ink-soft)">No straight bets logged yet.</td>`;
@@ -1385,6 +1468,59 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
       b.setAttribute('aria-selected', String(b===mk)));
     return;
   }
+  // ---- parlay slip ----
+  const pl=e.target.closest('[data-parlay]');
+  if(pl){
+    const box=pl.closest('.add'), v=f=>box.querySelector(`[data-gs="${f}"]`);
+    const desc=v('pick').value.trim(), odds=parseInt(v('odds').value,10)||-110;
+    if(!desc){toast('Describe the leg first');return;}
+    const g=GM().find(x=>x.id===pl.dataset.parlay)||{};
+    const sel=box.querySelector('.sgbtn[aria-selected="true"]');
+    slip().legs.push({desc,odds,kind:LG()==='cfb'?'cfb':'nfl',
+      market:(sel&&sel.dataset.mk)||'side',
+      match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', game:g.id||'', wk:g.wk||S.week});
+    v('pick').value='';v('odds').value='';
+    save();renderSides();toast('Leg added');
+    return;
+  }
+  const srm=e.target.closest('[data-sliprm]');
+  if(srm){ slip().legs.splice(Number(srm.dataset.sliprm),1); save(); renderSides(); return; }
+  const sclr=e.target.closest('[data-slipclear]');
+  if(sclr){ slip().legs=[]; save(); renderSides(); return; }
+  const sadd=e.target.closest('[data-slipadd]');
+  if(sadd){
+    const box=sadd.closest('.pbody'), v=f=>box.querySelector(`[data-sl="${f}"]`);
+    const desc=v('desc').value.trim(), odds=parseInt(v('odds').value,10);
+    if(!desc||!odds){toast('Needs a leg and a price');return;}
+    slip().legs.push({desc,odds,kind:'custom',market:'other',match:'',wk:S.week});
+    save();renderSides();toast('Leg added');
+    return;
+  }
+  const su=e.target.closest('[data-slipu]');
+  if(su){
+    const legs=slip().legs;
+    if(legs.length<2){toast('A parlay needs two legs');return;}
+    if(su.dataset.slipu==='x'){
+      const c=su.closest('.pbody').querySelector('[data-slipcustom]');
+      c.hidden=!c.hidden; return;
+    }
+    const box=su.closest('.pbody');
+    const stake = su.dataset.slipu==='c'
+      ? Number(box.querySelector('[data-sl="stake"]').value)
+      : Number(su.dataset.slipu)*U();
+    if(!stake||stake<=0){toast('Needs a stake');return;}
+    const d=slipOdds();
+    addBet({
+      desc:legs.map(l=>l.desc).join(' + '),
+      odds:toAm(d), stake, kind:'parlay', league:slipLeague(),
+      legs:legs.slice(), wk:S.week,
+      match:`${legs.length}-leg parlay`
+    });
+    slip().legs=[]; save(); renderSides(); renderBank(); renderLedger();
+    toast(money(stake)+' parlay placed');
+    return;
+  }
+
   const u=e.target.closest('[data-u]'); if(!u)return;
   const id=u.dataset.g, box=u.closest('.add');
   const v=f=>box.querySelector(`[data-gs="${f}"]`);
@@ -1410,7 +1546,7 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   if(v('stake'))v('stake').value='';
   const c=box.querySelector('[data-custom]'); if(c)c.hidden=true;
   const un=(stake/U());
-  renderBank();toast((Math.abs(un-Math.round(un))<0.01?Math.round(un)+(Math.round(un)===1?' unit':' units'):money(stake))+' logged');
+  renderBank();renderLedger();toast((Math.abs(un-Math.round(un))<0.01?Math.round(un)+(Math.round(un)===1?' unit':' units'):money(stake))+' logged');
 });
 
 /* bankroll */
@@ -1418,13 +1554,13 @@ document.getElementById('bankList').addEventListener('click',e=>{
   const g=e.target.closest('[data-bg]');
   if(g){
     const b=BANKKEY(), x=b.bets.find(y=>y.id===g.dataset.bid);
-    if(x){x.result=x.result===g.dataset.bg?null:g.dataset.bg;save();renderBank();}
+    if(x){x.result=x.result===g.dataset.bg?null:g.dataset.bg;save();renderBank();renderLedger();}
     return;
   }
   const d=e.target.closest('[data-bdel]');
   if(d){
     const b=BANKKEY(); const i=b.bets.findIndex(y=>y.id===d.dataset.bdel);
-    if(i>=0){b.bets.splice(i,1);save();renderBank();}
+    if(i>=0){b.bets.splice(i,1);save();renderBank();renderLedger();}
   }
 });
 document.getElementById('bankSummary').addEventListener('change',e=>{
@@ -1450,7 +1586,7 @@ document.getElementById('main').addEventListener('click',e=>{
       odds:s.ret>0?toAm(s.ret/s.staked):-100,
       stake:s.staked, result:s.pl>=0?'W':'L', ts:Date.now(),
       fixedReturn:s.ret});
-    save();renderCards();renderBank();toast('Settled');
+    save();renderCards();renderBank();renderLedger();toast('Settled');
     return;
   }
   const fold=e.target.closest('[data-fold]');
@@ -1524,6 +1660,16 @@ document.getElementById('player').addEventListener('change',e=>{
   }
   const th=e.target.closest('#pThresh');
   if(th){P(openPid).thresh=Math.max(1,Number(th.value)||20);save();renderPlayer();}
+});
+
+document.querySelector('.led thead').addEventListener('click',e=>{
+  const th=e.target.closest('[data-sort]'); if(!th)return;
+  const k=th.dataset.sort;
+  if(ledSort.key===k) ledSort.dir = ledSort.dir==='asc'?'desc':'asc';
+  else { ledSort.key=k; ledSort.dir = k==='label'?'asc':'desc'; }
+  document.querySelectorAll('.led th').forEach(h=>h.removeAttribute('data-on'));
+  th.setAttribute('data-on','1');
+  renderLedger();
 });
 
 document.getElementById('setBudget').addEventListener('change',e=>{S.budget=Number(e.target.value)||0;save();renderTotals();});
