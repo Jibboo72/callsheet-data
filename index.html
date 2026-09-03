@@ -237,6 +237,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
     </tr></thead>
     <tbody id="ledBody"></tbody>
   </table>
+  <div id="calBlock"></div>
   <p class="note">Every graded leg lands here. After six or seven weeks you'll see which market is carrying the sheet and which one only looked clever.</p>
   <div class="hr"></div>
   <div><span class="lab">Weekly budget across all five slips</span><input id="setBudget" type="number" step="1" min="1" inputmode="decimal"></div>
@@ -1130,6 +1131,7 @@ function bankStats(){
   const b=BANKKEY();
   let staked=0,ret=0,open=0,w=0,l=0,p=0;
   b.bets.forEach(x=>{
+    if(x.paper)return;                 // paper never touches the bankroll
     const st=Number(x.stake)||0;
     if(x.result==="W"){staked+=st;ret+=payout(st,x.odds,x);w++;}
     else if(x.result==='L'){staked+=st;l++;}
@@ -1142,10 +1144,23 @@ function bankStats(){
     roi:staked?pl/staked:0,
     settled:w+l+p};
 }
+function paperStats(){
+  const b=BANKKEY();
+  let w=0,l=0,staked=0,ret=0,open=0;
+  b.bets.forEach(x=>{
+    if(!x.paper)return;
+    const st=Number(x.stake)||0;
+    if(x.result==='W'){w++;staked+=st;ret+=payout(st,x.odds,x);}
+    else if(x.result==='L'){l++;staked+=st;}
+    else open+=st;
+  });
+  return {w,l,staked,pl:ret-staked,open,n:w+l,roi:staked?(ret-staked)/staked:0};
+}
+
 function addBet(rec){
   const b=BANKKEY();
   b.bets.push(Object.assign({id:'b'+Date.now()+Math.random().toString(36).slice(2,6),
-    wk:S.week,result:null,ts:Date.now()},rec));
+    wk:S.week,result:null,ts:Date.now(),paper:!!b.paper},rec));
   save();
 }
 
@@ -1352,6 +1367,23 @@ function renderBank(){
         <div class="stat"><div class="n">${b.bets.length}</div><div class="l">Total logged</div></div>
       </div>
       <div style="height:10px"></div>
+      <div class="seg" style="grid-template-columns:1fr 1fr">
+        <button class="sgbtn" data-paper="0" aria-selected="${!b.paper}">Real money</button>
+        <button class="sgbtn" data-paper="1" aria-selected="${!!b.paper}">Paper</button>
+      </div>
+      <div class="note" style="margin:8px 0 0">${b.paper
+        ? '<strong>Paper mode on.</strong> New bets are recorded with their price and graded normally, but never touch the balance. Use it to build a record of model probability against real prices before risking anything.'
+        : 'Bets go against the real bankroll.'}</div>
+      ${(()=>{const ps=paperStats();
+        if(!ps.n&&!ps.open)return '';
+        const col=ps.pl>0?'var(--win)':(ps.pl<0?'var(--loss)':'var(--ink)');
+        return `<div style="height:10px"></div>
+        <div class="stats">
+          <div class="stat"><div class="n" style="color:${col}">${ps.pl>=0?'+':''}${money(ps.pl).replace('$','')}</div><div class="l">Paper P/L<br>${ps.pl>=0?'+':''}${(ps.pl/U()).toFixed(1)}u</div></div>
+          <div class="stat"><div class="n" style="color:${col}">${ps.staked?(100*ps.roi).toFixed(1)+'%':'—'}</div><div class="l">Paper ROI<br>on ${money(ps.staked)}</div></div>
+          <div class="stat"><div class="n">${ps.w}-${ps.l}</div><div class="l">Paper record<br>${ps.open?money(ps.open)+' pending':'settled'}</div></div>
+        </div>`;})()}
+      <div style="height:10px"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><span class="lab">Starting bankroll</span>
           <input id="bankStart" type="number" step="10" inputmode="decimal" value="${Number(b.start||0)}"></div>
@@ -1390,8 +1422,8 @@ function renderBank(){
       const when=x.gdate||(g&&g.date)||'';
       return `<div class="row">
         <div class="pick" style="cursor:default">
-          ${match?`<div class="who">${esc(match)}</div>`:''}
-          <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${esc(x.desc)}</div>
+          ${match?`<div class="who">${x.paper?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(match)}</div>`:''}
+          <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${(!match&&x.paper)?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(x.desc)}</div>
           ${outcome}
           <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''} · ${fmtAm(x.odds)} · ${unitStr(st)}</div>
         </div>
@@ -1444,6 +1476,24 @@ function bucketStats(kind,market){
     else open+=st;
   });
   return {w,l,staked,pl:ret-staked,open,n:w+l};
+}
+
+/* The only test that matters and the one no backtest could give us: when
+   the model said 70%, did 70% of those bets win? Built from every graded
+   bet that carried a model probability, paper included. */
+function calibration(){
+  const b=BANKKEY();
+  const rows=b.bets.filter(x=>x.mprob!=null&&(x.result==='W'||x.result==='L'));
+  if(rows.length<5)return null;
+  const bands=[[0,.4],[.4,.55],[.55,.7],[.7,1.01]];
+  const out=bands.map(([lo,hi])=>{
+    const m=rows.filter(x=>x.mprob>=lo&&x.mprob<hi);
+    if(!m.length)return null;
+    return {lo,hi,n:m.length,
+      pred:m.reduce((a,x)=>a+x.mprob,0)/m.length,
+      act:m.filter(x=>x.result==='W').length/m.length};
+  }).filter(Boolean);
+  return {n:rows.length,bands:out};
 }
 
 function renderLedger(){
@@ -1513,6 +1563,26 @@ function renderLedger(){
   const plc=pall>0?'var(--win)':(pall<0?'var(--loss)':'var(--ink-soft)');
   tr.innerHTML=`<td style="font-weight:700">All legs</td><td class="n">${tw}</td><td class="n">${tl}</td><td class="n">${n?Math.round(tw/n*100)+'%':'—'}</td><td class="n" style="color:${plc}">${(pall>=0?'+':'')+money(pall).replace('$','')}</td>`;
   body.appendChild(tr);
+
+  // ---- calibration ----
+  const cal=calibration();
+  const host=document.getElementById('calBlock');
+  if(!cal){
+    host.innerHTML=`<div class="pblock" style="margin-top:16px"><div class="pbh">Model calibration</div><div class="pbody">
+      <div class="note" style="margin:0">Nothing to check yet. Log bets with a price — paper counts — and once five have graded, this shows whether the model's probabilities actually came true. That's the one test a backtest couldn't give us.</div>
+    </div></div>`;
+  } else {
+    host.innerHTML=`<div class="pblock" style="margin-top:16px"><div class="pbh">Model calibration · ${cal.n} graded</div><div class="pbody">
+      ${cal.bands.map(b=>{
+        const gap=b.act-b.pred;
+        const col=Math.abs(gap)<0.08?'var(--ink-soft)':(gap>0?'var(--win)':'var(--loss)');
+        return `<div class="hist"><span class="wk2">${Math.round(b.lo*100)}-${Math.round(b.hi*100)}%</span>
+          <span class="t">said ${Math.round(b.pred*100)}% · <strong style="color:${col}">hit ${Math.round(b.act*100)}%</strong>
+          <span style="color:var(--ink-soft)"> (n=${b.n})</span></span></div>`;
+      }).join('')}
+      <div class="note" style="margin:8px 0 0">Close means the model is honest. Consistently hitting below what it predicted means it's overrating, and the EV numbers are inflated by the same amount.</div>
+    </div></div>`;
+  }
 }
 
 /* ---------------- player screen ---------------- */
@@ -1843,6 +1913,11 @@ document.getElementById('bankList').addEventListener('click',e=>{
     if(i>=0){b.bets.splice(i,1);save();renderBank();renderLedger();}
   }
 });
+document.getElementById('bankSummary').addEventListener('click',e=>{
+  const pb=e.target.closest('[data-paper]');
+  if(pb){ BANKKEY().paper = pb.dataset.paper==='1'; save(); renderBank();
+    toast(BANKKEY().paper?'Paper mode on':'Real money'); }
+});
 document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankStart'){BANKKEY().start=Number(e.target.value)||0;save();renderBank();}
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
@@ -1866,7 +1941,7 @@ document.getElementById('main').addEventListener('click',e=>{
     // Logged as one net line so the bankroll math matches the card exactly,
     // rather than trying to reconstruct each combo as its own bet.
     const b=BANKKEY();
-    b.bets.push({id:'b'+Date.now(),wk:S.week,kind:'prop',card:cid,
+    b.bets.push({id:'b'+Date.now(),wk:S.week,kind:'prop',card:cid,paper:!!b.paper,
       desc:`${catById(cid).name} · ${s.won}/${s.bets} won`,
       odds:s.ret>0?toAm(s.ret/s.staked):-100,
       stake:s.staked, result:s.pl>=0?'W':'L', ts:Date.now(),
