@@ -420,6 +420,50 @@ function chipHTML(pid){
   return `<div class="chip" style="background:${col}">${inner}</div>`;
 }
 
+function screenPanel(cid){
+  const open=S.screenOpen===cid;
+  if(cid==='flyer'){
+    if(!open)return `<div style="height:8px"></div><button class="btn ghost" data-screen="${cid}">Who picks up the targets?</button>`;
+    const pool=flyerPool(S.flyerName||'');
+    return `<div style="height:10px"></div>
+      <div class="pblock"><div class="pbh">Injury flyer</div><div class="pbody">
+        <span class="lab">Who's out?</span>
+        <input data-flyer="name" list="rosterNames" value="${esc(S.flyerName||'')}" placeholder="Player who's injured">
+        ${pool?`
+          <div class="note" style="margin:10px 0">${esc(pool.out.name)} — ${esc(pool.team)}${pool.outSt?` · ${pool.outSt.tgtpg.toFixed(1)} targets/game`:''}. Those targets go somewhere.</div>
+          <div class="flag" style="border-color:var(--hl-long);color:var(--ink);background:rgba(255,138,31,.14)">
+            Listed lowest-volume first, deliberately. Across 166 absences the top beneficiary gained +3.3 targets — but the highest-volume teammate was that man only <strong>18%</strong> of the time, worse than random. The gains skewed to deep backups. This is a shortlist, not a ranking.
+          </div>
+          ${pool.mates.slice(0,10).map(m=>`<div class="hist">
+            <span class="wk2">${esc(m.pos||'')}</span>
+            <span class="t">${esc(m.name)}<br><span style="color:var(--ink-soft)">${m.st.tgtpg.toFixed(1)} tgt/g · ${m.st.recpg.toFixed(1)} rec/g · 3+ in ${Math.round(m.hr.rate*100)}%</span></span>
+          </div>`).join('')}`
+        :(S.flyerName?`<div class="note" style="margin:10px 0 0">No player and team found for "${esc(S.flyerName)}". Check the spelling on the Roster tab.</div>`
+                     :`<div class="note" style="margin:10px 0 0">Type a name to see who's left on that offense.</div>`)}
+        <div style="height:8px"></div>
+        <button class="btn ghost" data-screen="close">Close</button>
+      </div></div>`;
+  }
+  const cfg=SCREEN[cid];
+  if(!cfg)return '';
+  if(!open)return `<div style="height:8px"></div><button class="btn ghost" data-screen="${cid}">Find candidates</button>`;
+  const list=screen(cid)||[];
+  return `<div style="height:10px"></div>
+    <div class="pblock"><div class="pbh">Candidates · ${esc(cfg.label)}</div><div class="pbody">
+      <div class="note" style="margin:0 0 8px">${cfg.note}</div>
+      ${list.length?list.map(x=>`<div class="hist">
+          <span class="pill" style="background:${x.hr.rate>=.7?'var(--win)':(x.hr.rate<=.4?'var(--loss)':'var(--ink-soft)')}">${Math.round(x.hr.rate*100)}%</span>
+          <span class="t"><strong>${esc(x.name)}</strong> ${esc(x.team||'')}<br>
+            <span style="color:var(--ink-soft)">${x.hr.h}/${x.hr.n} · ${x.st.recpg.toFixed(1)} rec/g · ${Math.round(x.st.cr*100)}% catch · ${x.st.ypr.toFixed(1)} ypc</span>
+            ${x.mu?`<br><span style="color:${rankColor(x.mu.d_rank)}">vs ${esc(x.mu.opp)} · pass D #${x.mu.d_rank}</span>`:''}
+            ${x.prior?`<br><span style="color:var(--hl-long)">all ${x.prior.n} with ${esc(x.prior.from)}</span>`:''}
+          </span></div>`).join('')
+        :`<div class="empty">Nobody clears the filter. Import player logs on the Roster tab if you haven't.</div>`}
+      <div class="note" style="margin:10px 0 8px">Ranked on how often it has hit, not on price. Check each against the number before you take it.</div>
+      <button class="btn ghost" data-screen="close">Close</button>
+    </div></div>`;
+}
+
 function renderCards(){
   const host=document.getElementById('cats');host.innerHTML='';
   // autocomplete source so a typed name matches the roster slug
@@ -493,6 +537,7 @@ function renderCards(){
           ${m.bets>1?`<div class="tline"><span class="k">Range</span><span class="v">${fmtAm(m.shortest)} / ${fmtAm(m.longest)}</span></div>`:''}
           <div class="tline"><span class="k">Return if everything hits</span><span class="v">${m.bets?money(m.maxRet):'—'}</span></div>
           ${flags.map(f=>`<div class="flag">${f}</div>`).join('')}
+          ${screenPanel(c.id)}
           ${(()=>{
             const s=propSettlement(c.id);
             const done=(S.bank&&S.bank.bets||[]).some(b=>b.kind==='prop'&&b.card===c.id&&Number(b.wk)===Number(S.week));
@@ -770,11 +815,101 @@ function previewProp(box){
     <br><span style="opacity:.75">Past rate isn't a forecast — role, health and matchup all move it.</span></div>`;
 }
 document.getElementById('cats').addEventListener('input',e=>{
+  const fl=e.target.closest('[data-flyer]');
+  if(fl){ S.flyerName=fl.value; save();
+    const pos=fl.selectionStart; renderCards();
+    const again=document.querySelector('[data-flyer="name"]');
+    if(again){again.focus(); try{again.setSelectionRange(pos,pos);}catch(e){}}
+    return; }
   const box=e.target.closest('.add'); if(box)previewProp(box);
 });
 document.getElementById('cats').addEventListener('change',e=>{
   const box=e.target.closest('.add'); if(box)previewProp(box);
 });
+
+/* ---------------- candidate screener ----------------
+   Ranks players against each card's profile using the logs already loaded.
+   Deliberately ignores price: this answers "who is most likely to hit",
+   not "who is worth the number". You compare to the odds yourself. */
+const SCREEN={
+  slot:{
+    label:'3+ receptions',
+    // slot profile: catches most of what's thrown, short depth, real volume
+    ok:st=>st.cr>=0.66 && st.ypr<=11.5 && st.recpg>=3.5,
+    rate:p=>hitRate(p,'rec',3,'atleast'),
+    useDef:true,
+    note:'Catch rate 66%+, yards per catch under 11.5, 3.5+ receptions a game. Opponent defense matters here — it moved the hit rate 9 points in testing.'
+  },
+  long:{
+    label:'20+ yard catch',
+    // volume drives the tail, not big-play reputation
+    ok:st=>st.recpg>=4 && st.ypr>=9.5,
+    rate:p=>hitRate(p,'lng',20,'atleast'),
+    useDef:false,
+    note:'4+ receptions a game with normal depth. Defense rank is ignored on purpose — testing showed it made no difference to longest-catch outcomes.'
+  },
+  fade:{
+    label:'longest under 25',
+    ok:st=>st.recpg>=2.5,
+    rate:p=>hitRate(p,'lng',25,'under'),
+    useDef:true,
+    note:'Unders on the longest catch. Sorted by how often it stayed under, tough defenses first.'
+  }
+};
+function seasonStats(p){
+  const L=(p.log||[]).filter(g=>g.tgt!=null);
+  if(L.length<6)return null;
+  const t=L.reduce((a,g)=>a+g.tgt,0), r=L.reduce((a,g)=>a+g.rec,0), y=L.reduce((a,g)=>a+g.yds,0);
+  if(!t||!r)return null;
+  return {n:L.length, recpg:r/L.length, cr:r/t, ypr:y/r, tgtpg:t/L.length};
+}
+function hitRate(p,f,th,side){
+  const L=(p.log||[]).filter(g=>g[f]!=null);
+  if(!L.length)return null;
+  const h=L.filter(g=>meets(g[f],side,th)).length;
+  return {h,n:L.length,rate:h/L.length};
+}
+function screen(cid){
+  const cfg=SCREEN[cid]; if(!cfg)return null;
+  const out=[];
+  Object.keys(S.players||{}).forEach(pid=>{
+    const p=P(pid), st=seasonStats(p);
+    if(!st||!cfg.ok(st))return;
+    const hr=cfg.rate(p); if(!hr||hr.n<6)return;
+    const m=MU(pid);
+    out.push({pid,name:p.name,team:p.team,st,hr,mu:m,prior:priorTeam(pid)});
+  });
+  out.sort((a,b)=>{
+    if(cfg.useDef&&a.mu&&b.mu&&a.mu.d_rank&&b.mu.d_rank){
+      // same hit rate band? let the softer draw win
+      const diff=b.hr.rate-a.hr.rate;
+      if(Math.abs(diff)>0.08)return diff;
+      return (cid==='fade')?(a.mu.d_rank-b.mu.d_rank):(b.mu.d_rank-a.mu.d_rank);
+    }
+    return b.hr.rate-a.hr.rate;
+  });
+  return out.slice(0,12);
+}
+
+/* Injury Flyer can't be ranked. Tested on 166 mid-season absences: the
+   biggest beneficiary gained +3.3 targets, but the highest-volume remaining
+   teammate was that guy only 18% of the time — worse than picking at random
+   from five. So this lists the pool and their profiles and stops there. */
+function flyerPool(outName){
+  const outPid=slug(outName||''), outP=P(outPid);
+  if(!outP||!outP.team)return null;
+  const team=outP.team;
+  const mates=Object.keys(S.players).filter(pid=>{
+    const q=P(pid);
+    return pid!==outPid && q.team===team && q.log && q.log.length>=4;
+  }).map(pid=>{
+    const q=P(pid), st=seasonStats(q);
+    return {pid,name:q.name,pos:q.pos,st,hr:hitRate(q,'rec',3,'atleast')};
+  }).filter(x=>x.st);
+  mates.sort((a,b)=>a.st.tgtpg-b.st.tgtpg);   // low volume first, on purpose
+  const outSt=seasonStats(outP);
+  return {out:outP,team,outSt,mates};
+}
 
 /* ---------------- sides & bankroll ---------------- */
 const BANKKEY=()=>{S.bank=S.bank||{start:500,unit:14,bets:[]};S.bank.bets=S.bank.bets||[];if(S.bank.unit==null)S.bank.unit=14;return S.bank;};
@@ -1574,6 +1709,11 @@ function renderAll(){_paceCache=null;document.getElementById('wkNum').textConten
 document.getElementById('main').addEventListener('click',e=>{
   const op=e.target.closest('[data-open]');
   if(op){ openPlayer(op.dataset.open); return; }
+  const sc=e.target.closest('[data-screen]');
+  if(sc){
+    S.screenOpen = sc.dataset.screen==='close' ? null : sc.dataset.screen;
+    save(); renderCards(); return;
+  }
   const st=e.target.closest('[data-settle]');
   if(st){
     const cid=st.dataset.settle, s=propSettlement(cid);
