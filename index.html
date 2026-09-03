@@ -540,7 +540,7 @@ function renderRoster(){
         <button class="av" data-open="${pid}" aria-label="Open ${esc(p.name)}">${chipHTML(pid)}</button>
         <div class="pick" data-open="${pid}">
           <div class="who">${esc(p.name)}</div>
-          <div class="what">${[p.pos,TEAMS[p.team]?TEAMS[p.team][0]:p.team].filter(Boolean).join(' · ')||'No bio yet'} · ${h.length} pick${h.length===1?'':'s'}</div>
+          <div class="what">${[p.pos,TEAMS[p.team]?TEAMS[p.team][0]:p.team].filter(Boolean).join(' · ')||'No bio yet'} · ${h.length} pick${h.length===1?'':'s'}${priorTeam(pid)?' · <span style="color:var(--hl-long);font-weight:600">was '+esc(p.logTeam)+'</span>':''}</div>
         </div>
         <div class="meta"><div class="odds">${w}-${l}</div><div class="book">${p.log.length} games</div></div>
       </div>`;
@@ -574,10 +574,16 @@ function mergeImport(raw){
     const p=ensurePlayer(pid,inc.name);
     const oldTeam=p.team;
     // incoming stats always win; anything you typed yourself is preserved
-    if(Array.isArray(inc.log)&&inc.log.length) p.log=inc.log;
+    if(Array.isArray(inc.log)&&inc.log.length){
+      p.log=inc.log;
+      p.logTeam=inc.team||'';        // the team these games were played for
+    }
     else if(existed&&p.log&&p.log.length) kept++;
     p.gsis=gsis;
     ['team','pos','ht','wt','college','exp'].forEach(f=>{ if(inc[f]) p[f]=inc[f]; });
+    // roster refresh moved him: remember where the logs came from, so the
+    // history stays visible but never gets read as current-team volume
+    if(existed&&oldTeam&&inc.team&&oldTeam!==inc.team&&p.log&&p.log.length&&!p.logTeam) p.logTeam=oldTeam;
     if(inc.mu) p.mu=inc.mu; else delete p.mu;
     if(inc.adj) p.adj=inc.adj; else delete p.adj;
     if(existed&&oldTeam&&inc.team&&oldTeam!==inc.team) moved.push(`${p.name} ${oldTeam}→${inc.team}`);
@@ -624,6 +630,21 @@ document.getElementById('impFetch').addEventListener('click',async()=>{
 document.getElementById('rosterSearch').addEventListener('input',e=>{
   rosterQuery=e.target.value; renderRoster();
 });
+
+/* Logs compiled under a different team than he plays for now. The player
+   traits carry over; the VOLUME does not, and volume is what drives
+   receptions and longest-reception props. So the history stays visible
+   and stays labelled. */
+function priorTeam(pid){
+  const p=P(pid);
+  if(!p||!p.logTeam||!p.team||p.logTeam===p.team)return null;
+  if(!p.log||!p.log.length)return null;
+  return {from:p.logTeam,to:p.team,n:p.log.length};
+}
+function priorTag(pid){
+  const pt=priorTeam(pid); if(!pt)return '';
+  return `<span style="color:var(--hl-long);font-weight:600">all ${pt.n} with ${esc(pt.from)}</span>`;
+}
 
 /* ---------------- structured props ---------------- */
 const MKT=[
@@ -689,7 +710,8 @@ function hitLine(p){
   const splits=[];
   if(h.tough)splits.push(`${h.tough.h}/${h.tough.n} vs tough D`);
   if(h.soft)splits.push(`${h.soft.h}/${h.soft.n} vs soft D`);
-  return `<div class="what" style="opacity:.9">hit ${h.hits}/${h.n} (${pct}%) · last 5: ${h.rhits}/${h.rn}${edge}${splits.length?'<br>'+splits.join(' · '):''}</div>`;
+  const pt=priorTag(p.pid);
+  return `<div class="what" style="opacity:.9">hit ${h.hits}/${h.n} (${pct}%) · last 5: ${h.rhits}/${h.rn}${edge}${splits.length?'<br>'+splits.join(' · '):''}${pt?'<br>'+pt:''}</div>`;
 }
 
 /* live preview: show the hit rate before the bet is even added */
@@ -715,6 +737,7 @@ function previewProp(box){
   if(h.tough)sp.push(`${h.tough.h}/${h.tough.n} vs tough D`);
   if(h.soft)sp.push(`${h.soft.h}/${h.soft.n} vs soft D`);
   host.innerHTML=`<div class="note" style="margin:0"><strong>${esc(propLabel(mkt,side,line))}</strong> — hit ${h.hits} of ${h.n} games (${pct}%), last 5: ${h.rhits}/${h.rn}${sp.length?'<br>'+sp.join(' · '):''}${verdict}
+    ${(()=>{const pt=priorTeam(pid);return pt?`<br><span style="color:var(--hl-long);font-weight:600">Careful — all ${pt.n} of those games were with ${esc(pt.from)}. He's on ${esc(pt.to)} now, so the volume may not carry.</span>`:'';})()}
     <br><span style="opacity:.75">Past rate isn't a forecast — role, health and matchup all move it.</span></div>`;
 }
 document.getElementById('cats').addEventListener('input',e=>{
@@ -958,6 +981,14 @@ function renderPlayer(){
     <div class="wrap" style="padding-top:16px">
 
       ${(()=>{
+        const pt=priorTeam(openPid); if(!pt)return '';
+        return `<div class="flag" style="border-color:var(--hl-long);color:var(--ink);background:rgba(255,138,31,.14);margin-bottom:18px">
+          <strong>Changed teams.</strong> All ${pt.n} logged games were with ${esc(pt.from)}; he's on ${esc(pt.to)} now.
+          Catch rate and yards per catch mostly travel with the player. Target volume does not — it belongs to the old offense,
+          and volume is what drives receptions and longest-reception props.</div>`;
+      })()}
+
+      ${(()=>{
         const a=p.adj; if(!a)return '';
         const d=(v,r)=>v-r, sgn=v=>(v>0?'+':'')+v.toFixed(1);
         const sosLbl = a.sos>0.75?'tougher than average':(a.sos<-0.75?'easier than average':'about average');
@@ -1009,7 +1040,7 @@ function renderPlayer(){
           <span>${st.hits} of ${st.g} games</span></div>
       </div></div>`:''}
 
-      <div class="pblock"><div class="pbh">Game log</div><div class="pbody">
+      <div class="pblock"><div class="pbh">Game log${(()=>{const pt=priorTeam(openPid);return pt?` · with ${esc(pt.from)}`:'';})()}</div><div class="pbody">
         <table class="logtbl">
           <thead><tr><th>Wk</th><th style="text-align:left">Opp</th><th>Tgt</th><th>Rec</th><th>Yds</th><th>Long</th><th></th></tr></thead>
           <tbody>${(p.log||[]).length?p.log.map((g,i)=>`<tr>
