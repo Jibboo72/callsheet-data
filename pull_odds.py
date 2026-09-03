@@ -28,7 +28,7 @@ import sys
 import urllib.parse
 import urllib.request
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 BASE = "https://api.sportsgameodds.com/v2"
 # Reception and longest-reception markets are the thin ones we care about;
@@ -81,23 +81,44 @@ def call_either(path, key, params=None):
                 f"  query : HTTP {e2.code}: {e2.read().decode()[:200]}")
 
 
+# The account endpoint returns email, customerID and keyID alongside the
+# quota. This repo is public — none of that gets written to disk. Only the
+# rate-limit block is kept.
 def usage(key):
-    """Objects used and remaining, straight from the account endpoint."""
     for path in ("/account/usage", "/account"):
         try:
             d = call_either(path, key)
-            return d.get("data", d)
+            d = d.get("data", d)
+            rl = (d or {}).get("rateLimits") or {}
+            mon = rl.get("per-month") or {}
+            return {
+                "tier": d.get("tier"),
+                "objectsUsed": mon.get("current-entities"),
+                "objectsLimit": mon.get("max-entities"),
+                "reqPerMin": (rl.get("per-minute") or {}).get("max-requests"),
+            }
         except Exception as e:
             print(f"  usage via {path}: {e}", file=sys.stderr)
     return None
 
 
-def pull(season, key):
+def pull(season, key, days=8):
     events = []
     try:
-        d = call_either("/events", key, {"leagueID": "NFL", "season": str(season),
-                                         "type": "match", "limit": 100})
+        # `season` alone came back with 2024 games, so bound it by date as
+        # well and filter client-side. Also keeps the object spend down:
+        # one NFL week is ~16 events, not 100.
+        now = datetime.now(timezone.utc)
+        params = {"leagueID": "NFL", "type": "match", "limit": 40,
+                  "startsAfter": now.strftime("%Y-%m-%d"),
+                  "startsBefore": (now + timedelta(days=days)).strftime("%Y-%m-%d")}
+        d = call_either("/events", key, params)
         events = d.get("data", d if isinstance(d, list) else [])
+        # belt and braces: drop anything already kicked off, whatever the
+        # API did with the date params
+        cutoff = now.isoformat()
+        events = [e for e in events
+                  if str((e.get("status") or {}).get("startsAt") or "") >= cutoff[:10]]
     except Exception as e:
         raise SystemExit(f"events call failed: {e}")
 
