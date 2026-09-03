@@ -221,6 +221,8 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
       <div style="height:6px"></div>
       <button class="btn ghost" id="impFetch">Fetch and import</button>
       <div id="impStatus" class="note" style="margin-bottom:0"></div>
+      ${''}
+      <div id="quota"></div>
     </div>
   </div>
   <input id="impInput" type="file" accept=".json,application/json" hidden>
@@ -617,6 +619,29 @@ let rosterQuery='';
 let sidesQuery='';
 let ledSort={key:null,dir:'desc'};
 let bankQuery='';
+/* API quota, read from whatever the last odds pull recorded. The free plan
+   is a shared monthly pool across every sport on the account, so this is the
+   number that decides whether a college pull is affordable. */
+function renderQuota(){
+  const host=document.getElementById('quota'); if(!host)return;
+  const o=S.odds;
+  if(!o){ host.innerHTML=`<div class="note" style="margin:10px 0 0">No odds snapshot loaded. The weekly pull writes one to <code>data/odds-2026.json</code>.</div>`; return; }
+  const u=o.usage||{};
+  const used=Number(u.objectsUsed ?? u.used ?? u.currentUsage ?? NaN);
+  const cap=Number(u.objectsLimit ?? u.limit ?? u.monthlyLimit ?? NaN);
+  const left=(!isNaN(used)&&!isNaN(cap))?cap-used:null;
+  const pct=(left!=null&&cap)?left/cap:null;
+  const col=pct==null?'var(--ink-soft)':(pct<0.15?'var(--loss)':(pct<0.35?'var(--hl-long)':'var(--win)'));
+  host.innerHTML=`<div style="height:10px"></div>
+    <div class="stats">
+      <div class="stat"><div class="n" style="color:${col}">${left!=null?left.toLocaleString():'—'}</div><div class="l">Objects left${cap?`<br>of ${cap.toLocaleString()}`:''}</div></div>
+      <div class="stat"><div class="n">${o.events_pulled ?? '—'}</div><div class="l">Last pull<br>events</div></div>
+      <div class="stat"><div class="n" style="font-size:13px">${esc(String(o.pulled||'').slice(5,16).replace('T',' '))}</div><div class="l">Snapshot<br>taken</div></div>
+    </div>
+    ${left==null?`<div class="note" style="margin:8px 0 0">The pull didn't return a usage figure — field names in the account response probably differ. The raw shape is printed in the workflow log.</div>`
+      :`<div class="note" style="margin:8px 0 0">At ~16 objects a week for NFL and ~55 for college FBS, that's ${Math.floor(left/16)} more NFL-only pulls. Baseball shares this pool.</div>`}`;
+}
+
 function renderRoster(){
   const host=document.getElementById('rosterList');
   let ids=Object.keys(S.players||{});
@@ -660,6 +685,12 @@ function mergeImport(raw){
   try{ data=typeof raw==='string'?JSON.parse(raw):raw; }
   catch(e){ impSay("That file isn't valid JSON.",true); return; }
   const src=data&&data.players;
+  if(data&&data.kind==='odds'){
+    S.odds=data; save(); renderAll();
+    const n=(data.games||[]).length;
+    impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
+    return;
+  }
   if(Array.isArray(data&&data.games)){
     if(data.kind==='cfb'){
       S.cfb=data; save(); renderAll();
@@ -1923,7 +1954,7 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
