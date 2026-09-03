@@ -80,6 +80,14 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .btn.ghost{background:transparent;color:var(--ink)}
 .btn:active{transform:translateY(1px)}
 
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:2px solid var(--ink);margin-bottom:6px}
+.sgbtn{
+  font-family:Oswald,sans-serif;font-weight:600;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;border:0;border-right:2px solid var(--ink);
+  background:transparent;color:var(--ink);padding:8px 2px;cursor:pointer;
+}
+.sgbtn:last-child{border-right:0}
+.sgbtn[aria-selected="true"]{background:var(--ink);color:var(--stock)}
 .units{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 .ubtn{
   font-family:Oswald,sans-serif;font-weight:700;font-size:13px;letter-spacing:.04em;
@@ -191,11 +199,13 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 </section>
 
 <section id="paneSides" hidden>
+  <input id="sidesSearch" placeholder="Search teams" style="margin-bottom:14px">
   <div id="sidesBoard"></div>
 </section>
 
 <section id="paneBank" hidden>
   <div id="bankSummary"></div>
+  <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
 </section>
 
@@ -219,7 +229,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 
 <section id="paneLedger" hidden>
   <table class="led">
-    <thead><tr><th>Market</th><th class="n">W</th><th class="n">L</th><th class="n">Hit%</th></tr></thead>
+    <thead><tr><th>Market</th><th class="n">W</th><th class="n">L</th><th class="n">Hit%</th><th class="n">P/L</th></tr></thead>
     <tbody id="ledBody"></tbody>
   </table>
   <p class="note">Every graded leg lands here. After six or seven weeks you'll see which market is carrying the sheet and which one only looked clever.</p>
@@ -515,6 +525,8 @@ function propHistory(pid){
 }
 
 let rosterQuery='';
+let sidesQuery='';
+let bankQuery='';
 function renderRoster(){
   const host=document.getElementById('rosterList');
   let ids=Object.keys(S.players||{});
@@ -634,6 +646,12 @@ document.getElementById('impFetch').addEventListener('click',async()=>{
 });
 document.getElementById('rosterSearch').addEventListener('input',e=>{
   rosterQuery=e.target.value; renderRoster();
+});
+document.getElementById('sidesSearch').addEventListener('input',e=>{
+  sidesQuery=e.target.value; renderSides();
+});
+document.getElementById('bankSearch').addEventListener('input',e=>{
+  bankQuery=e.target.value; renderBank();
 });
 
 /* Logs compiled under a different team than he plays for now. The player
@@ -881,22 +899,32 @@ function renderSides(){
     return;
   }
   const wk=S.week;
-  // Finished games sink to the bottom — what's still bettable stays on top.
-  const games=all.filter(g=>Number(g.wk)===Number(wk)).slice().sort((a,b)=>{
+  // A search overrides the week filter — if you're hunting a team you don't
+  // want to already know which week they play.
+  const q=(sidesQuery||'').trim().toLowerCase();
+  // NFL teams are stored as abbreviations, so match the full nickname too —
+  // "seahawks" should find SEA without you knowing the code.
+  const nick=t=>(TEAMS[t]?TEAMS[t][0]:'');
+  const base=q
+    ? all.filter(g=>[g.away,g.home,nick(g.away),nick(g.home),g.aconf,g.hconf]
+        .filter(Boolean).join(' ').toLowerCase().includes(q))
+    : all.filter(g=>Number(g.wk)===Number(wk));
+  const games=base.slice().sort((a,b)=>{
+    if(q&&Number(a.wk)!==Number(b.wk))return Number(a.wk)-Number(b.wk);
     const fa=('margin' in a)?1:0, fb=('margin' in b)?1:0;
     if(fa!==fb)return fa-fb;
     return String(a.date||'').localeCompare(String(b.date||''))
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
-  let html=toggle+addGameForm()+`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
+  let html=toggle+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`:`Week ${wk} · ${games.length} games`}</div><div class="pbody">
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
   </div></div>`;
 
   if(!games.length){
-    html+=`<div class="pblock"><div class="pbody"><div class="empty">No games that week.</div></div></div>`;
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}</div></div></div>`;
     host.innerHTML=html; return;
   }
 
@@ -918,6 +946,7 @@ function renderSides(){
     const line=hasLine?`${esc(fav)} -${Math.abs(g.spread).toFixed(1)}`:'no line';
     const played='margin' in g;
     const wx=[g.roof&&g.roof!=='outdoors'?g.roof:null, g.wind?g.wind+' mph':null].filter(Boolean).join(' · ');
+    const wkTag = q?`Wk ${g.wk} · `:'';
     const meta = cfb
       ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':''].filter(Boolean).join(' · ')
       : String(g.date||'').slice(5)+(g.div?' · div':'');
@@ -931,7 +960,7 @@ function renderSides(){
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${esc(g.away)} @ ${esc(g.home)}</span>
-        <span class="cnt">${esc(meta)}${g.mine?' · added':''}</span>
+        <span class="cnt">${esc(wkTag+meta)}${g.mine?' · added':''}</span>
         ${g.mine?`<button class="x" data-rmgame="${esc(g.id)}" aria-label="Remove game">×</button>`:''}
       </div>
       <div class="pbody" style="padding:9px 10px">
@@ -941,6 +970,11 @@ function renderSides(){
         <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
           <input data-gs="pick" data-g="${esc(g.id)}" placeholder="${cfb?`Bet — e.g. ${esc(g.home)} -7 or over 52.5`:`Bet — e.g. ${esc(g.home)} -3.5`}" style="grid-column:1/-1">
           <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text" style="grid-column:1/-1">
+          <div class="seg" style="grid-column:1/-1">
+            <button class="sgbtn" data-mk="side" data-g="${esc(g.id)}" aria-selected="true">Side</button>
+            <button class="sgbtn" data-mk="total" data-g="${esc(g.id)}" aria-selected="false">Total</button>
+            <button class="sgbtn" data-mk="ml" data-g="${esc(g.id)}" aria-selected="false">ML</button>
+          </div>
           <div class="units" style="grid-column:1/-1">
             <button class="ubtn" data-u="1" data-g="${esc(g.id)}">1 unit<span>${money(U())}</span></button>
             <button class="ubtn" data-u="2" data-g="${esc(g.id)}">2 units<span>${money(2*U())}</span></button>
@@ -982,9 +1016,17 @@ function renderBank(){
       <div class="note" style="margin:8px 0 0">Every unit is ${money(U())}. The buttons on the Sides board stake 1, 2 or 3 units; ✱ takes any amount.</div>
     </div></div>`;
 
-  const rows=bankRows();
+  const bq=(bankQuery||'').trim().toLowerCase();
+  const allRows=bankRows();
+  const rows=bq?allRows.filter(x=>{
+    const g=gameById(x.game);
+    const m=x.match||(g?`${g.away} @ ${g.home}`:'');
+    const lg=x.kind==='cfb'?'ncaa college':(x.kind==='prop'?'prop':'nfl');
+    const nicks=(m.match(/[A-Z]{2,4}/g)||[]).map(t=>TEAMS[t]?TEAMS[t][0]:'').join(' ');
+    return `${m} ${nicks} ${x.desc} ${lg} wk${x.wk}`.toLowerCase().includes(bq);
+  }):allRows;
   document.getElementById('bankList').innerHTML=`
-    <div class="cat"><div class="band" style="background:var(--stock-2);cursor:default"><span class="tag">Bet log</span><span class="cnt">${rows.length}</span></div>
+    <div class="cat"><div class="band" style="background:var(--stock-2);cursor:default"><span class="tag">Bet log</span><span class="cnt">${bq?`${rows.length} of ${allRows.length}`:rows.length}</span></div>
     ${rows.length?rows.map(x=>{
       const st=Number(x.stake)||0;
       const ret=x.result==='W'?payout(st,x.odds,x)-st:(x.result==='L'?-st:0);
@@ -1014,21 +1056,99 @@ function renderBank(){
           <button data-bg="W" data-bid="${esc(x.id)}" data-on="${x.result==='W'?1:0}">W</button>
           <button data-bg="L" data-bid="${esc(x.id)}" data-on="${x.result==='L'?1:0}">L</button>
         </div></div>`;
-    }).join(''):`<div class="empty">Nothing logged yet. Add bets from the Sides board, or settle a prop card.</div>`}
+    }).join(''):`<div class="empty">${bq?'No bets match that.':'Nothing logged yet. Add bets from the Sides board, or settle a prop card.'}</div>`}
     </div>`;
+}
+
+/* Bets placed before the Side/Total/ML selector existed have no market
+   recorded. Guess from the wording rather than dropping them — a bet
+   containing over/under is a total, everything else a side. */
+function betMarket(b){
+  if(b.market)return b.market;
+  const d=String(b.desc||'').toLowerCase();
+  if(/\b(over|under|o\d|u\d)\b|^[ou]\s*\d/.test(d))return 'total';
+  if(/\bml\b|moneyline|money line/.test(d))return 'ml';
+  return 'side';
+}
+const BUCKETS=[
+  {id:'nfl-side',  label:'NFL side',      kind:'side', market:'side'},
+  {id:'nfl-total', label:'NFL total',     kind:'side', market:'total'},
+  {id:'nfl-ml',    label:'NFL moneyline', kind:'side', market:'ml'},
+  {id:'cfb-side',  label:'College side',  kind:'cfb',  market:'side'},
+  {id:'cfb-total', label:'College total', kind:'cfb',  market:'total'},
+  {id:'cfb-ml',    label:'College ML',    kind:'cfb',  market:'ml'}
+];
+
+function bucketStats(kind,market){
+  const b=BANKKEY();
+  let w=0,l=0,staked=0,ret=0,open=0;
+  b.bets.forEach(x=>{
+    const k=x.kind==='cfb'?'cfb':(x.kind==='prop'?'prop':'side');
+    if(k!==kind)return;
+    if(betMarket(x)!==market)return;
+    const st=Number(x.stake)||0;
+    if(x.result==='W'){w++;staked+=st;ret+=payout(st,x.odds,x);}
+    else if(x.result==='L'){l++;staked+=st;}
+    else if(x.result==='P'){staked+=st;ret+=st;}
+    else open+=st;
+  });
+  return {w,l,staked,pl:ret-staked,open,n:w+l};
 }
 
 function renderLedger(){
   const body=document.getElementById('ledBody');body.innerHTML='';
+  const row=(label,st,swatch)=>{
+    const tr=document.createElement('tr');
+    const plc=st.pl>0?'var(--win)':(st.pl<0?'var(--loss)':'var(--ink-soft)');
+    tr.innerHTML=`<td>${swatch?`<span class="swatch" style="background:${swatch}"></span>`:''}${label}${st.open?`<br><span style="font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)">${money(st.open)} open</span>`:''}</td>
+      <td class="n">${st.w}</td><td class="n">${st.l}</td>
+      <td class="n">${st.n?Math.round(st.w/st.n*100)+'%':'—'}</td>
+      <td class="n" style="color:${plc}">${st.n?((st.pl>=0?'+':'')+money(st.pl).replace('$','')):'—'}</td>`;
+    return tr;
+  };
+  const head=(txt)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td colspan="5" style="background:var(--ink);color:var(--stock);font-family:Oswald,sans-serif;font-weight:600;font-size:10px;letter-spacing:.14em;text-transform:uppercase;padding:6px 9px">${txt}</td>`;
+    return tr;
+  };
+
+  // ---- straight bets ----
+  body.appendChild(head('Straight bets'));
+  let any=false, T={w:0,l:0,staked:0,pl:0,open:0,n:0};
+  BUCKETS.forEach(bk=>{
+    const st=bucketStats(bk.kind,bk.market);
+    if(!st.n&&!st.open)return;          // hide buckets you've never used
+    any=true;
+    ['w','l','staked','pl','open','n'].forEach(k=>T[k]+=st[k]);
+    body.appendChild(row(bk.label,st));
+  });
+  if(!any){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td colspan="5" style="font-size:11px;font-style:italic;color:var(--ink-soft)">No straight bets logged yet.</td>`;
+    body.appendChild(tr);
+  } else {
+    const tr=row('All straight bets',T); tr.style.background='rgba(22,21,15,.07)';
+    tr.querySelector('td').style.fontWeight='700';
+    body.appendChild(tr);
+  }
+
+  // ---- prop markets (leg-level, from the cards) ----
+  body.appendChild(head('Prop legs'));
   let tw=0,tl=0;
   CATS.forEach(c=>{
     const r=S.ledger[c.id]||{w:0,l:0};tw+=r.w;tl+=r.l;const n=r.w+r.l;
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td><span class="swatch" style="background:${c.color}"></span>${c.name}</td><td class="n">${r.w}</td><td class="n">${r.l}</td><td class="n">${n?Math.round(r.w/n*100)+'%':'—'}</td>`;
+    tr.innerHTML=`<td><span class="swatch" style="background:${c.color}"></span>${c.name}</td><td class="n">${r.w}</td><td class="n">${r.l}</td><td class="n">${n?Math.round(r.w/n*100)+'%':'—'}</td><td class="n">—</td>`;
     body.appendChild(tr);
   });
+  const pst=bucketStats('prop','side');
+  const pall=(()=>{const b=BANKKEY();let staked=0,ret=0;b.bets.forEach(x=>{
+    if(x.kind!=='prop')return;const st=Number(x.stake)||0;
+    if(x.result==='W'){staked+=st;ret+=payout(st,x.odds,x);}else if(x.result==='L'){staked+=st;}});
+    return ret-staked;})();
   const n=tw+tl,tr=document.createElement('tr');tr.style.background='rgba(22,21,15,.07)';
-  tr.innerHTML=`<td style="font-weight:700">All legs</td><td class="n">${tw}</td><td class="n">${tl}</td><td class="n">${n?Math.round(tw/n*100)+'%':'—'}</td>`;
+  const plc=pall>0?'var(--win)':(pall<0?'var(--loss)':'var(--ink-soft)');
+  tr.innerHTML=`<td style="font-weight:700">All legs</td><td class="n">${tw}</td><td class="n">${tl}</td><td class="n">${n?Math.round(tw/n*100)+'%':'—'}</td><td class="n" style="color:${plc}">${(pall>=0?'+':'')+money(pall).replace('$','')}</td>`;
   body.appendChild(tr);
 }
 
@@ -1259,6 +1379,12 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
     }
     return;
   }
+  const mk=e.target.closest('[data-mk]');
+  if(mk){
+    mk.closest('.seg').querySelectorAll('.sgbtn').forEach(b=>
+      b.setAttribute('aria-selected', String(b===mk)));
+    return;
+  }
   const u=e.target.closest('[data-u]'); if(!u)return;
   const id=u.dataset.g, box=u.closest('.add');
   const v=f=>box.querySelector(`[data-gs="${f}"]`);
@@ -1275,7 +1401,10 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   if(!desc){toast('Describe the bet first');return;}
   if(!stake||stake<=0){toast('Needs a stake');return;}
   const g=GM().find(x=>x.id===id)||{};
-  addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',game:id,wk:g.wk||S.week,
+  const sel=box.querySelector('.sgbtn[aria-selected="true"]');
+  addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',
+    market:(sel&&sel.dataset.mk)||'side',
+    game:id,wk:g.wk||S.week,
     match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', gdate:g.date||''});
   v('pick').value='';v('odds').value='';
   if(v('stake'))v('stake').value='';
