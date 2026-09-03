@@ -127,6 +127,17 @@ jobs:
           python export_roster.py "${{ steps.season.outputs.season }}" \
             "data/roster-${{ steps.season.outputs.season }}.json"
 
+      # College schedule for the Saturday board. Schedules and results only —
+      # this source carries no spreads or totals (those need a CollegeFootballData
+      # API key), so lines get typed in at bet time. Not gated on NFL pbp.
+      - name: Build college schedule
+        if: steps.season.outputs.run == 'yes'
+        continue-on-error: true
+        run: |
+          mkdir -p data
+          python export_cfb.py "${{ steps.season.outputs.season }}" \
+            "data/cfb-${{ steps.season.outputs.season }}.json"
+
       - name: Commit if the numbers changed
         if: steps.season.outputs.run == 'yes'
         run: |
