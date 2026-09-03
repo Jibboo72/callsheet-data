@@ -223,6 +223,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
       <div id="impStatus" class="note" style="margin-bottom:0"></div>
       ${''}
       <div id="quota"></div>
+      <div id="bookPick"></div>
     </div>
   </div>
   <input id="impInput" type="file" accept=".json,application/json" hidden>
@@ -511,7 +512,8 @@ function screenPanel(cid){
               if(x.posted){
                 const e=edgeOf(x.mp,x.posted.odds);
                 const col=e.ev>0.05?'var(--win)':(e.ev<-0.05?'var(--loss)':'var(--ink-soft)');
-                return `<br><strong>${fmtAm(x.posted.odds)}</strong> at ${esc(String(sc.line))} · implies ${Math.round(e.imp*100)}% · <span style="color:${col};font-weight:600">${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV</span>`;
+                const bk=x.posted.book?` <span style="color:var(--ink-soft)">${esc(bookName(x.posted.book))}</span>`:'';
+                return `<br><strong>${fmtAm(x.posted.odds)}</strong>${bk} at ${esc(String(sc.line))} · implies ${Math.round(e.imp*100)}% · <span style="color:${col};font-weight:600">${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV</span>${sharpNote(x.mp,x.posted)}`;
               }
               if(x.best){
                 const col=x.best.ev>0.05?'var(--win)':(x.best.ev<-0.05?'var(--loss)':'var(--ink-soft)');
@@ -645,6 +647,19 @@ let bankQuery='';
 /* API quota, read from whatever the last odds pull recorded. The free plan
    is a shared monthly pool across every sport on the account, so this is the
    number that decides whether a college pull is affordable. */
+function renderBooks(){
+  const host=document.getElementById('bookPick'); if(!host)return;
+  const mine=myBooks();
+  host.innerHTML=`<div style="height:12px"></div>
+    <span class="lab">Books you can bet</span>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+      ${Object.entries(BOOKS).map(([id,nm])=>`
+        <button class="sgbtn" data-book="${id}" aria-selected="${mine.includes(id)}"
+          style="border:2px solid var(--ink)">${esc(nm)}</button>`).join('')}
+    </div>
+    <div class="note" style="margin:8px 0 0">The screener quotes the best price among these. Pinnacle is never included — you can't bet it, but its number is shown as a check on the model.</div>`;
+}
+
 function renderQuota(){
   const host=document.getElementById('quota'); if(!host)return;
   const o=S.odds;
@@ -969,6 +984,22 @@ document.getElementById('cats').addEventListener('change',e=>{
    The weekly pull writes prices keyed by SGO player IDs like
    JAXON_SMITHNJIGBA_1_NFL — hyphens and punctuation stripped. Match on
    letters and digits only so "Jaxon Smith-Njigba" lines up. */
+/* Books you can actually bet. Pinnacle is deliberately NOT in this list —
+   you can't get a bet down there, but its number is the closest thing to a
+   true probability available, so it's used as a reality check on the model
+   rather than as a price. */
+const BOOKS={
+  draftkings:'DraftKings', fanduel:'FanDuel', betmgm:'BetMGM',
+  bet365:'bet365', fanatics:'Fanatics', hardrockbet:'Hard Rock',
+  caesars:'Caesars', betonlineag:'BetOnline'
+};
+const SHARP='pinnacle';
+const myBooks=()=>{
+  if(!S.myBooks) S.myBooks=['draftkings','fanduel','betmgm','bet365','fanatics','hardrockbet'];
+  return S.myBooks;
+};
+const bookName=id=>BOOKS[id]||id;
+
 const OMKT={receiving_receptions:'rec', receiving_yards:'yds',
             receiving_longestReception:'lng', receiving_targets:'tgt'};
 const mkey=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -979,6 +1010,7 @@ function sgoKey(pid){
 let _oddsIdx=null;
 function oddsIndex(){
   if(_oddsIdx)return _oddsIdx;
+  myBooks();
   const idx={};
   const games=(S.odds&&S.odds.games)||[];
   games.forEach(g=>{
@@ -989,8 +1021,23 @@ function oddsIndex(){
       const k=sgoKey(pr.player); if(!k)return;
       const odds=parseInt(pr.odds,10); if(isNaN(odds))return;
       idx[k]=idx[k]||{};
+      // best price among YOUR books, plus the sharp number for reference
+      let best=null, sharp=null;
+      const bb=pr.books||{};
+      Object.entries(bb).forEach(([bid,b])=>{
+        const bo=parseInt(b.odds,10); if(isNaN(bo))return;
+        if(bid===SHARP){ sharp={odds:bo,line:b.line!=null?Number(b.line):Number(pr.line)}; return; }
+        if(!myBooks().includes(bid))return;
+        // higher decimal = better price for you
+        if(!best||toDec(bo)>toDec(best.odds)) best={book:bid,odds:bo,line:b.line!=null?Number(b.line):Number(pr.line)};
+      });
       (idx[k][mk]=idx[k][mk]||[]).push({
-        side:pr.side, line:Number(pr.line), odds,
+        side:pr.side, line:Number(pr.line),
+        odds: best?best.odds:odds,          // your best, else the consensus
+        book: best?best.book:null,
+        consensus: odds,
+        sharp,
+        nBooks: Object.keys(bb).length,
         game:`${g.away} @ ${g.home}`, start:g.start
       });
     });
@@ -1021,6 +1068,19 @@ function bestValue(pid,mkt,opts){
     if(!best||e.ev>best.ev) best={...x,side,prob:mp.prob,ev:e.ev,imp:e.imp};
   });
   return best;
+}
+
+/* Pinnacle's number is the best free estimate of true probability there is.
+   When the model disagrees with it by a lot, the model is usually the one
+   that's wrong — so say so instead of letting a big EV number stand alone. */
+function sharpNote(prob,posted){
+  const sh=posted&&posted.sharp;
+  if(!sh)return '';
+  const si=implied(sh.odds); if(si==null)return '';
+  const gap=prob-si;
+  const col=Math.abs(gap)>0.10?'var(--loss)':'var(--ink-soft)';
+  const warn=Math.abs(gap)>0.10?' — model is well off the sharp number':'';
+  return `<br><span style="color:${col}">Pinnacle ${fmtAm(sh.odds)} = ${Math.round(si*100)}%${warn}</span>`;
 }
 
 /* ---------------- probability model ----------------
@@ -2069,7 +2129,7 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;_oddsIdx=null;renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;_oddsIdx=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
@@ -2180,6 +2240,14 @@ document.querySelector('.led thead').addEventListener('click',e=>{
   document.querySelectorAll('.led th').forEach(h=>h.removeAttribute('data-on'));
   th.setAttribute('data-on','1');
   renderLedger();
+});
+
+document.getElementById('bookPick').addEventListener('click',e=>{
+  const b=e.target.closest('[data-book]'); if(!b)return;
+  const id=b.dataset.book, m=myBooks();
+  const i=m.indexOf(id);
+  if(i>=0)m.splice(i,1); else m.push(id);
+  save(); _oddsIdx=null; renderBooks(); renderCards();
 });
 
 document.getElementById('setBudget').addEventListener('change',e=>{S.budget=Number(e.target.value)||0;save();renderTotals();});

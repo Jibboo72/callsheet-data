@@ -123,9 +123,12 @@ def pull(season, key, days=8):
         raise SystemExit(f"events call failed: {e}")
 
     if events:
-        print("--- raw shape of first event (for fixing field names) ---",
-              file=sys.stderr)
-        print(json.dumps(events[0], indent=1)[:1500], file=sys.stderr)
+        odds0 = (events[0].get("odds") or {})
+        k0 = next(iter(odds0), None)
+        if k0:
+            print("--- shape of one odds entry (for fixing field names) ---",
+                  file=sys.stderr)
+            print(json.dumps(odds0[k0], indent=1)[:1800], file=sys.stderr)
 
     out = []
     for ev in events:
@@ -135,6 +138,24 @@ def pull(season, key, days=8):
             name = str(o.get("statID") or o.get("marketName") or oid).lower()
             if not any(w in name for w in WANT):
                 continue
+            # per-book prices. The consensus number alone can't be shopped
+            # and can't be sanity-checked against a sharp book, so keep them
+            # all — it costs nothing extra, billing is per event.
+            books = {}
+            bb = o.get("byBookmaker") or {}
+            if isinstance(bb, dict):
+                for bid, b in bb.items():
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("available") is False:
+                        continue
+                    price = b.get("odds") or b.get("price")
+                    if price is None:
+                        continue
+                    books[bid] = {
+                        "odds": price,
+                        "line": b.get("overUnder") or b.get("bookOverUnder"),
+                    }
             props.append({
                 "id": oid,
                 "market": o.get("statID") or o.get("marketName"),
@@ -142,6 +163,8 @@ def pull(season, key, days=8):
                 "side": o.get("sideID"),
                 "line": o.get("bookOverUnder") or o.get("fairOverUnder"),
                 "odds": o.get("bookOdds") or o.get("fairOdds"),
+                "fair": o.get("fairOdds"),
+                "books": books or None,
             })
         if props:
             out.append({
