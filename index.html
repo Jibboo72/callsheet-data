@@ -756,7 +756,18 @@ document.getElementById('cats').addEventListener('change',e=>{
 const BANKKEY=()=>{S.bank=S.bank||{start:500,unit:14,bets:[]};S.bank.bets=S.bank.bets||[];if(S.bank.unit==null)S.bank.unit=14;return S.bank;};
 const LG=()=>S.league||'nfl';
 const SRC=()=>LG()==='cfb'?S.cfb:S.games;
-const GM=()=>{const d=SRC();return d&&Array.isArray(d.games)?d.games:[];};
+/* Games you added by hand, kept separate from the imported feed so a
+   re-import never wipes them. Merged in at read time. */
+function myGames(){
+  S.mine=S.mine||{};
+  S.mine[LG()]=S.mine[LG()]||[];
+  return S.mine[LG()];
+}
+const GM=()=>{
+  const d=SRC();
+  const imported=(d&&Array.isArray(d.games))?d.games:[];
+  return imported.concat(myGames());
+};
 const U=()=>Number((S.bank&&S.bank.unit)||14);
 /* stakes read in units, with the dollar figure alongside */
 function unitStr(v){
@@ -820,6 +831,29 @@ function propSettlement(cid){
   return {bets:bets.length,won,staked,ret,pl:ret-staked};
 }
 
+/* Any game the feed doesn't carry — FCS, a bowl, a Tuesday MAC game.
+   Added by hand, stored per-league, survives re-imports. */
+function addGameForm(){
+  const open=!!S.addOpen;
+  if(!open)return `<button class="btn ghost" data-addgame="open" style="margin-bottom:16px">+ Add a game</button>`;
+  return `<div class="pblock" style="margin-bottom:16px">
+    <div class="pbh">Add a game · Week ${S.week}</div>
+    <div class="pbody">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div><span class="lab">Away</span><input data-ag="away" placeholder="Montana"></div>
+        <div><span class="lab">Home</span><input data-ag="home" placeholder="North Dakota St"></div>
+        <div><span class="lab">Spread (home)</span><input data-ag="spread" placeholder="-7.5" inputmode="text"></div>
+        <div><span class="lab">Total</span><input data-ag="total" placeholder="48.5" inputmode="decimal"></div>
+        <div style="grid-column:1/-1"><span class="lab">Date</span><input data-ag="date" type="date"></div>
+      </div>
+      <div class="note" style="margin:8px 0">Spread is from the home team's side: <strong>-7.5</strong> means the home team is favored by 7.5. Leave blank if you don't have a number.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <button class="btn" data-addgame="save">Add to Week ${S.week}</button>
+        <button class="btn ghost" data-addgame="cancel">Cancel</button>
+      </div>
+    </div></div>`;
+}
+
 function renderSides(){
   const host=document.getElementById('sidesBoard');
   const cfb=LG()==='cfb';
@@ -829,7 +863,7 @@ function renderSides(){
     </nav>`;
   const all=GM();
   if(!all.length){
-    host.innerHTML=toggle+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
+    host.innerHTML=toggle+addGameForm()+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
       <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Import <code>${cfb?'cfb':'games'}-2026.json</code> on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
     return;
   }
@@ -841,8 +875,8 @@ function renderSides(){
     return String(a.date||'').localeCompare(String(b.date||''))
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
-  const cal=(SRC().calibration)||{};
-  let html=toggle+`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
+  const cal=(SRC()&&SRC().calibration)||{};
+  let html=toggle+addGameForm()+`<div class="pblock"><div class="pbh">Week ${wk} · ${games.length} games</div><div class="pbody">
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
@@ -874,7 +908,7 @@ function renderSides(){
     const meta = cfb
       ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':''].filter(Boolean).join(' · ')
       : String(g.date||'').slice(5)+(g.div?' · div':'');
-    const statBlock = cfb
+    const statBlock = (cfb && !(g.mine && (g.spread!=null || g.total!=null)))
       ? `<div class="note" style="margin:0 0 4px">${esc(g.aconf||'')}${g.aconf&&g.hconf?' at ':''}${esc(g.hconf||'')}</div>`
       : `<div class="stats">
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
@@ -882,9 +916,10 @@ function renderSides(){
           <div class="stat"><div class="n" style="color:${eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
         </div>`;
     html+=`<div class="cat">
-      <div class="band" style="background:var(--stock-2);cursor:default">
+      <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${esc(g.away)} @ ${esc(g.home)}</span>
-        <span class="cnt">${esc(meta)}</span>
+        <span class="cnt">${esc(meta)}${g.mine?' · added':''}</span>
+        ${g.mine?`<button class="x" data-rmgame="${esc(g.id)}" aria-label="Remove game">×</button>`:''}
       </div>
       <div class="pbody" style="padding:9px 10px">
         ${statBlock}
@@ -1166,6 +1201,37 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 document.getElementById('sidesBoard').addEventListener('click',e=>{
   const lg=e.target.closest('[data-lg]');
   if(lg){ S.league=lg.dataset.lg; save(); renderSides(); return; }
+
+  const ag=e.target.closest('[data-addgame]');
+  if(ag){
+    const act=ag.dataset.addgame;
+    if(act==='open'){ S.addOpen=true; save(); renderSides(); return; }
+    if(act==='cancel'){ S.addOpen=false; save(); renderSides(); return; }
+    const box=ag.closest('.pbody'), v=f=>box.querySelector(`[data-ag="${f}"]`).value.trim();
+    const away=v('away'), home=v('home');
+    if(!away||!home){ toast('Needs both teams'); return; }
+    const sp=v('spread'), tot=v('total');
+    myGames().push({
+      id:'my'+Date.now(), wk:S.week, mine:true,
+      away, home,
+      date:v('date')||'',
+      spread: sp===''?null:Number(sp),
+      total: tot===''?null:Number(tot),
+      proj:null
+    });
+    S.addOpen=false; save(); renderSides();
+    toast(away+' @ '+home+' added');
+    return;
+  }
+
+  const rm=e.target.closest('[data-rmgame]');
+  if(rm){
+    const list=myGames(), i=list.findIndex(g=>g.id===rm.dataset.rmgame);
+    if(i>=0&&confirm('Remove '+list[i].away+' @ '+list[i].home+'? Bets already logged stay in the bankroll.')){
+      list.splice(i,1); save(); renderSides();
+    }
+    return;
+  }
   const u=e.target.closest('[data-u]'); if(!u)return;
   const id=u.dataset.g, box=u.closest('.add');
   const v=f=>box.querySelector(`[data-gs="${f}"]`);
