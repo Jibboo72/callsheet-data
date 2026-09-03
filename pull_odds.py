@@ -37,20 +37,55 @@ WANT = ("receptions", "receiving_yards", "longest_reception",
         "receiving_longest", "targets")
 
 
-def call(path, key, params=None):
+# Cloudflare sits in front of this API and blocks the default
+# "Python-urllib/3.x" agent outright — that is what a 403 with error code
+# 1010 means. It is not an authentication failure. A normal browser-ish
+# User-Agent is required.
+HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/124.0.0.0 Safari/537.36"),
+    "Accept": "application/json",
+}
+
+
+def call(path, key, params=None, query_auth=False):
     url = f"{BASE}{path}"
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"X-Api-Key": key})
+    p = dict(params or {})
+    h = dict(HEADERS)
+    # docs allow either the x-api-key header or an apiKey query param
+    if query_auth:
+        p["apiKey"] = key
+    else:
+        h["x-api-key"] = key
+    if p:
+        url += "?" + urllib.parse.urlencode(p)
+    req = urllib.request.Request(url, headers=h)
     with urllib.request.urlopen(req, timeout=45) as r:
         return json.loads(r.read().decode())
+
+
+def call_either(path, key, params=None):
+    """Header auth first, query param as fallback."""
+    try:
+        return call(path, key, params)
+    except urllib.error.HTTPError as e:
+        if e.code not in (401, 403):
+            raise
+        first = f"HTTP {e.code}: {e.read().decode()[:200]}"
+        try:
+            return call(path, key, params, query_auth=True)
+        except urllib.error.HTTPError as e2:
+            raise RuntimeError(
+                f"both auth styles rejected.\n  header: {first}\n"
+                f"  query : HTTP {e2.code}: {e2.read().decode()[:200]}")
 
 
 def usage(key):
     """Objects used and remaining, straight from the account endpoint."""
     for path in ("/account/usage", "/account"):
         try:
-            d = call(path, key)
+            d = call_either(path, key)
             return d.get("data", d)
         except Exception as e:
             print(f"  usage via {path}: {e}", file=sys.stderr)
@@ -60,12 +95,11 @@ def usage(key):
 def pull(season, key):
     events = []
     try:
-        d = call("/events", key, {"leagueID": "NFL", "season": str(season),
-                                  "type": "match", "limit": 100})
+        d = call_either("/events", key, {"leagueID": "NFL", "season": str(season),
+                                         "type": "match", "limit": 100})
         events = d.get("data", d if isinstance(d, list) else [])
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()[:300]
-        raise SystemExit(f"events call failed: HTTP {e.code} {body}")
+    except Exception as e:
+        raise SystemExit(f"events call failed: {e}")
 
     if events:
         print("--- raw shape of first event (for fixing field names) ---",
