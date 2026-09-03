@@ -116,6 +116,17 @@ jobs:
           python export_games.py "${{ steps.season.outputs.season }}" \
             "data/games-${{ steps.season.outputs.season }}.json"
 
+      # Rosters are published months before kickoff, so this is NOT gated on
+      # play-by-play. It keeps player teams current through free agency —
+      # after 2025, 48 of 251 receivers had changed teams, and a wrong team
+      # means a wrong opponent and a wrong pass-defense read.
+      - name: Build rosters
+        if: steps.season.outputs.run == 'yes'
+        run: |
+          mkdir -p data
+          python export_roster.py "${{ steps.season.outputs.season }}" \
+            "data/roster-${{ steps.season.outputs.season }}.json"
+
       - name: Commit if the numbers changed
         if: steps.season.outputs.run == 'yes'
         run: |
