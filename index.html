@@ -240,6 +240,10 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
     </tr></thead>
     <tbody id="ledBody"></tbody>
   </table>
+  <div class="seg" style="grid-template-columns:1fr 1fr;margin-top:14px">
+    <button class="sgbtn" data-lp="0" aria-selected="true">Real money</button>
+    <button class="sgbtn" data-lp="1" aria-selected="false">Paper</button>
+  </div>
   <div id="calBlock"></div>
   <p class="note">Every graded leg lands here. After six or seven weeks you'll see which market is carrying the sheet and which one only looked clever.</p>
   <div class="hr"></div>
@@ -1626,8 +1630,51 @@ function renderBank(){
         outcome=`<div class="what">Final ${esc(g.away)} ${g.as} – ${esc(g.home)} ${g.hs}${tot}</div>`;
       }
       const when=x.gdate||(g&&g.date)||'';
+
+      // tapped open for editing — miscategorised bets otherwise sit wrong
+      // in the ledger forever
+      if(S.editBet===x.id){
+        const isPar=x.kind==='parlay';
+        const lg=isPar?(x.league||'nfl'):(x.kind==='cfb'?'cfb':'nfl');
+        const mk=betMarket(x);
+        return `<div class="row" style="display:block;padding:10px;background:rgba(22,21,15,.05)">
+          <div class="lab">Editing</div>
+          <input data-eb="desc" value="${esc(x.desc||'')}" placeholder="Description">
+          <div style="height:6px"></div>
+          <div class="lab">League</div>
+          <div class="seg" style="grid-template-columns:1fr 1fr${isPar?' 1fr':''}">
+            <button class="sgbtn" data-eblg="nfl" aria-selected="${lg==='nfl'}">NFL</button>
+            <button class="sgbtn" data-eblg="cfb" aria-selected="${lg==='cfb'}">College</button>
+            ${isPar?`<button class="sgbtn" data-eblg="mixed" aria-selected="${lg==='mixed'}">Mixed</button>`:''}
+          </div>
+          ${isPar?'':`<div style="height:6px"></div>
+          <div class="lab">Market</div>
+          <div class="seg" style="grid-template-columns:1fr 1fr 1fr">
+            <button class="sgbtn" data-ebmk="side" aria-selected="${mk==='side'}">Side</button>
+            <button class="sgbtn" data-ebmk="total" aria-selected="${mk==='total'}">Total</button>
+            <button class="sgbtn" data-ebmk="ml" aria-selected="${mk==='ml'}">ML</button>
+          </div>`}
+          <div style="height:6px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+            <div><span class="lab">Odds</span><input data-eb="odds" value="${esc(String(x.odds))}" inputmode="text"></div>
+            <div><span class="lab">Stake</span><input data-eb="stake" value="${esc(String(x.stake))}" inputmode="decimal"></div>
+            <div><span class="lab">Week</span><input data-eb="wk" value="${esc(String(x.wk))}" inputmode="numeric"></div>
+          </div>
+          <div style="height:6px"></div>
+          <div class="seg" style="grid-template-columns:1fr 1fr">
+            <button class="sgbtn" data-ebpaper="0" aria-selected="${!x.paper}">Real</button>
+            <button class="sgbtn" data-ebpaper="1" aria-selected="${!!x.paper}">Paper</button>
+          </div>
+          <div style="height:8px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button class="btn" data-ebsave="${esc(x.id)}">Save</button>
+            <button class="btn ghost" data-ebclose="1">Close</button>
+          </div>
+        </div>`;
+      }
+
       return `<div class="row">
-        <div class="pick" style="cursor:default">
+        <div class="pick" data-ebopen="${esc(x.id)}">
           ${match?`<div class="who">${x.paper?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(match)}</div>`:''}
           <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${(!match&&x.paper)?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(x.desc)}</div>
           ${outcome}
@@ -1669,6 +1716,8 @@ function bucketStats(kind,market){
   const b=BANKKEY();
   let w=0,l=0,staked=0,ret=0,open=0;
   b.bets.forEach(x=>{
+    // match the bankroll: real and paper are never mixed in one figure
+    if(!!x.paper !== !!S.ledgerPaper)return;
     const k=x.kind==='parlay'?'parlay'
            :(x.kind==='cfb'?'cfb':(x.kind==='prop'?'prop':'side'));
     if(k!==kind)return;
@@ -2107,6 +2156,49 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
 
 /* bankroll */
 document.getElementById('bankList').addEventListener('click',e=>{
+  const open=e.target.closest('[data-ebopen]');
+  if(open){ S.editBet = S.editBet===open.dataset.ebopen ? null : open.dataset.ebopen;
+    save(); renderBank(); return; }
+  const close=e.target.closest('[data-ebclose]');
+  if(close){ S.editBet=null; save(); renderBank(); return; }
+
+  // league / market / paper are set on the row itself, then saved together
+  const elg=e.target.closest('[data-eblg]');
+  if(elg){ elg.closest('.seg').querySelectorAll('.sgbtn').forEach(b=>
+    b.setAttribute('aria-selected',String(b===elg))); return; }
+  const emk=e.target.closest('[data-ebmk]');
+  if(emk){ emk.closest('.seg').querySelectorAll('.sgbtn').forEach(b=>
+    b.setAttribute('aria-selected',String(b===emk))); return; }
+  const epp=e.target.closest('[data-ebpaper]');
+  if(epp){ epp.closest('.seg').querySelectorAll('.sgbtn').forEach(b=>
+    b.setAttribute('aria-selected',String(b===epp))); return; }
+
+  const sv=e.target.closest('[data-ebsave]');
+  if(sv){
+    const b=BANKKEY(), x=b.bets.find(y=>y.id===sv.dataset.ebsave);
+    if(!x){S.editBet=null;renderBank();return;}
+    const box=sv.closest('.row');
+    const v=f=>{const el=box.querySelector(`[data-eb="${f}"]`);return el?el.value.trim():null;};
+    const sel=a=>{const el=box.querySelector(`[data-${a}][aria-selected="true"]`);
+      return el?el.dataset[a.replace('data-','')]:null;};
+    const desc=v('desc'); if(desc)x.desc=desc;
+    const od=parseInt(v('odds'),10); if(!isNaN(od))x.odds=od;
+    const stk=Number(v('stake')); if(stk>0)x.stake=stk;
+    const wk=parseInt(v('wk'),10); if(!isNaN(wk))x.wk=wk;
+
+    const lg=(box.querySelector('[data-eblg][aria-selected="true"]')||{}).dataset;
+    const mk=(box.querySelector('[data-ebmk][aria-selected="true"]')||{}).dataset;
+    const pp=(box.querySelector('[data-ebpaper][aria-selected="true"]')||{}).dataset;
+    if(lg&&lg.eblg){
+      if(x.kind==='parlay') x.league=lg.eblg;
+      else if(x.kind!=='prop') x.kind = lg.eblg==='cfb' ? 'cfb' : 'side';
+    }
+    if(mk&&mk.ebmk) x.market=mk.ebmk;
+    if(pp&&pp.ebpaper) x.paper = pp.ebpaper==='1';
+    S.editBet=null; save(); renderBank(); renderLedger(); toast('Bet updated');
+    return;
+  }
+
   const g=e.target.closest('[data-bg]');
   if(g){
     const b=BANKKEY(), x=b.bets.find(y=>y.id===g.dataset.bid);
@@ -2231,6 +2323,13 @@ document.getElementById('player').addEventListener('change',e=>{
   const th=e.target.closest('#pThresh');
   if(th){P(openPid).thresh=Math.max(1,Number(th.value)||20);save();renderPlayer();}
 });
+
+document.querySelectorAll('[data-lp]').forEach(b=>b.addEventListener('click',()=>{
+  S.ledgerPaper = b.dataset.lp==='1';
+  document.querySelectorAll('[data-lp]').forEach(o=>
+    o.setAttribute('aria-selected',String(o===b)));
+  save(); renderLedger();
+}));
 
 document.querySelector('.led thead').addEventListener('click',e=>{
   const th=e.target.closest('[data-sort]'); if(!th)return;
