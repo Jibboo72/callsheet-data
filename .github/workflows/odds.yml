@@ -14,6 +14,10 @@ on:
         description: "Season"
         required: false
         default: "2026"
+      leagues:
+        description: "NFL, or NFL,NCAAF (college adds ~55 objects/week)"
+        required: false
+        default: "NFL"
 
 permissions:
   contents: write
@@ -30,6 +34,7 @@ jobs:
       - name: Pull odds
         env:
           SGO_KEY: ${{ secrets.SGO_KEY }}
+          SGO_LEAGUES: ${{ github.event.inputs.leagues || 'NFL,NCAAF' }}
         run: |
           if [ -z "$SGO_KEY" ]; then
             echo "SGO_KEY secret not set — add it under Settings > Secrets"
