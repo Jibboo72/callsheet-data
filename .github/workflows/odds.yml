@@ -15,7 +15,7 @@ on:
         required: false
         default: "2026"
       leagues:
-        description: "NFL, or NFL,NCAAF (college adds ~55 objects/week)"
+        description: "NFL only. College props are entered by hand — a college pull cost ~200 objects for markets we do not use."
         required: false
         default: "NFL"
 
@@ -34,7 +34,7 @@ jobs:
       - name: Pull odds
         env:
           SGO_KEY: ${{ secrets.SGO_KEY }}
-          SGO_LEAGUES: ${{ github.event.inputs.leagues || 'NFL,NCAAF' }}
+          SGO_LEAGUES: ${{ github.event.inputs.leagues || 'NFL' }}
         run: |
           if [ -z "$SGO_KEY" ]; then
             echo "SGO_KEY secret not set — add it under Settings > Secrets"
