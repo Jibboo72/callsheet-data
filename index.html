@@ -306,6 +306,12 @@ const CATS=[
   {id:'qb',name:'Longest Completion',color:'var(--hl-qb)',
    blurb:'Team-level, aggregates every receiver, thinnest market on the board. Limits are low, so singles usually fit better.',
    def:{mode:'single',size:2,stake:2}},
+  {id:'td',name:'Anytime TD',color:'var(--hl-qb)',
+   blurb:'Anytime touchdown scorers. Priced off your books, with the sharp number alongside. NFL names match your roster so the model can weigh in.',
+   def:{mode:'single',size:2,stake:1}},
+  {id:'ctd',name:'College TD',color:'var(--hl-flyer)',
+   blurb:'College anytime touchdown. No player logs exist for college, so there is no model here — type the name freely and the app just records the bet and the price.',
+   def:{mode:'single',size:2,stake:1}},
   {id:'flyer',name:'Injury Flyer',color:'var(--hl-flyer)',
    blurb:'A backup slot or committee back absorbing targets after the Wednesday report, before the line catches up.',
    def:{mode:'single',size:2,stake:1}}
@@ -413,6 +419,7 @@ function paceOf(m){
 }
 /* one line for a card row: "@ PHI · pass D #4 · slow" */
 function muLine(pid){
+  if(!pid)return '';
   const m=MU(pid); if(!m)return '';
   const pc=paceOf(m);
   const where=m.home?'vs ':'@ ';
@@ -585,7 +592,7 @@ function renderCards(){
         <div class="blurb">${c.blurb}</div>
         ${rows}
         <div class="add">
-          <input class="full" data-f="who" placeholder="Player" style="grid-column:1/-1" list="rosterNames">
+          <input class="full" data-f="who" placeholder="${c.id==='ctd'?'Player — any name, no roster lookup':'Player'}" style="grid-column:1/-1"${c.id==='ctd'?'':' list="rosterNames"'}>
           <select data-f="mkt" style="grid-column:1/-1">${MKT.map(m=>`<option value="${m.v}">${m.label}</option>`).join('')}</select>
           <select data-f="side">${SIDES.map(s=>`<option value="${s.v}">${s.label}</option>`).join('')}</select>
           <input data-f="line" placeholder="Line" inputmode="decimal">
@@ -822,6 +829,7 @@ document.getElementById('bankSearch').addEventListener('input',e=>{
    receptions and longest-reception props. So the history stays visible
    and stays labelled. */
 function priorTeam(pid){
+  if(!pid)return null;
   const p=P(pid);
   if(!p||!p.logTeam||!p.team||p.logTeam===p.team)return null;
   if(!p.log||!p.log.length)return null;
@@ -837,7 +845,8 @@ const MKT=[
   {v:'rec', label:'Receptions',        short:'rec',  step:0.5},
   {v:'yds', label:'Receiving yards',   short:'yds',  step:0.5},
   {v:'lng', label:'Longest reception', short:'long', step:0.5},
-  {v:'tgt', label:'Targets',           short:'tgt',  step:0.5}
+  {v:'tgt', label:'Targets',           short:'tgt',  step:0.5},
+  {v:'td',  label:'Anytime TD',         short:'td',   step:0.5}
 ];
 const SIDES=[
   {v:'atleast', label:'at least (N+)'},
@@ -882,7 +891,7 @@ function propHit(pid,mkt,side,line){
 function implied(odds){const d=toDec(odds);return d?1/d:null;}
 
 function hitLine(p){
-  if(!p.mkt||p.line==null)return '';
+  if(!p.pid||!p.mkt||p.line==null)return '';
   const h=propHit(p.pid,p.mkt,p.side,p.line);
   if(!h)return '';
   const pct=Math.round(h.rate*100);
@@ -1005,7 +1014,9 @@ const myBooks=()=>{
 const bookName=id=>BOOKS[id]||id;
 
 const OMKT={receiving_receptions:'rec', receiving_yards:'yds',
-            receiving_longestReception:'lng', receiving_targets:'tgt'};
+            receiving_longestReception:'lng', receiving_targets:'tgt',
+            touchdowns:'td', anytime_touchdown:'td',
+            'rushing+receiving_touchdowns':'td'};
 const mkey=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 function sgoKey(pid){
   // TRAVIS_KELCE_1_NFL -> traviskelce
@@ -1151,6 +1162,13 @@ function evTag(prob,odds){
    Deliberately ignores price: this answers "who is most likely to hit",
    not "who is worth the number". You compare to the odds yourself. */
 const SCREEN={
+  td:{
+    label:'anytime TD',
+    ok:st=>st.recpg>=2,
+    rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
+    useDef:true,
+    note:'Touchdown props from your books. There is no TD column in the game logs, so the model can only work from posted prices — treat the probability column as the market\'s, not ours.'
+  },
   slot:{
     label:'3+ receptions',
     // slot profile: catches most of what's thrown, short depth, real volume
@@ -1539,10 +1557,11 @@ function renderSides(){
         <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
           <input data-gs="pick" data-g="${esc(g.id)}" placeholder="${cfb?`Bet — e.g. ${esc(g.home)} -7 or over 52.5`:`Bet — e.g. ${esc(g.home)} -3.5`}" style="grid-column:1/-1">
           <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text" style="grid-column:1/-1">
-          <div class="seg" style="grid-column:1/-1">
+          <div class="seg" style="grid-column:1/-1;grid-template-columns:repeat(4,1fr)">
             <button class="sgbtn" data-mk="side" data-g="${esc(g.id)}" aria-selected="true">Side</button>
             <button class="sgbtn" data-mk="total" data-g="${esc(g.id)}" aria-selected="false">Total</button>
             <button class="sgbtn" data-mk="ml" data-g="${esc(g.id)}" aria-selected="false">ML</button>
+            <button class="sgbtn" data-mk="td" data-g="${esc(g.id)}" aria-selected="false">TD</button>
           </div>
           <div class="units" style="grid-column:1/-1">
             <button class="ubtn" data-u="1" data-g="${esc(g.id)}">1 unit<span>${money(U())}</span></button>
@@ -1698,6 +1717,7 @@ function betMarket(b){
   const d=String(b.desc||'').toLowerCase();
   if(/\b(over|under|o\d|u\d)\b|^[ou]\s*\d/.test(d))return 'total';
   if(/\bml\b|moneyline|money line/.test(d))return 'ml';
+  if(/\btd\b|touchdown|anytime/.test(d))return 'td';
   return 'side';
 }
 const BUCKETS=[
@@ -1709,7 +1729,9 @@ const BUCKETS=[
   {id:'cfb-ml',    label:'College ML',      kind:'cfb',  market:'ml'},
   {id:'par-nfl',   label:'NFL parlay',      kind:'parlay', market:'nfl'},
   {id:'par-cfb',   label:'College parlay',  kind:'parlay', market:'cfb'},
-  {id:'par-mix',   label:'Mixed parlay',    kind:'parlay', market:'mixed'}
+  {id:'par-mix',   label:'Mixed parlay',    kind:'parlay', market:'mixed'},
+  {id:'nfl-td',    label:'NFL anytime TD',  kind:'side', market:'td'},
+  {id:'cfb-td',    label:'College TD',      kind:'cfb',  market:'td'}
 ];
 
 function bucketStats(kind,market){
@@ -2259,8 +2281,12 @@ document.getElementById('main').addEventListener('click',e=>{
     const who=g('who').value.trim(), mkt=g('mkt').value, side=g('side').value;
     const line=g('line').value.trim(), odds=parseInt(g('odds').value,10), book=g('book').value.trim();
     if(!who||line===''||!odds){toast('Needs a player, a line, and a price');return;}
-    const pid=slug(who); ensurePlayer(pid,who);
-    card(cid).picks.push({who,what:propLabel(mkt,side,line),mkt,side,line:Number(line),odds,book,pid});
+    const pid=slug(who);
+    // college has no player logs, so don't pollute the NFL roster with names
+    // we can never model
+    if(cid!=='ctd') ensurePlayer(pid,who);
+    card(cid).picks.push({who,what:propLabel(mkt,side,line),mkt,side,line:Number(line),odds,book,
+      pid: cid==='ctd'?null:pid, cfb: cid==='ctd'||undefined});
     ['line','odds','book'].forEach(f=>g(f).value='');
     save();renderCards();renderRoster();return;
   }

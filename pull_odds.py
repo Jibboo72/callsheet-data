@@ -34,7 +34,12 @@ BASE = "https://api.sportsgameodds.com/v2"
 # Reception and longest-reception markets are the thin ones we care about;
 # receiving yards is included because it's the liquid market next door.
 WANT = ("receptions", "receiving_yards", "longest_reception",
-        "receiving_longest", "targets")
+        "receiving_longest", "targets", "touchdown")
+
+# Which leagues to pull. College is ~55 events a week against NFL's ~16, so
+# it is off unless asked for — the monthly object pool is shared with
+# whatever else the key is doing.
+LEAGUES = {"NFL": "NFL", "NCAAF": "NCAAF"}
 
 
 # Cloudflare sits in front of this API and blocks the default
@@ -102,14 +107,14 @@ def usage(key):
     return None
 
 
-def pull(season, key, days=8):
+def pull(season, key, days=8, league="NFL"):
     events = []
     try:
         # `season` alone came back with 2024 games, so bound it by date as
         # well and filter client-side. Also keeps the object spend down:
         # one NFL week is ~16 events, not 100.
         now = datetime.now(timezone.utc)
-        params = {"leagueID": "NFL", "type": "match", "limit": 40,
+        params = {"leagueID": league, "type": "match", "limit": 60,
                   "startsAfter": now.strftime("%Y-%m-%d"),
                   "startsBefore": (now + timedelta(days=days)).strftime("%Y-%m-%d")}
         d = call_either("/events", key, params)
@@ -185,8 +190,17 @@ if __name__ == "__main__":
     season = sys.argv[1] if len(sys.argv) > 1 else "2026"
     out = sys.argv[2] if len(sys.argv) > 2 else f"odds-{season}.json"
 
+    leagues = [x.strip().upper() for x in
+               os.environ.get("SGO_LEAGUES", "NFL").split(",") if x.strip()]
     before = usage(key)
-    games, n_events = pull(season, key)
+    games, n_events = [], 0
+    for lg in leagues:
+        print(f"pulling {lg}...", file=sys.stderr)
+        g, n = pull(season, key, league=lg)
+        for x in g:
+            x["league"] = lg
+        games += g
+        n_events += n
     after = usage(key)
 
     doc = {
@@ -194,6 +208,7 @@ if __name__ == "__main__":
         "kind": "odds",
         "pulled": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "events_pulled": n_events,
+        "leagues": leagues,
         "games": games,
         "usage": after or before,
     }
