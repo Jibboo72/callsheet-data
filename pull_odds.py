@@ -107,6 +107,17 @@ def usage(key):
     return None
 
 
+def team_name(ev, side):
+    """Field path differs by league, so try the likely ones in order."""
+    t = (ev.get("teams") or {}).get(side) or {}
+    n = t.get("names") or {}
+    for v in (n.get("short"), n.get("medium"), n.get("abbr"), n.get("long"),
+              t.get("teamID"), t.get("name")):
+        if v:
+            return str(v)
+    return None
+
+
 def pull(season, key, days=8, league="NFL"):
     events = []
     try:
@@ -161,12 +172,19 @@ def pull(season, key, days=8, league="NFL"):
                         "odds": price,
                         "line": b.get("overUnder") or b.get("bookOverUnder"),
                     }
+            # Anytime/first TD come back as yes/no with no line rather than
+            # over/under. They were being dropped on the floor.
+            side = o.get("sideID")
+            line = o.get("bookOverUnder") or o.get("fairOverUnder")
+            if side in ("yes", "no") and line is None:
+                line = 0.5
+                side = "over" if side == "yes" else "under"
             props.append({
                 "id": oid,
                 "market": o.get("statID") or o.get("marketName"),
                 "player": o.get("playerID") or o.get("participantID"),
-                "side": o.get("sideID"),
-                "line": o.get("bookOverUnder") or o.get("fairOverUnder"),
+                "side": side,
+                "line": line,
                 "odds": o.get("bookOdds") or o.get("fairOdds"),
                 "fair": o.get("fairOdds"),
                 "books": books or None,
@@ -175,8 +193,8 @@ def pull(season, key, days=8, league="NFL"):
             out.append({
                 "id": ev.get("eventID"),
                 "wk": (ev.get("info") or {}).get("week"),
-                "home": (ev.get("teams") or {}).get("home", {}).get("names", {}).get("short"),
-                "away": (ev.get("teams") or {}).get("away", {}).get("names", {}).get("short"),
+                "home": team_name(ev, "home"),
+                "away": team_name(ev, "away"),
                 "start": (ev.get("status") or {}).get("startsAt"),
                 "props": props,
             })
