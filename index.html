@@ -569,11 +569,25 @@ function renderCards(){
           ${muLine(p.pid)}
         </div>
         <div class="meta"><div class="odds">${fmtAm(p.odds)}</div><div class="book">${esc(p.book||'')}</div></div>
+        ${cd.mode==='single'?`<button class="x" data-place="${c.id}:${i}"
+          aria-label="Place bet on ${esc(p.who)}"
+          style="font-family:Oswald,sans-serif;font-size:10px;font-weight:700;letter-spacing:.08em;padding:0 6px;color:${p.betId?'var(--win)':'var(--ink)'}">${p.betId?'✓':'BET'}</button>`:''}
         <button class="x" data-del="${c.id}:${i}" aria-label="Remove ${esc(p.who)}">×</button>
         <div class="grade">
           <button data-g="W" data-k="${c.id}:${i}" data-on="${p.grade==='W'?1:0}">W</button>
           <button data-g="L" data-k="${c.id}:${i}" data-on="${p.grade==='L'?1:0}">L</button>
-        </div></div>`;
+        </div></div>
+      ${S.placing===`${c.id}:${i}`?`<div class="pbody" style="padding:8px 10px;background:rgba(22,21,15,.06);border-bottom:1px dashed rgba(22,21,15,.3)">
+        <div class="lab">Stake — ${esc(p.who)} at ${fmtAm(p.odds)}</div>
+        <div class="units">
+          <button class="ubtn" data-placeu="1" data-pc="${c.id}:${i}">1 unit<span>${money(U())}</span></button>
+          <button class="ubtn" data-placeu="2" data-pc="${c.id}:${i}">2 units<span>${money(2*U())}</span></button>
+          <button class="ubtn" data-placeu="3" data-pc="${c.id}:${i}">3 units<span>${money(3*U())}</span></button>
+          <button class="ubtn" data-placeu="c" data-pc="${c.id}:${i}">✱<span>use box</span></button>
+        </div>
+        <div style="height:6px"></div>
+        <input data-placestake placeholder="Custom $" inputmode="decimal">
+      </div>`:''}`;
     });
     let sizes='';
     for(let k=2;k<=Math.min(6,Math.max(2,m.legs));k++)sizes+=`<option value="${k}"${Number(cd.size)===k?' selected':''}>${k}-pick</option>`;
@@ -1390,6 +1404,32 @@ function addBet(rec){
   b.bets.push(Object.assign({id:'b'+Date.now()+Math.random().toString(36).slice(2,6),
     wk:S.week,result:null,ts:Date.now(),paper:!!b.paper},rec));
   save();
+}
+
+/* A pick placed straight from a card. TD cards land in their own ledger
+   buckets; everything else counts as a prop leg. */
+function cardBetKind(cid){
+  if(cid==='ctd')return {kind:'cfb', market:'td'};
+  if(cid==='td') return {kind:'side', market:'td'};
+  return {kind:'prop', market:'side'};
+}
+function placePick(cid,i,stake){
+  const c=card(cid), p=c.picks[i];
+  if(!p||p.betId)return null;
+  const k=cardBetKind(cid);
+  const mp=p.pid?modelProb(p.pid,p.mkt,p.line,p.side):null;
+  const id='b'+Date.now()+Math.random().toString(36).slice(2,5);
+  BANKKEY().bets.push({
+    id, wk:S.week, kind:k.kind, market:k.market,
+    desc:`${p.who} ${p.what}`, match:p.who,
+    odds:p.odds, stake, result:p.grade||null,
+    paper:!!BANKKEY().paper,
+    mprob:mp?mp.prob:null,        // what the model said, for calibration
+    card:cid, pickWho:p.who
+  });
+  p.betId=id;
+  save();
+  return id;
 }
 
 /* how many round-robin combos actually won, from the graded legs */
@@ -2253,6 +2293,28 @@ document.getElementById('main').addEventListener('click',e=>{
   if(po){ S.screenPricedOnly = po.dataset.po==='1'; save(); renderCards(); return; }
   const sv=e.target.closest('[data-sv]');
   if(sv){ S.screenValue = sv.dataset.sv==='1'; save(); renderCards(); return; }
+  const pb=e.target.closest('[data-place]');
+  if(pb){
+    const [cid,i]=pb.dataset.place.split(':');
+    const p=card(cid).picks[Number(i)];
+    if(p.betId){ toast('Already placed — edit it on the Bank tab'); return; }
+    S.placing = S.placing===pb.dataset.place ? null : pb.dataset.place;
+    save(); renderCards(); return;
+  }
+  const pu=e.target.closest('[data-placeu]');
+  if(pu){
+    const [cid,i]=pu.dataset.pc.split(':');
+    let stake;
+    if(pu.dataset.placeu==='c'){
+      const el=pu.closest('.pbody').querySelector('[data-placestake]');
+      stake=Number(el&&el.value);
+    } else stake=Number(pu.dataset.placeu)*U();
+    if(!stake||stake<=0){toast('Needs a stake');return;}
+    placePick(cid,Number(i),stake);
+    S.placing=null; save(); renderCards(); renderBank(); renderLedger();
+    toast(money(stake)+' placed');
+    return;
+  }
   const sc=e.target.closest('[data-screen]');
   if(sc){
     S.screenOpen = sc.dataset.screen==='close' ? null : sc.dataset.screen;
@@ -2291,7 +2353,11 @@ document.getElementById('main').addEventListener('click',e=>{
     save();renderCards();renderRoster();return;
   }
   const del=e.target.closest('[data-del]');
-  if(del){const[cid,i]=del.dataset.del.split(':');card(cid).picks.splice(Number(i),1);save();renderCards();renderRoster();return;}
+  if(del){
+    const[cid,i]=del.dataset.del.split(':');
+    const p=card(cid).picks[Number(i)];
+    if(p&&p.betId&&!confirm('This pick has a bet logged against it. Remove the pick? The bet stays in the bankroll.'))return;
+    card(cid).picks.splice(Number(i),1);save();renderCards();renderRoster();return;}
   const bench=e.target.closest('[data-bench]');
   if(bench){const[cid,i]=bench.dataset.bench.split(':');const p=card(cid).picks[Number(i)];p.benched=!p.benched;save();renderCards();return;}
   const gr=e.target.closest('[data-g]');
@@ -2303,7 +2369,12 @@ document.getElementById('main').addEventListener('click',e=>{
     p.grade=p.grade===g?null:g;
     if(p.grade==='W')S.ledger[cid].w++;
     if(p.grade==='L')S.ledger[cid].l++;
-    save();renderCards();renderRoster();renderLedger();
+    // a pick placed as its own bet grades in one place, not two
+    if(p.betId){
+      const b=BANKKEY().bets.find(x=>x.id===p.betId);
+      if(b)b.result=p.grade;
+    }
+    save();renderCards();renderRoster();renderBank();renderLedger();
   }
 });
 
