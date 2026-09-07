@@ -205,6 +205,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 </section>
 
 <section id="paneBank" hidden>
+  <div id="closeWeek"></div>
   <div id="bankSummary"></div>
   <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
@@ -1380,6 +1381,51 @@ function gameById(id){
   return null;
 }
 
+/* ---------------- closing a week ----------------
+   Done betting a week: lock it so the totals stop moving, and carry
+   anything you never actually placed forward instead of losing it. Bets
+   already logged stay put — they belong to the week they were struck. */
+function isClosed(wk){ S.closed=S.closed||{}; return !!S.closed[String(wk)]; }
+function weekSummary(wk){
+  const b=BANKKEY();
+  let placed=0, open=0, staked=0;
+  b.bets.forEach(x=>{ if(Number(x.wk)!==Number(wk))return;
+    placed++; staked+=Number(x.stake)||0;
+    if(!x.result)open++; });
+  let unplaced=0;
+  const wc=S.cards[wk]||{};
+  Object.values(wc).forEach(cd=>(cd.picks||[]).forEach(p=>{ if(!p.betId)unplaced++; }));
+  return {placed,open,staked,unplaced};
+}
+function closeWeek(wk){
+  const from=S.cards[wk]||{};
+  const to=wk+1;
+  S.cards[to]=S.cards[to]||{};
+  let moved=0;
+  Object.entries(from).forEach(([cid,cd])=>{
+    const keep=[], carry=[];
+    (cd.picks||[]).forEach(p=>{ (p.betId?keep:carry).push(p); });
+    if(carry.length){
+      const d=catById(cid)?catById(cid).def:{mode:'single',size:2,stake:1};
+      S.cards[to][cid]=S.cards[to][cid]||{picks:[],mode:cd.mode||d.mode,size:cd.size||d.size,stake:cd.stake||d.stake};
+      carry.forEach(p=>{
+        // a carried pick is a fresh candidate, not a graded one
+        const q={...p}; delete q.grade; delete q.betId;
+        S.cards[to][cid].picks.push(q);
+      });
+      moved+=carry.length;
+    }
+    cd.picks=keep;
+  });
+  // an unplaced parlay slip carries too
+  const legs=slip().legs.slice();
+  S.closed=S.closed||{}; S.closed[String(wk)]=Date.now();
+  S.week=to;
+  if(legs.length) S.slip={legs};
+  save();
+  return {moved,legs:legs.length};
+}
+
 /* ---------------- parlay slip ----------------
    Straight-bet parlays, kept entirely separate from the five prop cards.
    Legs can come off either board or be typed in (anytime TD, etc), so a
@@ -1667,6 +1713,23 @@ function renderSides(){
 
 function renderBank(){
   const b=BANKKEY(), s=bankStats();
+
+  // close-the-week panel
+  const wsum=weekSummary(S.week), closedNow=isClosed(S.week);
+  const closeHost=document.getElementById('closeWeek');
+  if(closeHost){
+    closeHost.innerHTML=`<div class="pblock" style="margin-bottom:16px">
+      <div class="pbh">Week ${S.week}${closedNow?' · closed':''}</div>
+      <div class="pbody">
+        ${closedNow
+          ? `<div class="note" style="margin:0 0 8px">Closed. Bets already logged still grade normally — closing only stops new picks landing here.</div>
+             <button class="btn ghost" data-reopen="${S.week}">Reopen week ${S.week}</button>`
+          : `<div class="note" style="margin:0 0 8px">${wsum.placed} bet${wsum.placed===1?'':'s'} logged${wsum.open?`, ${wsum.open} still ungraded`:''} · ${money(wsum.staked)} staked.
+             ${wsum.unplaced?`<br><strong>${wsum.unplaced} pick${wsum.unplaced===1?'':'s'} never placed</strong> — those move to week ${S.week+1} rather than being lost.`:''}</div>
+             <button class="btn" data-close="${S.week}">Close week ${S.week} and move on</button>`}
+      </div></div>`;
+  }
+
   const col=s.pl>0?'var(--win)':(s.pl<0?'var(--loss)':'var(--ink)');
   document.getElementById('bankSummary').innerHTML=`
     <div class="pblock"><div class="pbh">Bankroll</div><div class="pbody">
@@ -2449,6 +2512,27 @@ document.getElementById('bankList').addEventListener('click',e=>{
     if(i>=0){b.bets.splice(i,1);save();renderBank();renderLedger();}
   }
 });
+document.getElementById('closeWeek').addEventListener('click',e=>{
+  const c=e.target.closest('[data-close]');
+  if(c){
+    const wk=Number(c.dataset.close), sum=weekSummary(wk);
+    let msg=`Close week ${wk}?`;
+    if(sum.open)msg+=`\n\n${sum.open} bet${sum.open===1?'':'s'} still ungraded — you can still grade them.`;
+    if(sum.unplaced)msg+=`\n\n${sum.unplaced} unplaced pick${sum.unplaced===1?'':'s'} will move to week ${wk+1}.`;
+    if(!confirm(msg))return;
+    const r=closeWeek(wk);
+    renderAll();
+    toast(`Week ${wk} closed${r.moved?` · ${r.moved} carried forward`:''}`);
+    return;
+  }
+  const ro=e.target.closest('[data-reopen]');
+  if(ro){
+    delete S.closed[String(ro.dataset.reopen)];
+    S.week=Number(ro.dataset.reopen);
+    save(); renderAll(); toast('Week reopened');
+  }
+});
+
 document.getElementById('bankSummary').addEventListener('click',e=>{
   const pb=e.target.closest('[data-paper]');
   if(pb){ BANKKEY().paper = pb.dataset.paper==='1'; save(); renderBank();
@@ -2459,7 +2543,7 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;_oddsIdx=null;_wkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;_oddsIdx=null;_wkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
