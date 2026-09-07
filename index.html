@@ -1312,6 +1312,39 @@ const LG=()=>S.league||'nfl';
 const SRC=()=>LG()==='cfb'?S.cfb:S.games;
 /* Games you added by hand, kept separate from the imported feed so a
    re-import never wipes them. Merged in at read time. */
+/* NFL week 1 falls in college week 2, and the gap holds all season. Rather
+   than hardcode +1, work it out from the dates each time the file changes —
+   a bye or a schedule quirk would break a fixed offset. */
+let _wkMap=null;
+function cfbWeekFor(nflWk){
+  const nflG=(S.games&&S.games.games)||[], cfbG=(S.cfb&&S.cfb.games)||[];
+  if(!nflG.length||!cfbG.length)return null;
+  if(!_wkMap){
+    _wkMap={};
+    const span={};
+    nflG.forEach(g=>{ if(!g.date)return;
+      const w=Number(g.wk); span[w]=span[w]||[g.date,g.date];
+      if(g.date<span[w][0])span[w][0]=g.date;
+      if(g.date>span[w][1])span[w][1]=g.date; });
+    Object.entries(span).forEach(([w,[lo,hi]])=>{
+      // college plays Thu-Sat, so look back a few days from the NFL window
+      const from=new Date(new Date(lo).getTime()-4*864e5).toISOString().slice(0,10);
+      const tally={};
+      cfbG.forEach(g=>{ if(g.date&&g.date>=from&&g.date<=hi)
+        tally[g.wk]=(tally[g.wk]||0)+1; });
+      const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
+      if(best)_wkMap[w]=Number(best[0]);
+    });
+  }
+  return _wkMap[Number(nflWk)]??null;
+}
+/* the week number to filter by on whichever board is showing */
+function boardWeek(){
+  if(LG()!=='cfb')return Number(S.week);
+  const m=cfbWeekFor(S.week);
+  return m==null?Number(S.week):m;
+}
+
 function myGames(){
   S.mine=S.mine||{};
   S.mine[LG()]=S.mine[LG()]||[];
@@ -1502,7 +1535,7 @@ function addGameForm(){
   const open=!!S.addOpen;
   if(!open)return `<button class="btn ghost" data-addgame="open" style="margin-bottom:16px">+ Add a game</button>`;
   return `<div class="pblock" style="margin-bottom:16px">
-    <div class="pbh">Add a game · Week ${S.week}</div>
+    <div class="pbh">Add a game · ${LG()==='cfb'?`college week ${boardWeek()}`:`week ${boardWeek()}`}</div>
     <div class="pbody">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
         <div><span class="lab">Away</span><input data-ag="away" placeholder="Montana"></div>
@@ -1513,7 +1546,7 @@ function addGameForm(){
       </div>
       <div class="note" style="margin:8px 0">Spread is from the home team's side: <strong>-7.5</strong> means the home team is favored by 7.5. Leave blank if you don't have a number.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <button class="btn" data-addgame="save">Add to Week ${S.week}</button>
+        <button class="btn" data-addgame="save">Add to week ${boardWeek()}</button>
         <button class="btn ghost" data-addgame="cancel">Cancel</button>
       </div>
     </div></div>`;
@@ -1532,7 +1565,8 @@ function renderSides(){
       <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Import <code>${cfb?'cfb':'games'}-2026.json</code> on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
     return;
   }
-  const wk=S.week;
+  const wk=boardWeek();
+  const cfbShift = cfb && wk!==Number(S.week);
   // A search overrides the week filter — if you're hunting a team you don't
   // want to already know which week they play.
   const q=(sidesQuery||'').trim().toLowerCase();
@@ -1551,7 +1585,9 @@ function renderSides(){
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
-  let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`:`Week ${wk} · ${games.length} games`}</div><div class="pbody">
+  let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`
+        :`${cfb?`College week ${wk}`:`Week ${wk}`} · ${games.length} games`}</div><div class="pbody">
+    ${cfbShift?`<div class="note" style="margin:0 0 6px">Sheet week ${S.week} is <strong>college week ${wk}</strong> — the college season starts a week earlier, so the numbers don't line up. The page turn follows the same weekend either way.</div>`:''}
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
@@ -2249,7 +2285,7 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
     if(!away||!home){ toast('Needs both teams'); return; }
     const sp=v('spread'), tot=v('total');
     myGames().push({
-      id:'my'+Date.now(), wk:S.week, mine:true,
+      id:'my'+Date.now(), wk:boardWeek(), mine:true,
       away, home,
       date:v('date')||'',
       spread: sp===''?null:Number(sp),
@@ -2423,7 +2459,7 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;_oddsIdx=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;_oddsIdx=null;_wkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week;renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
