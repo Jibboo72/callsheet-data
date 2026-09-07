@@ -1455,11 +1455,12 @@ function bankRows(){
     return (Number(y.wk)-Number(x.wk))||(y.ts-x.ts);
   });
 }
-function bankStats(){
+function bankStats(wk){
   const b=BANKKEY();
   let staked=0,ret=0,open=0,w=0,l=0,p=0;
   b.bets.forEach(x=>{
     if(x.paper)return;                 // paper never touches the bankroll
+    if(wk!=null&&Number(x.wk)!==Number(wk))return;
     const st=Number(x.stake)||0;
     if(x.result==="W"){staked+=st;ret+=payout(st,x.odds,x);w++;}
     else if(x.result==='L'){staked+=st;l++;}
@@ -1472,11 +1473,12 @@ function bankStats(){
     roi:staked?pl/staked:0,
     settled:w+l+p};
 }
-function paperStats(){
+function paperStats(wk){
   const b=BANKKEY();
   let w=0,l=0,staked=0,ret=0,open=0;
   b.bets.forEach(x=>{
     if(!x.paper)return;
+    if(wk!=null&&Number(x.wk)!==Number(wk))return;
     const st=Number(x.stake)||0;
     if(x.result==='W'){w++;staked+=st;ret+=payout(st,x.odds,x);}
     else if(x.result==='L'){l++;staked+=st;}
@@ -1712,7 +1714,12 @@ function renderSides(){
 }
 
 function renderBank(){
-  const b=BANKKEY(), s=bankStats();
+  const b=BANKKEY();
+  // Balance is always the full bankroll — that number can't be "this week".
+  // Everything else can be, and usually should be.
+  const thisWeek = S.bankScope!=='all';
+  const s = bankStats(thisWeek?S.week:null);
+  const allTime = bankStats();
 
   // close-the-week panel
   const wsum=weekSummary(S.week), closedNow=isClosed(S.week);
@@ -1732,14 +1739,18 @@ function renderBank(){
 
   const col=s.pl>0?'var(--win)':(s.pl<0?'var(--loss)':'var(--ink)');
   document.getElementById('bankSummary').innerHTML=`
-    <div class="pblock"><div class="pbh">Bankroll</div><div class="pbody">
+    <div class="pblock"><div class="pbh">Bankroll${thisWeek?` · week ${S.week}`:' · all time'}</div><div class="pbody">
+      <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+        <button class="sgbtn" data-bscope="week" aria-selected="${thisWeek}">This week</button>
+        <button class="sgbtn" data-bscope="all" aria-selected="${!thisWeek}">All time</button>
+      </div>
       <div class="stats">
-        <div class="stat"><div class="n" style="color:${col}">${money(s.bal)}</div><div class="l">Balance</div></div>
-        <div class="stat"><div class="n" style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</div><div class="l">Profit / loss<br>${s.pl>=0?'+':''}${(s.pl/U()).toFixed(1)}u</div></div>
+        <div class="stat"><div class="n" style="color:${allTime.pl>0?'var(--win)':(allTime.pl<0?'var(--loss)':'var(--ink)')}">${money(allTime.bal)}</div><div class="l">Balance<br>all time</div></div>
+        <div class="stat"><div class="n" style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</div><div class="l">${thisWeek?`Week ${S.week} P/L`:'Profit / loss'}<br>${s.pl>=0?'+':''}${(s.pl/U()).toFixed(1)}u</div></div>
         <div class="stat"><div class="n" style="color:${col}">${s.staked?(100*s.roi).toFixed(1)+'%':'—'}</div><div class="l">ROI on ${money(s.staked)}</div></div>
-        <div class="stat"><div class="n">${s.w}-${s.l}${s.p?'-'+s.p:''}</div><div class="l">Settled bets</div></div>
+        <div class="stat"><div class="n">${s.w}-${s.l}${s.p?'-'+s.p:''}</div><div class="l">${thisWeek?'Settled this week':'Settled bets'}</div></div>
         <div class="stat"><div class="n">${money(s.open)}</div><div class="l">At risk, open<br>${(s.open/U()).toFixed(1)}u</div></div>
-        <div class="stat"><div class="n">${b.bets.length}</div><div class="l">Total logged</div></div>
+        <div class="stat"><div class="n">${b.bets.length}</div><div class="l">${thisWeek?`Logged wk ${S.week}`:'Total logged'}</div></div>
       </div>
       <div style="height:10px"></div>
       <div class="seg" style="grid-template-columns:1fr 1fr">
@@ -1749,7 +1760,7 @@ function renderBank(){
       <div class="note" style="margin:8px 0 0">${b.paper
         ? '<strong>Paper mode on.</strong> New bets are recorded with their price and graded normally, but never touch the balance. Use it to build a record of model probability against real prices before risking anything.'
         : 'Bets go against the real bankroll.'}</div>
-      ${(()=>{const ps=paperStats();
+      ${(()=>{const ps=paperStats(thisWeek?S.week:null);
         if(!ps.n&&!ps.open)return '';
         const col=ps.pl>0?'var(--win)':(ps.pl<0?'var(--loss)':'var(--ink)');
         return `<div style="height:10px"></div>
@@ -1769,7 +1780,9 @@ function renderBank(){
     </div></div>`;
 
   const bq=(bankQuery||'').trim().toLowerCase();
-  const allRows=bankRows();
+  let allRows=bankRows();
+  // the log follows the same scope — a search always spans every week
+  if(thisWeek&&!bq) allRows=allRows.filter(x=>Number(x.wk)===Number(S.week));
   const rows=bq?allRows.filter(x=>{
     const g=gameById(x.game);
     const m=x.match||(g?`${g.away} @ ${g.home}`:'');
@@ -1778,7 +1791,7 @@ function renderBank(){
     return `${m} ${nicks} ${x.desc} ${lg} wk${x.wk}`.toLowerCase().includes(bq);
   }):allRows;
   document.getElementById('bankList').innerHTML=`
-    <div class="cat"><div class="band" style="background:var(--stock-2);cursor:default"><span class="tag">Bet log</span><span class="cnt">${bq?`${rows.length} of ${allRows.length}`:rows.length}</span></div>
+    <div class="cat"><div class="band" style="background:var(--stock-2);cursor:default"><span class="tag">Bet log${thisWeek&&!bq?` · week ${S.week}`:''}</span><span class="cnt">${bq?`${rows.length} of ${allRows.length}`:rows.length}</span></div>
     ${rows.length?rows.map(x=>{
       const st=Number(x.stake)||0;
       const ret=x.result==='W'?payout(st,x.odds,x)-st:(x.result==='L'?-st:0);
@@ -2534,6 +2547,8 @@ document.getElementById('closeWeek').addEventListener('click',e=>{
 });
 
 document.getElementById('bankSummary').addEventListener('click',e=>{
+  const bs=e.target.closest('[data-bscope]');
+  if(bs){ S.bankScope=bs.dataset.bscope; save(); renderBank(); return; }
   const pb=e.target.closest('[data-paper]');
   if(pb){ BANKKEY().paper = pb.dataset.paper==='1'; save(); renderBank();
     toast(BANKKEY().paper?'Paper mode on':'Real money'); }
