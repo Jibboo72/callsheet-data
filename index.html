@@ -1834,12 +1834,23 @@ function renderBank(){
   }
 
   const col=s.pl>0?'var(--win)':(s.pl<0?'var(--loss)':'var(--ink)');
+  // A bet placed while the sheet sat on a different week (very possible —
+  // college and NFL run on different week numbers, and "Close week" moves
+  // you forward) still gets saved correctly, but the "This week" scope
+  // hides it with no indication anything's missing. That silence is the
+  // actual problem people hit, not data loss — so make it loud instead.
+  const elsewhere = thisWeek
+    ? BANKKEY().bets.filter(x=>!!x.paper===!!BANKKEY().paper && Number(x.wk)!==Number(S.week)).length
+    : 0;
   document.getElementById('bankSummary').innerHTML=`
     <div class="pblock"><div class="pbh">Bankroll${thisWeek?` · week ${S.week}`:' · all time'}</div><div class="pbody">
       <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
         <button class="sgbtn" data-bscope="week" aria-selected="${thisWeek}">This week</button>
         <button class="sgbtn" data-bscope="all" aria-selected="${!thisWeek}">All time</button>
       </div>
+      ${elsewhere?`<div class="flag" style="border-color:var(--hl-long);color:var(--ink);background:rgba(255,138,31,.14);margin-bottom:10px">
+        ${elsewhere} bet${elsewhere===1?'':'s'} logged under a different week aren't shown below — nothing's missing, this view is just filtered to week ${S.week}. <button class="btn ghost" data-bscope="all" style="margin-top:6px;width:auto;padding:6px 10px">Show all time</button>
+      </div>`:''}
       <div class="stats">
         <div class="stat"><div class="n" style="color:${allTime.pl>0?'var(--win)':(allTime.pl<0?'var(--loss)':'var(--ink)')}">${money(allTime.bal)}</div><div class="l">Balance<br>all time</div></div>
         <div class="stat"><div class="n" style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</div><div class="l">${thisWeek?`Week ${S.week} P/L`:'Profit / loss'}<br>${s.pl>=0?'+':''}${(s.pl/U()).toFixed(1)}u</div></div>
