@@ -1412,37 +1412,51 @@ const LG=()=>S.league||'nfl';
 const SRC=()=>LG()==='cfb'?S.cfb:S.games;
 /* Games you added by hand, kept separate from the imported feed so a
    re-import never wipes them. Merged in at read time. */
-/* NFL week 1 falls in college week 2, and the gap holds all season. Rather
-   than hardcode +1, work it out from the dates each time the file changes —
-   a bye or a schedule quirk would break a fixed offset. */
-let _wkMap=null;
-function cfbWeekFor(nflWk){
+/* The sheet's week pointer tracks COLLEGE numbering — college's season
+   starts a week before the NFL's, so sheet week 1 is college-only (no NFL
+   games exist yet), and from there college week N lines up with NFL week
+   N-1 for the rest of the season. Derived from real date-range overlap
+   rather than a hardcoded -1, so a bye or schedule quirk can't break it:
+   if a CFB week's dates and an NFL week's dates genuinely overlap, that's
+   the match. CFB week 1 ending before the NFL even starts correctly finds
+   no match at all, rather than wrongly grabbing NFL week 1. */
+let _nflWkMap=null;
+function nflWeekFor(cfbWk){
   const nflG=(S.games&&S.games.games)||[], cfbG=(S.cfb&&S.cfb.games)||[];
   if(!nflG.length||!cfbG.length)return null;
-  if(!_wkMap){
-    _wkMap={};
-    const span={};
-    nflG.forEach(g=>{ if(!g.date)return;
-      const w=Number(g.wk); span[w]=span[w]||[g.date,g.date];
-      if(g.date<span[w][0])span[w][0]=g.date;
-      if(g.date>span[w][1])span[w][1]=g.date; });
-    Object.entries(span).forEach(([w,[lo,hi]])=>{
-      // college plays Thu-Sat, so look back a few days from the NFL window
-      const from=new Date(new Date(lo).getTime()-4*864e5).toISOString().slice(0,10);
-      const tally={};
-      cfbG.forEach(g=>{ if(g.date&&g.date>=from&&g.date<=hi)
-        tally[g.wk]=(tally[g.wk]||0)+1; });
-      const best=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0];
-      if(best)_wkMap[w]=Number(best[0]);
+  if(!_nflWkMap){
+    _nflWkMap={};
+    const spanOf=games=>{
+      const s={};
+      games.forEach(g=>{ if(!g.date)return;
+        const w=Number(g.wk); s[w]=s[w]||[g.date,g.date];
+        if(g.date<s[w][0])s[w][0]=g.date;
+        if(g.date>s[w][1])s[w][1]=g.date; });
+      return s;
+    };
+    const cfbSpan=spanOf(cfbG), nflSpan=spanOf(nflG);
+    Object.entries(cfbSpan).forEach(([cw,[clo,chi]])=>{
+      let best=null,bestDays=0;
+      Object.entries(nflSpan).forEach(([nw,[nlo,nhi]])=>{
+        const lo=clo>nlo?clo:nlo, hi=chi<nhi?chi:nhi;
+        if(lo<=hi){
+          const days=(new Date(hi)-new Date(lo))/864e5;
+          if(days>=bestDays){bestDays=days;best=Number(nw);}
+        }
+      });
+      if(best!=null)_nflWkMap[cw]=best;
     });
   }
-  return _wkMap[Number(nflWk)]??null;
+  return _nflWkMap[Number(cfbWk)]??null;
 }
-/* the week number to filter by on whichever board is showing */
+/* the week number to filter by on whichever board is showing. S.week is
+   always the college number; 0 for NFL when no real NFL week overlaps
+   (the pre-season college-only week) deliberately matches nothing rather
+   than falling back to a guess. */
 function boardWeek(){
-  if(LG()!=='cfb')return Number(S.week);
-  const m=cfbWeekFor(S.week);
-  return m==null?Number(S.week):m;
+  if(LG()==='cfb')return Number(S.week);
+  const m=nflWeekFor(S.week);
+  return m==null?0:m;
 }
 
 function myGames(){
@@ -1724,7 +1738,8 @@ function renderSides(){
     return;
   }
   const wk=boardWeek();
-  const cfbShift = cfb && wk!==Number(S.week);
+  const noNflYet = !cfb && wk===0;
+  const nflShift = !cfb && !noNflYet && wk!==Number(S.week);
   // A search overrides the week filter — if you're hunting a team you don't
   // want to already know which week they play.
   const q=(sidesQuery||'').trim().toLowerCase();
@@ -1743,16 +1758,21 @@ function renderSides(){
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
+  const nflLabel = noNflYet ? 'No NFL yet' : `Week ${wk}`;
   let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`
-        :`${cfb?`College week ${wk}`:`Week ${wk}`} · ${games.length} games`}</div><div class="pbody">
-    ${cfbShift?`<div class="note" style="margin:0 0 6px">Sheet week ${S.week} is <strong>college week ${wk}</strong> — the college season starts a week earlier, so the numbers don't line up. The page turn follows the same weekend either way.</div>`:''}
+        :`${cfb?`College week ${wk}`:nflLabel} · ${games.length} games`}</div><div class="pbody">
+    ${noNflYet?`<div class="note" style="margin:0 0 6px">Sheet week ${S.week} is college-only — the NFL hasn't started yet this far back. The sheet's week number tracks college's calendar since it starts a week earlier; NFL week 1 lands on sheet week ${(()=>{
+        // find the first sheet week where the NFL actually has games, for a concrete pointer
+        for(let w=Number(S.week)+1; w<=Number(S.week)+3; w++){ if(nflWeekFor(w))return w; } return Number(S.week)+1;
+      })()}.</div>`:''}
+    ${nflShift?`<div class="note" style="margin:0 0 6px">Sheet week ${S.week} is <strong>NFL week ${wk}</strong> — the sheet's week number tracks college's calendar, which starts a week earlier, so NFL always reads one behind. The page turn follows the same weekend either way.</div>`:''}
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
   </div></div>`;
 
   if(!games.length){
-    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}</div></div></div>`;
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':(noNflYet?'No NFL games yet — check back once the season starts.':'No games that week.')}</div></div></div>`;
     host.innerHTML=html; return;
   }
 
@@ -2517,9 +2537,13 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
     if(!desc){toast('Describe the leg first');return;}
     const g=GM().find(x=>x.id===pl.dataset.parlay)||{};
     const sel=box.querySelector('.sgbtn[aria-selected="true"]');
+    // The sheet's week is the one bookkeeping number that matters here — a
+    // game's own native week (NFL vs college number their weeks
+    // differently) would silently misfile this a week off from wherever
+    // the sheet actually is.
     slip().legs.push({desc,odds,kind:LG()==='cfb'?'cfb':'nfl',
       market:(sel&&sel.dataset.mk)||'side',
-      match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', game:g.id||'', wk:g.wk||S.week});
+      match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', game:g.id||'', wk:S.week});
     v('pick').value='';v('odds').value='';
     save();renderSides();toast('Leg added');
     return;
@@ -2581,9 +2605,11 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   if(!confirmIfClosed(S.week))return;
   const g=GM().find(x=>x.id===id)||{};
   const sel=box.querySelector('.sgbtn[aria-selected="true"]');
+  // Same reasoning as the parlay leg above: the sheet's week, not the
+  // game's own native week number, is what Bank/Ledger/close-week key off.
   addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',
     market:(sel&&sel.dataset.mk)||'side',
-    game:id,wk:g.wk||S.week,
+    game:id,wk:S.week,
     match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', gdate:g.date||''});
   v('pick').value='';v('odds').value='';
   if(v('stake'))v('stake').value='';
@@ -2682,7 +2708,7 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;_oddsIdx=null;_wkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
 /* Every tap inside Props or Sides (BET, grade, fold, add, unit buttons...)
    rebuilds that whole list's innerHTML. That's what was making the page
