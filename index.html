@@ -1121,16 +1121,17 @@ function postedAt(pid,mkt,line,side){
   return postedFor(pid,mkt).find(x=>x.side===want&&Math.abs(x.line-Number(line))<0.01)||null;
 }
 /* best value available on this player in this market, judged by the model */
-function bestValue(pid,mkt,opts){
+function bestValue(pid,mkt,opts,side){
   let best=null;
   postedFor(pid,mkt).forEach(x=>{
     // an "over 4.5" prop is the same event as "at least 5"
-    const side = x.side==='under' ? 'under' : 'over';
-    const mp=modelProb(pid,mkt,x.line,side,opts);
+    const xside = x.side==='under' ? 'under' : 'over';
+    if(side&&xside!==side)return;   // stay on the side you're screening
+    const mp=modelProb(pid,mkt,x.line,xside,opts);
     if(!mp)return;
     const e=edgeOf(mp.prob,x.odds);
     if(!e)return;
-    if(!best||e.ev>best.ev) best={...x,side,prob:mp.prob,ev:e.ev,imp:e.imp};
+    if(!best||e.ev>best.ev) best={...x,side:xside,prob:mp.prob,ev:e.ev,imp:e.imp};
   });
   return best;
 }
@@ -1278,7 +1279,7 @@ function screen(cid){
     // away the very players you can actually bet — a deep threat has the
     // wrong profile for Slot Floor yet still has a posted receptions line.
     // So in priced-only mode a posted price IS the filter.
-    const hasPrice=havePrices&&(postedAt(pid,sc.mkt,sc.line,sc.side)||bestValue(pid,sc.mkt));
+    const hasPrice=havePrices&&(postedAt(pid,sc.mkt,sc.line,sc.side)||bestValue(pid,sc.mkt,null,sc.side==='under'?'under':'over'));
     if(pricedOnly ? !hasPrice : !cfg.ok(st))return;
     const hr=cfg.rate(p); if(!hr||hr.n<6)return;
     const m=MU(pid);
@@ -1291,7 +1292,7 @@ function screen(cid){
   // priced players never made the cut
   out.forEach(x=>{
     x.posted=postedAt(x.pid,sc.mkt,sc.line,sc.side);
-    x.best=bestValue(x.pid,sc.mkt);
+    x.best=bestValue(x.pid,sc.mkt,null,sc.side==='under'?'under':'over');
     x.ev=x.posted?(edgeOf(x.mp,x.posted.odds)||{}).ev:null;
   });
   // with prices loaded, anyone without one isn't bettable this week
