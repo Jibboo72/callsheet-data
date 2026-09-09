@@ -24,7 +24,8 @@ ROSTER = "https://github.com/nflverse/nflverse-data/releases/download/rosters/ro
 SCHEDULE = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"
 COLS = ["season", "season_type", "week", "posteam", "defteam",
         "receiver_player_id", "receiver_player_name",
-        "complete_pass", "pass_attempt", "yards_gained"]
+        "complete_pass", "pass_attempt", "yards_gained",
+        "pass_touchdown", "touchdown"]
 ROSTER_COLS = ["gsis_id", "full_name", "position", "height", "weight",
                "college", "years_exp"]
 
@@ -110,6 +111,7 @@ def fit_sensitivity(players, weeks):
     import numpy as np
 
     metrics = {"yds": lambda g: float(g["yds"]),
+               "td": lambda g: float(g.get("td", 0)),
                "rec": lambda g: float(g["rec"]),
                "tgt": lambda g: float(g["tgt"]),
                "lng": lambda g: float(g["lng"])}
@@ -168,12 +170,16 @@ def build(season, cache_dir=None):
     df["rec"] = (df.complete_pass == 1).astype(int)
     df["yds"] = df.yards_gained.where(df.complete_pass == 1, 0)
     df["catch_len"] = df.yards_gained.where(df.complete_pass == 1)
+    # receiving touchdowns — the anytime-TD screener had nothing to work
+    # from without this
+    df["td"] = ((df.get("pass_touchdown", 0) == 1) & (df.complete_pass == 1)).astype(int)
 
     g = df.groupby(["receiver_player_id", "receiver_player_name", "week"], as_index=False).agg(
         tgt=("pass_attempt", "sum"),
         rec=("rec", "sum"),
         yds=("yds", "sum"),
         lng=("catch_len", "max"),
+        td=("td", "sum"),
         team=("posteam", "first"),
         opp=("defteam", "first"),
     )
@@ -205,7 +211,8 @@ def build(season, cache_dir=None):
             "exp": _s(bio.get("years_exp")).replace(".0", ""),
             "log": [
                 {"wk": str(int(r.week)), "tgt": int(r.tgt), "rec": int(r.rec),
-                 "yds": int(r.yds), "lng": int(r.lng), "opp": _s(r.opp)}
+                 "yds": int(r.yds), "lng": int(r.lng), "td": int(r.td),
+                 "opp": _s(r.opp)}
                 for r in chunk.itertuples()
             ],
         }
@@ -263,7 +270,7 @@ def build(season, cache_dir=None):
             n = len(rated)
             sos = sum(g["dp"] for g in rated) / n
             a = {"n": n, "sos": round(sos, 2)}
-            for k in ("yds", "rec", "tgt", "lng"):
+            for k in ("yds", "rec", "tgt", "lng", "td"):
                 raw = sum(float(g[k]) for g in rated) / n
                 # Remove the schedule effect. slope is negative (tough defense
                 # costs production), so subtracting slope*sos ADDS back for a
