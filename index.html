@@ -541,6 +541,16 @@ function screenPanel(cid){
         <button class="sgbtn" data-po="0" aria-selected="${S.screenPricedOnly===false}">Everyone</button>
       </div>`:`<div class="note" style="margin:0 0 8px;color:var(--hl-long)">No odds snapshot imported — ranking on probability only. Import <code>odds-2026.json</code> to see prices and EV.</div>`}
       <div class="note" style="margin:0 0 8px">${cfg.note}</div>
+      ${!list.length?(()=>{
+        const anyLogs=Object.values(S.players||{}).some(p=>(p.log||[]).length);
+        const hasField=Object.values(S.players||{}).some(p=>(p.log||[]).some(g=>g[sc.mkt]!=null));
+        if(!anyLogs)return '';
+        if(!hasField)return `<div class="flag" style="border-color:var(--hl-long);color:var(--ink);background:rgba(255,138,31,.14)">
+          No <strong>${esc(mktById(sc.mkt).label.toLowerCase())}</strong> in your player logs, so nothing can be ranked on it.
+          Re-import the receivers file — the newer build includes it.</div>`;
+        if(havePrices&&S.screenPricedOnly!==false)return `<div class="note" style="margin:0">Nobody with a posted price at this line. Your odds snapshot covers ${((S.odds&&S.odds.games)||[]).length} game${(((S.odds&&S.odds.games)||[]).length)===1?'':'s'} — pull fresh odds, or switch to <strong>Everyone</strong> above.</div>`;
+        return '';
+      })():''}
       ${list.length?list.map(x=>`<div class="hist">
           <span class="pill" style="background:${x.mp>=.7?'var(--win)':(x.mp<=.4?'var(--loss)':'var(--ink-soft)')}">${Math.round(x.mp*100)}%</span>
           <span class="t"><strong>${esc(x.name)}</strong> ${esc(x.team||'')}<br>
