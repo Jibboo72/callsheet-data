@@ -389,7 +389,11 @@ function card(cid){
   if(!S.cards[S.week][cid]){const d=catById(cid).def;S.cards[S.week][cid]={picks:[],mode:d.mode,size:d.size,stake:d.stake};}
   return S.cards[S.week][cid];
 }
-const activeLegs=cid=>card(cid).picks.filter(p=>!p.benched);
+// Legs bet individually via the per-pick BET button are pulled out of
+// round-robin/parlay combo math entirely — otherwise the same real-world
+// wager would get paid out twice: once as the straight bet, once again
+// when the round robin settles.
+const activeLegs=cid=>card(cid).picks.filter(p=>!p.benched&&!p.betId);
 
 const toDec=am=>{am=Number(am);if(!am||isNaN(am))return null;return am>0?1+am/100:1+100/Math.abs(am);};
 const toAm=d=>d>=2?Math.round((d-1)*100):-Math.round(100/(d-1));
@@ -521,7 +525,7 @@ function screenPanel(cid){
               <strong style="color:${col}">${tot>=0?'+':''}${(tot*100).toFixed(0)}% EV</strong> total.
               Their prices imply ${Math.round(imp*100)}% combined — over 100% is the book's vig on the field, and you pay it once per leg.</div>`;
           })()}`
-        :(S.flyerName?`<div class="note" style="margin:10px 0 0">No player and team found for "${esc(S.flyerName)}". Check the spelling on the Roster tab.</div>`
+        :(S.flyerName?`<div class="note" style="margin:10px 0 0">No player and team found for "${esc(S.flyerName)}" — either the spelling's off, or he's too new to be in the imported roster yet. This box finds his <strong>teammates</strong> as replacement candidates; to bet on ${esc(S.flyerName)} himself, add him directly on one of the five prop cards above — typing an unlisted name there still works, it just won't have a hit rate yet.</div>`
                      :`<div class="note" style="margin:10px 0 0">Type a name to see who's left on that offense.</div>`)}
         <div style="height:8px"></div>
         <button class="btn ghost" data-screen="close">Close</button>
@@ -651,8 +655,8 @@ function renderCards(){
           <button data-g="W" data-k="${c.id}:${i}" data-on="${p.grade==='W'?1:0}">W</button>
           <button data-g="L" data-k="${c.id}:${i}" data-on="${p.grade==='L'?1:0}">L</button>
         </div></div>
-      ${cd.mode==='single'?`<button class="betbtn${p.betId?' placed':''}" data-place="${c.id}:${i}"
-          aria-label="Place bet on ${esc(p.who)}">${p.betId?'✓ Placed — tap to edit on Bank tab':'Place this bet'}</button>`:''}
+      <button class="betbtn${p.betId?' placed':''}" data-place="${c.id}:${i}"
+          aria-label="Place bet on ${esc(p.who)}">${p.betId?'✓ Placed — tap to edit on Bank tab':(cd.mode==='single'?'Place this bet':'Bet this leg straight')}</button>
       ${S.placing===`${c.id}:${i}`?`<div class="pbody" style="padding:8px 10px;background:rgba(22,21,15,.06);border-bottom:1px dashed rgba(22,21,15,.3)">
         <div class="lab">Stake — ${esc(p.who)} at ${fmtAm(p.odds)}</div>
         <div class="units">
@@ -669,6 +673,8 @@ function renderCards(){
     let sizes='';
     for(let k=2;k<=Math.min(6,Math.max(2,m.legs));k++)sizes+=`<option value="${k}"${Number(cd.size)===k?' selected':''}>${k}-pick</option>`;
     const flags=[];
+    const placedCount=cd.picks.filter(p=>p.betId).length;
+    if(cd.mode!=='single'&&placedCount)flags.push(`${placedCount} leg${placedCount===1?'':'s'} placed as a straight bet and pulled out of the round robin below — see the Bank tab. Everything else here still combines normally.`);
     if(cd.mode==='rr'&&m.legs>0&&m.legs<Number(cd.size))flags.push(`A ${cd.size}-pick round robin needs at least ${cd.size} active legs. Right now there are ${m.legs}.`);
     if(cd.mode==='parlay'&&m.legs===1)flags.push('A parlay needs two or more legs. One active leg is just a single.');
     if(cd.mode!=='single'&&m.legs>1)flags.push('Same-game legs may be blocked or repriced as an SGP. Check the slip builds before you fund it.');
@@ -1013,7 +1019,7 @@ function previewProp(box){
   const who=g('who').value.trim(), line=g('line').value.trim();
   if(!who||line===''){host.innerHTML='';return;}
   const pid=slug(who), p=P(pid);
-  if(!p){host.innerHTML=`<div class="note" style="margin:0">No game log for "${esc(who)}" yet — check the spelling against the Roster tab.</div>`;return;}
+  if(!p){host.innerHTML=`<div class="note" style="margin:0">No game log for "${esc(who)}" — probably a backup or someone who didn't play much in 2025. <strong>You can still add this pick</strong>; it just won't have a hit rate or model probability to check it against.</div>`;return;}
   const mkt=g('mkt').value, side=g('side').value;
   let odds=parseInt(g('odds').value,10);
   // if the book has this exact line and you haven't typed a price, use theirs
@@ -1021,7 +1027,7 @@ function previewProp(box){
   let auto=false;
   if(isNaN(odds)&&post){ odds=post.odds; auto=true; }
   const h=propHit(pid,mkt,side,line);
-  if(!h){host.innerHTML=`<div class="note" style="margin:0">${esc(p.name)} has no ${esc(mktById(mkt).label.toLowerCase())} logged.</div>`;return;}
+  if(!h){host.innerHTML=`<div class="note" style="margin:0">${esc(p.name)} has no ${esc(mktById(mkt).label.toLowerCase())} logged — probably didn't play enough in 2025 to show up. <strong>You can still add this pick</strong>, just without a hit rate to check it against.</div>`;return;}
   const pct=Math.round(h.rate*100);
   const mp=modelProb(pid,mkt,line,side);
   let verdict='';
