@@ -262,6 +262,16 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <button class="btn ghost" id="clearWeek">Clear this week's cards</button>
   <div style="height:10px"></div>
   <button class="btn ghost" id="clearAll">Reset the season ledger</button>
+  <div class="hr"></div>
+  <div class="pblock"><div class="pbh">Backup</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Everything lives on this device only. Deleting the home-screen icon, clearing Safari data, or switching phones wipes it. Back up before you do any of those.</div>
+    <button class="btn" id="backupOut">Copy backup to clipboard</button>
+    <div style="height:8px"></div>
+    <textarea id="backupIn" placeholder="Paste a backup here to restore" style="min-height:70px"></textarea>
+    <div style="height:6px"></div>
+    <button class="btn ghost" id="backupRestore">Restore from paste</button>
+    <div id="backupMsg" class="note" style="margin:8px 0 0"></div>
+  </div></div>
   </div>
 </section>
 
@@ -2801,6 +2811,38 @@ document.getElementById('clearWeek').addEventListener('click',()=>{
 document.getElementById('clearAll').addEventListener('click',()=>{
   if(!confirm('Reset every market record for the season?'))return;
   S.ledger={};save();renderLedger();toast('Ledger reset');});
+
+/* Backup and restore. The whole app state is one JSON blob, so this is
+   just copy-out / paste-in — no accounts, no server. */
+function backupMsg(t,bad){
+  const el=document.getElementById('backupMsg');
+  el.textContent=t; el.style.color=bad?'var(--loss)':'var(--ink-soft)';
+}
+document.getElementById('backupOut').addEventListener('click',async()=>{
+  const blob=JSON.stringify(S);
+  const box=document.getElementById('backupIn');
+  box.value=blob;                       // always show it, clipboard may fail
+  try{
+    await navigator.clipboard.writeText(blob);
+    backupMsg(`Copied — ${(blob.length/1024).toFixed(0)} KB. Paste it somewhere safe (Notes, email to yourself).`);
+  }catch(e){
+    box.select();
+    backupMsg('Clipboard blocked — the text is in the box above, select and copy it manually.');
+  }
+});
+document.getElementById('backupRestore').addEventListener('click',()=>{
+  const txt=document.getElementById('backupIn').value.trim();
+  if(!txt){backupMsg('Paste a backup first.',true);return;}
+  let data;
+  try{ data=JSON.parse(txt); }catch(e){ backupMsg('That is not valid backup text.',true); return; }
+  if(!data||typeof data!=='object'||!data.bank){ backupMsg('That does not look like a call sheet backup.',true); return; }
+  const bets=((data.bank||{}).bets||[]).length;
+  const players=Object.keys(data.players||{}).length;
+  if(!confirm(`Restore ${bets} bet${bets===1?'':'s'} and ${players} players? This replaces everything currently on this device.`))return;
+  S=data; save(); renderAll();
+  backupMsg(`Restored ${bets} bets, ${players} players.`);
+  toast('Restored');
+});
 
 function showTab(name){
   const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Bank:'paneBank',Ledger:'paneLedger'};
