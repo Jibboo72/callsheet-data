@@ -2753,7 +2753,7 @@ document.getElementById('main').addEventListener('click',e=>{
     card(cid).picks.splice(Number(i),1);save();renderCards();renderRoster();return;}
   const bench=e.target.closest('[data-bench]');
   if(bench){const[cid,i]=bench.dataset.bench.split(':');const p=card(cid).picks[Number(i)];p.benched=!p.benched;save();renderCards();return;}
-  const gr=e.target.closest('[data-g]');
+  const gr=e.target.closest('[data-g][data-k]');
   if(gr){
     const[cid,i]=gr.dataset.k.split(':'),g=gr.dataset.g,p=card(cid).picks[Number(i)];
     S.ledger[cid]=S.ledger[cid]||{w:0,l:0};
