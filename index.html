@@ -67,6 +67,19 @@ nav.tabs button[aria-selected="true"]{background:var(--ink);color:var(--stock)}
 .row .grade button + button{border-top:1px solid rgba(22,21,15,.3)}
 .row .grade button[data-on="1"][data-g="W"]{background:var(--win);color:#fff}
 .row .grade button[data-on="1"][data-g="L"]{background:var(--loss);color:#fff}
+.betbtn{
+  display:block;width:100%;box-sizing:border-box;
+  font-family:Oswald,sans-serif;font-weight:700;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;border:2px solid var(--ink);border-top:0;background:var(--ink);
+  color:var(--stock);padding:9px 10px;cursor:pointer;text-align:center;
+}
+.betbtn:active{transform:translateY(1px)}
+.betbtn.placed{background:var(--stock-2);color:var(--win);border-color:var(--win)}
+.gamehead{
+  font-family:Oswald,sans-serif;font-weight:700;font-size:11px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--stock);background:var(--ink-soft);
+  padding:6px 10px;margin-top:2px;
+}
 .x{border:0;background:transparent;font-size:17px;line-height:1;color:var(--ink-soft);cursor:pointer;padding:0 8px}
 .empty{padding:12px 10px;font-size:11px;color:var(--ink-soft);font-style:italic}
 
@@ -577,6 +590,19 @@ function screenPanel(cid){
     </div></div>`;
 }
 
+/* A canonical "AWAY @ HOME" string for grouping picks by game. Derived
+   automatically from the player's team + next opponent (schedule data,
+   available from week 1 — it doesn't need the ratings that come later).
+   A manually typed game on the pick always wins, which covers college
+   free-text picks and anyone without a matchup yet. */
+function pickGame(p){
+  if(p.game)return p.game;
+  if(!p.pid)return '';
+  const pl=P(p.pid), m=MU(p.pid);
+  if(!pl||!pl.team||!m||!m.opp)return '';
+  return m.home?`${m.opp} @ ${pl.team}`:`${pl.team} @ ${m.opp}`;
+}
+
 function renderCards(){
   const host=document.getElementById('cats');host.innerHTML='';
   // autocomplete source so a typed name matches the roster slug
@@ -594,9 +620,24 @@ function renderCards(){
       const rb=(MU(cd.picks[b].pid)||{}).d_rank||99;
       return ra-rb;
     });
+    // Group by game on top of whatever ordering the card already uses.
+    // Array.sort is stable, so ties keep their existing relative order —
+    // fade keeps sorting toughest-defense-first WITHIN each game group.
+    const grouped = !S.groupByGame || S.groupByGame[c.id] !== false; // default on
+    if(grouped) order.sort((a,b)=>{
+      const ga=pickGame(cd.picks[a])||'zzz', gb=pickGame(cd.picks[b])||'zzz';
+      return ga.localeCompare(gb);
+    });
     if(!cd.picks.length)rows=`<div class="empty">Nothing on this card yet.</div>`;
-    else order.map(i=>[cd.picks[i],i]).forEach(([p,i])=>{
-      rows+=`<div class="row${p.benched?' off':''}">
+    else{
+      let lastGame=null;
+      order.map(i=>[cd.picks[i],i]).forEach(([p,i])=>{
+        const g=pickGame(p);
+        if(grouped && g!==lastGame){
+          lastGame=g;
+          rows+=`<div class="gamehead">${g?esc(g):'Game not set'}</div>`;
+        }
+        rows+=`<div class="row${p.benched?' off':''}">
         <button class="av" data-open="${p.pid}" aria-label="Open ${esc(p.who)}">${chipHTML(p.pid)}</button>
         <div class="pick" data-bench="${c.id}:${i}">
           <div class="who">${esc(p.who)}</div>
@@ -605,14 +646,13 @@ function renderCards(){
           ${muLine(p.pid)}
         </div>
         <div class="meta"><div class="odds">${fmtAm(p.odds)}</div><div class="book">${esc(p.book||'')}</div></div>
-        ${cd.mode==='single'?`<button class="x" data-place="${c.id}:${i}"
-          aria-label="Place bet on ${esc(p.who)}"
-          style="font-family:Oswald,sans-serif;font-size:10px;font-weight:700;letter-spacing:.08em;padding:0 6px;color:${p.betId?'var(--win)':'var(--ink)'}">${p.betId?'✓':'BET'}</button>`:''}
         <button class="x" data-del="${c.id}:${i}" aria-label="Remove ${esc(p.who)}">×</button>
         <div class="grade">
           <button data-g="W" data-k="${c.id}:${i}" data-on="${p.grade==='W'?1:0}">W</button>
           <button data-g="L" data-k="${c.id}:${i}" data-on="${p.grade==='L'?1:0}">L</button>
         </div></div>
+      ${cd.mode==='single'?`<button class="betbtn${p.betId?' placed':''}" data-place="${c.id}:${i}"
+          aria-label="Place bet on ${esc(p.who)}">${p.betId?'✓ Placed — tap to edit on Bank tab':'Place this bet'}</button>`:''}
       ${S.placing===`${c.id}:${i}`?`<div class="pbody" style="padding:8px 10px;background:rgba(22,21,15,.06);border-bottom:1px dashed rgba(22,21,15,.3)">
         <div class="lab">Stake — ${esc(p.who)} at ${fmtAm(p.odds)}</div>
         <div class="units">
@@ -624,7 +664,8 @@ function renderCards(){
         <div style="height:6px"></div>
         <input data-placestake placeholder="Custom $" inputmode="decimal">
       </div>`:''}`;
-    });
+      });
+    }
     let sizes='';
     for(let k=2;k<=Math.min(6,Math.max(2,m.legs));k++)sizes+=`<option value="${k}"${Number(cd.size)===k?' selected':''}>${k}-pick</option>`;
     const flags=[];
@@ -648,10 +689,15 @@ function renderCards(){
           <input data-f="line" placeholder="Line" inputmode="decimal">
           <input data-f="odds" placeholder="-150" inputmode="text">
           <input data-f="book" placeholder="Book">
+          <input class="full" data-f="game" placeholder="Game (optional — e.g. NE @ SEA)" style="grid-column:1/-1">
           <div class="full" data-preview="${c.id}" style="grid-column:1/-1"></div>
           <button class="btn" data-add="${c.id}" style="grid-column:1/-1">Add to card</button>
         </div>
         <div class="slip">
+          <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+            <button class="sgbtn" data-groupgame="0" data-c="${c.id}" aria-selected="${!grouped}">Order added</button>
+            <button class="sgbtn" data-groupgame="1" data-c="${c.id}" aria-selected="${grouped}">Group by game</button>
+          </div>
           <div class="slipcfg">
             <div><span class="lab">Bet type</span><select data-set="mode" data-c="${c.id}">${MODES.map(o=>`<option value="${o.v}"${cd.mode===o.v?' selected':''}>${o.label}</option>`).join('')}</select></div>
             <div><span class="lab">Size</span><select data-set="size" data-c="${c.id}"${cd.mode==='rr'?'':' disabled'}>${sizes||'<option>2-pick</option>'}</select></div>
@@ -2604,6 +2650,21 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
 
 function renderAll(){_paceCache=null;_oddsIdx=null;_wkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderBank();renderLedger();}
 
+/* Every tap inside Props or Sides (BET, grade, fold, add, unit buttons...)
+   rebuilds that whole list's innerHTML. That's what was making the page
+   "jump somewhere" after tapping BET — the browser was resetting scroll to
+   the top of a long list of cards. This restores exactly where you were,
+   for every interaction in those two lists, without touching each handler.
+   Capture phase runs before the re-render; the double rAF waits for the
+   new layout to settle before snapping back. */
+document.getElementById('main').addEventListener('click', e => {
+  if(!e.target.closest('#cats, #sidesBoard'))return;
+  const y=window.scrollY;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    if(Math.abs(window.scrollY-y)>1) window.scrollTo(0,y);
+  }));
+}, true);
+
 /* ---------------- events ---------------- */
 document.getElementById('main').addEventListener('click',e=>{
   const op=e.target.closest('[data-open]');
@@ -2612,6 +2673,12 @@ document.getElementById('main').addEventListener('click',e=>{
   if(po){ S.screenPricedOnly = po.dataset.po==='1'; save(); renderCards(); return; }
   const sv=e.target.closest('[data-sv]');
   if(sv){ S.screenValue = sv.dataset.sv==='1'; save(); renderCards(); return; }
+  const gg=e.target.closest('[data-groupgame]');
+  if(gg){
+    S.groupByGame=S.groupByGame||{};
+    S.groupByGame[gg.dataset.c]=gg.dataset.groupgame==='1';
+    save(); renderCards(); return;
+  }
   const pb=e.target.closest('[data-place]');
   if(pb){
     const [cid,i]=pb.dataset.place.split(':');
@@ -2661,14 +2728,15 @@ document.getElementById('main').addEventListener('click',e=>{
     const cid=add.dataset.add,box=add.closest('.add'),g=f=>box.querySelector(`[data-f="${f}"]`);
     const who=g('who').value.trim(), mkt=g('mkt').value, side=g('side').value;
     const line=g('line').value.trim(), odds=parseInt(g('odds').value,10), book=g('book').value.trim();
+    const game=(g('game')&&g('game').value.trim())||'';
     if(!who||line===''||!odds){toast('Needs a player, a line, and a price');return;}
     const pid=slug(who);
     // college has no player logs, so don't pollute the NFL roster with names
     // we can never model
     if(cid!=='ctd') ensurePlayer(pid,who);
-    card(cid).picks.push({who,what:propLabel(mkt,side,line),mkt,side,line:Number(line),odds,book,
+    card(cid).picks.push({who,what:propLabel(mkt,side,line),mkt,side,line:Number(line),odds,book,game,
       pid: cid==='ctd'?null:pid, cfb: cid==='ctd'||undefined});
-    ['line','odds','book'].forEach(f=>g(f).value='');
+    ['line','odds','book','game'].forEach(f=>g(f).value='');
     save();renderCards();renderRoster();return;
   }
   const del=e.target.closest('[data-del]');
