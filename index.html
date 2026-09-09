@@ -612,6 +612,9 @@ function renderCards(){
   // autocomplete source so a typed name matches the roster slug
   const dl=Object.values(S.players||{}).map(p=>`<option value="${esc(p.name)}">`).join('');
   host.innerHTML=`<datalist id="rosterNames">${dl}</datalist>`;
+  if(isClosed(S.week)){
+    host.innerHTML+=`<div class="flag" style="margin-bottom:14px">Week ${S.week} is closed. Adding a new pick or bet here will ask you to confirm first — grading and removing still work normally.</div>`;
+  }
   CATS.forEach(c=>{
     const cd=card(c.id),m=slipMath(c.id),collapsed=!!S.collapsed[c.id];
     const el=document.createElement('div');el.className='cat';
@@ -1482,6 +1485,16 @@ function gameById(id){
    anything you never actually placed forward instead of losing it. Bets
    already logged stay put — they belong to the week they were struck. */
 function isClosed(wk){ S.closed=S.closed||{}; return !!S.closed[String(wk)]; }
+/* Closing a week only ever meant "I'm done planning this one" — nothing
+   actually stopped new picks or bets from landing on it, which made the
+   close button decorative. This is the one gate every add-new-activity
+   action runs through. Grading and deleting skip it on purpose: you should
+   always be able to finalize a result or remove a mistake on a closed week,
+   that's not "new activity." */
+function confirmIfClosed(wk){
+  if(!isClosed(wk))return true;
+  return confirm(`Week ${wk} is closed. Add to it anyway?`);
+}
 function weekSummary(wk){
   const b=BANKKEY();
   let placed=0, open=0, staked=0;
@@ -1702,7 +1715,8 @@ function renderSides(){
   const toggle=`<nav class="tabs" style="margin-bottom:14px">
       <button data-lg="nfl" aria-selected="${!cfb}">NFL Sunday</button>
       <button data-lg="cfb" aria-selected="${cfb}">College Saturday</button>
-    </nav>`;
+    </nav>`
+    + (isClosed(S.week)?`<div class="flag" style="margin-bottom:14px">Week ${S.week} is closed. Placing a new bet here will ask you to confirm first — grading and removing still work normally.</div>`:'');
   const all=GM();
   if(!all.length){
     host.innerHTML=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
@@ -2466,6 +2480,7 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
     const box=ag.closest('.pbody'), v=f=>box.querySelector(`[data-ag="${f}"]`).value.trim();
     const away=v('away'), home=v('home');
     if(!away||!home){ toast('Needs both teams'); return; }
+    if(!confirmIfClosed(S.week))return;
     const sp=v('spread'), tot=v('total');
     myGames().push({
       id:'my'+Date.now(), wk:boardWeek(), mine:true,
@@ -2535,6 +2550,7 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
       ? Number(box.querySelector('[data-sl="stake"]').value)
       : Number(su.dataset.slipu)*U();
     if(!stake||stake<=0){toast('Needs a stake');return;}
+    if(!confirmIfClosed(S.week))return;
     const d=slipOdds();
     addBet({
       desc:legs.map(l=>l.desc).join(' + '),
@@ -2562,6 +2578,7 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   const desc=v('pick').value.trim(), odds=parseInt(v('odds').value,10)||-110;
   if(!desc){toast('Describe the bet first');return;}
   if(!stake||stake<=0){toast('Needs a stake');return;}
+  if(!confirmIfClosed(S.week))return;
   const g=GM().find(x=>x.id===id)||{};
   const sel=box.querySelector('.sgbtn[aria-selected="true"]');
   addBet({desc,odds,stake,kind:LG()==='cfb'?'cfb':'side',
@@ -2713,6 +2730,7 @@ document.getElementById('main').addEventListener('click',e=>{
       stake=Number(el&&el.value);
     } else stake=Number(pu.dataset.placeu)*U();
     if(!stake||stake<=0){toast('Needs a stake');return;}
+    if(!confirmIfClosed(S.week))return;
     placePick(cid,Number(i),stake);
     S.placing=null; save(); renderCards(); renderBank(); renderLedger();
     toast(money(stake)+' placed');
@@ -2747,6 +2765,7 @@ document.getElementById('main').addEventListener('click',e=>{
     const line=g('line').value.trim(), odds=parseInt(g('odds').value,10), book=g('book').value.trim();
     const game=(g('game')&&g('game').value.trim())||'';
     if(!who||line===''||!odds){toast('Needs a player, a line, and a price');return;}
+    if(!confirmIfClosed(S.week))return;
     const pid=slug(who);
     // college has no player logs, so don't pollute the NFL roster with names
     // we can never model
