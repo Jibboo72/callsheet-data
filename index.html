@@ -270,7 +270,12 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
       <button class="btn ghost" id="backupFile">Save as file</button>
     </div>
     <div style="height:8px"></div>
-    <textarea id="backupIn" placeholder="Paste a backup here to restore" style="min-height:70px"></textarea>
+    <div class="hr" style="margin:14px 0"></div>
+    <span class="lab">Restore</span>
+    <button class="btn" id="backupFilePick">Restore from a saved file</button>
+    <input type="file" id="backupFileInput" accept=".json,application/json" hidden>
+    <div style="height:8px"></div>
+    <textarea id="backupIn" placeholder="…or paste backup text here" style="min-height:60px"></textarea>
     <div style="height:6px"></div>
     <button class="btn ghost" id="backupRestore">Restore from paste</button>
     <div id="backupMsg" class="note" style="margin:8px 0 0"></div>
@@ -2853,9 +2858,39 @@ document.getElementById('backupFile').addEventListener('click',()=>{
   setTimeout(()=>URL.revokeObjectURL(url),2000);
   backupMsg('Saved. Pick "Save to Files" — iCloud Drive keeps it off this device.');
 });
+/* Restoring from the saved .json is one tap — reading the text out of a
+   file by hand on iOS is miserable. */
+function applyBackup(txt){
+  let data;
+  try{ data=JSON.parse(txt); }catch(e){ backupMsg('That file is not valid backup text.',true); return; }
+  if(!data||typeof data!=='object'||!data.bank){ backupMsg('That does not look like a call sheet backup.',true); return; }
+  const bets=((data.bank||{}).bets||[]).length;
+  const picks=Object.values(data.cards||{}).reduce((a,wk)=>
+    a+Object.values(wk).reduce((b,c)=>b+((c.picks||[]).length),0),0);
+  const when=(data._backup&&data._backup.at)?` from ${String(data._backup.at).slice(0,16).replace('T',' ')}`:'';
+  if(!confirm(`Restore ${bets} bet${bets===1?'':'s'} and ${picks} card pick${picks===1?'':'s'}${when}? This replaces what's on this device.`))return;
+  REDOWNLOADABLE.forEach(k=>{ if(S[k]&&!data[k]) data[k]=S[k]; });
+  S=data; save(); renderAll();
+  backupMsg(`Restored ${bets} bet${bets===1?'':'s'}. Re-import players and games from the URLs if they're missing.`);
+  toast('Restored');
+}
+document.getElementById('backupFilePick').addEventListener('click',()=>{
+  const inp=document.getElementById('backupFileInput');
+  inp.value='';
+  inp.onchange=()=>{
+    const f=inp.files&&inp.files[0]; if(!f)return;
+    backupMsg('Reading '+f.name+'…');
+    const r=new FileReader();
+    r.onload=()=>applyBackup(String(r.result));
+    r.onerror=()=>backupMsg("Couldn't read that file.",true);
+    r.readAsText(f);
+  };
+  inp.click();
+});
 document.getElementById('backupRestore').addEventListener('click',()=>{
   const txt=document.getElementById('backupIn').value.trim();
   if(!txt){backupMsg('Paste a backup first.',true);return;}
+  applyBackup(txt); return;
   let data;
   try{ data=JSON.parse(txt); }catch(e){ backupMsg('That is not valid backup text.',true); return; }
   if(!data||typeof data!=='object'||!data.bank){ backupMsg('That does not look like a call sheet backup.',true); return; }
