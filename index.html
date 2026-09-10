@@ -219,6 +219,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 
 <section id="paneBank" hidden>
   <div id="closeWeek"></div>
+  <div id="moveBets"></div>
   <div id="bankSummary"></div>
   <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
@@ -1495,7 +1496,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-10 11:55 UTC';
+const BUILD_STAMP='2026-09-10 12:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1633,6 +1634,22 @@ function confirmIfClosed(wk){
   if(!isClosed(wk))return true;
   return confirm(`Week ${wk} is closed. Add to it anyway?`);
 }
+/* Explicit, user-triggered bulk reassignment of bets between weeks.
+   Deliberately manual rather than another automatic date-based guess —
+   plenty of bet types (a player prop, a settled round robin) have no
+   game date stored on them at all to re-derive from reliably, and
+   automatic re-sorting has been wrong here more than once already. You
+   see exactly how many bets are about to move before it happens. */
+function betsInWeek(wk){
+  return (S.bank&&S.bank.bets||[]).filter(b=>Number(b.wk)===Number(wk));
+}
+function moveBets(fromWk,toWk){
+  const moved=betsInWeek(fromWk);
+  moved.forEach(b=>{ b.wk=Number(toWk); });
+  save();
+  return moved.length;
+}
+
 function weekSummary(wk){
   const b=BANKKEY();
   let placed=0, open=0, staked=0;
@@ -1992,6 +2009,24 @@ function renderSides(){
 
 function renderBank(){
   const b=BANKKEY();
+
+  // move-bets utility
+  const mbHost=document.getElementById('moveBets');
+  if(mbHost){
+    const from=S.moveFrom!=null?S.moveFrom:S.week;
+    const to=S.moveTo!=null?S.moveTo:0;
+    const n=betsInWeek(from).length;
+    mbHost.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Move bets between weeks</div><div class="pbody">
+      <div class="note" style="margin:0 0 8px">Manual on purpose — some bets have no game date to sort by automatically, so nothing gets moved without you saying so.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><span class="lab">From week</span><input id="moveFromInput" type="number" value="${esc(String(from))}" inputmode="numeric"></div>
+        <div><span class="lab">To week</span><input id="moveToInput" type="number" value="${esc(String(to))}" inputmode="numeric"></div>
+      </div>
+      <div class="note" style="margin:8px 0">${n} bet${n===1?'':'s'} currently in week ${from}.</div>
+      <button class="btn" id="moveBetsBtn" ${n?'':'disabled'}>Move ${n||''} bet${n===1?'':'s'} from week ${from} to week ${to}</button>
+    </div></div>`;
+  }
+
   // Balance is always the full bankroll — that number can't be "this week".
   // Everything else can be, and usually should be.
   const thisWeek = S.bankScope!=='all';
@@ -2786,6 +2821,20 @@ document.getElementById('bankList').addEventListener('click',e=>{
     const b=BANKKEY(); const i=b.bets.findIndex(y=>y.id===d.dataset.bdel);
     if(i>=0){b.bets.splice(i,1);save();renderBank();renderLedger();}
   }
+});
+document.getElementById('moveBets').addEventListener('change',e=>{
+  if(e.target.id==='moveFromInput'){ S.moveFrom=parseInt(e.target.value,10)||0; save(); renderBank(); }
+  if(e.target.id==='moveToInput'){ S.moveTo=parseInt(e.target.value,10)||0; save(); renderBank(); }
+});
+document.getElementById('moveBets').addEventListener('click',e=>{
+  const btn=e.target.closest('#moveBetsBtn'); if(!btn)return;
+  const from=S.moveFrom!=null?S.moveFrom:S.week, to=S.moveTo!=null?S.moveTo:0;
+  const n=betsInWeek(from).length;
+  if(!n){toast('No bets in week '+from);return;}
+  if(!confirm(`Move ${n} bet${n===1?'':'s'} from week ${from} to week ${to}? This only changes which week they're filed under — nothing about the bet itself changes.`))return;
+  const moved=moveBets(from,to);
+  renderAll();
+  toast(`Moved ${moved} bet${moved===1?'':'s'} to week ${to}`);
 });
 document.getElementById('closeWeek').addEventListener('click',e=>{
   const c=e.target.closest('[data-close]');
