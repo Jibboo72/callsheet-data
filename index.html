@@ -427,6 +427,7 @@ async function load(){
   syncSampleBtn();
   const bi=document.getElementById('buildInfo');
   if(bi)bi.textContent=`build ${BUILD_STAMP} · week 1 starts ${WEEK1_START}`;
+  checkForNewerBuild();   // async, non-blocking — the rest of the app doesn't wait on this
   if(migration){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
   }
@@ -1495,6 +1496,47 @@ const WEEK1_START='2026-09-08';
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
 const BUILD_STAMP='2026-09-10 11:55 UTC';
+
+/* A home-screen web-clip on iOS can keep running a cached copy of this
+   page indefinitely without ever re-checking the server on its own —
+   that's the actual mechanism behind "the cache doesn't work all the
+   time." Rather than rely on someone noticing a stale footer, fetch the
+   real file from source on every load and compare build stamps directly.
+   raw.githubusercontent.com caches for 5 minutes at most, which is a far
+   shorter and more honest window than an iOS web-clip's cache. */
+const SOURCE_URL='https://raw.githubusercontent.com/Jibboo72/callsheet-data/main/index.html';
+async function checkForNewerBuild(){
+  try{
+    const res=await fetch(SOURCE_URL,{cache:'no-store'});
+    if(!res.ok)return;
+    const text=await res.text();
+    const m=text.match(/const BUILD_STAMP='([^']+)'/);
+    if(!m)return;
+    const latest=m[1];
+    const host=document.getElementById('buildInfo');
+    if(latest===BUILD_STAMP){
+      if(host)host.textContent+=' · up to date';
+      return;
+    }
+    if(host)host.innerHTML+=` · <span style="color:var(--loss);font-weight:700">running an old build (latest is ${esc(latest)})</span>`;
+    const banner=document.createElement('div');
+    banner.className='flag';
+    banner.style.cssText='position:fixed;left:12px;right:12px;bottom:70px;z-index:80;background:var(--stock);border-color:var(--loss)';
+    banner.innerHTML=`<strong>You're on an old version.</strong> This device is running build ${esc(BUILD_STAMP)}; the latest is ${esc(latest)}.
+      <div style="height:8px"></div>
+      <button class="btn" id="hardReloadBtn">Reload now</button>`;
+    document.body.appendChild(banner);
+    document.getElementById('hardReloadBtn').addEventListener('click',()=>{
+      // a plain reload can still serve the same cached copy on iOS — a
+      // new query string forces the browser to treat this as a different
+      // URL, which reliably bypasses that cache
+      location.href=location.pathname+'?_='+Date.now();
+    });
+  }catch(e){
+    // offline, or the fetch failed for some other reason — this is a
+    // best-effort convenience, not core functionality, so fail silently
+  }
+}
 function seasonStartDate(){ return WEEK1_START; }
 function addDays(dateStr,n){
   const d=new Date(dateStr+'T00:00:00Z');
