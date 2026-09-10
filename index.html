@@ -665,6 +665,7 @@ function renderCards(){
   // autocomplete source so a typed name matches the roster slug
   const dl=Object.values(S.players||{}).map(p=>`<option value="${esc(p.name)}">`).join('');
   host.innerHTML=`<datalist id="rosterNames">${dl}</datalist>`;
+  host.innerHTML+=slipPanel();
   if(isClosed(S.week)){
     host.innerHTML+=`<div class="flag" style="margin-bottom:14px">Week ${S.week} is closed. Adding a new pick or bet here will ask you to confirm first — grading and removing still work normally.</div>`;
   }
@@ -711,8 +712,12 @@ function renderCards(){
           <button data-g="W" data-k="${c.id}:${i}" data-on="${p.grade==='W'?1:0}">W</button>
           <button data-g="L" data-k="${c.id}:${i}" data-on="${p.grade==='L'?1:0}">L</button>
         </div></div>
-      <button class="betbtn${p.betId?' placed':''}" data-place="${c.id}:${i}"
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:0">
+        <button class="betbtn${p.betId?' placed':''}" data-place="${c.id}:${i}"
           aria-label="Place bet on ${esc(p.who)}">${p.betId?'✓ Placed — tap to edit on Bank tab':(cd.mode==='single'?'Place this bet':'Bet this leg straight')}</button>
+        <button class="betbtn" data-propparlay="${c.id}:${i}" style="border-left:0"
+          aria-label="Add ${esc(p.who)} to the parlay slip">+ Parlay</button>
+      </div>
       ${S.placing===`${c.id}:${i}`?`<div class="pbody" style="padding:8px 10px;background:rgba(22,21,15,.06);border-bottom:1px dashed rgba(22,21,15,.3)">
         <div class="lab">Stake — ${esc(p.who)} at ${fmtAm(p.odds)}</div>
         <div class="units">
@@ -1566,9 +1571,19 @@ function closeWeek(wk){
    Legs can come off either board or be typed in (anytime TD, etc), so a
    slip can mix NFL and college. */
 function slip(){ S.slip=S.slip||{legs:[]}; S.slip.legs=S.slip.legs||[]; return S.slip; }
+/* The combined parlay price. A manually-typed overall number always wins —
+   that's what the book actually shows you, and it may include adjustments
+   (parlay tax, promos) the pure math wouldn't know about. Without one,
+   every leg needs its own odds; a partial mix would silently understate
+   the true price, so that returns null (undetermined) rather than a
+   quietly-wrong number. */
 function slipOdds(){
-  const dec=slip().legs.map(l=>toDec(l.odds)).filter(Boolean);
-  if(!dec.length)return null;
+  const manual=(slip().manualOdds!=null && slip().manualOdds!=='') ? toDec(slip().manualOdds) : null;
+  if(manual)return manual;
+  const legs=slip().legs;
+  if(!legs.length)return null;
+  const dec=legs.map(l=>toDec(l.odds));
+  if(dec.some(d=>!d))return null;      // someone's missing a price and there's no override
   return dec.reduce((a,d)=>a*d,1);
 }
 function slipLeague(){
@@ -1674,26 +1689,38 @@ function propSettlement(cid){
 }
 
 function slipPanel(){
-  const legs=slip().legs;
+  const s=slip(), legs=s.legs;
   const d=slipOdds();
   const am=d?toAm(d):null;
+  const usingManual = s.manualOdds!=null && s.manualOdds!=='';
+  const showGroup = s.oddsView==='group';    // default is per-leg
+  const missing = !usingManual && legs.some(l=>!toDec(l.odds));
   return `<div class="pblock" style="margin-bottom:16px;${legs.length?'border-width:3px':''}">
-    <div class="pbh">Parlay slip${legs.length?` · ${legs.length} leg${legs.length===1?'':'s'} · ${fmtAm(am)}`:''}</div>
+    <div class="pbh">Parlay slip${legs.length?` · ${legs.length} leg${legs.length===1?'':'s'}${am!=null?` · ${fmtAm(am)}${usingManual?' (your price)':''}`:''}`:''}</div>
     <div class="pbody">
+      ${legs.length>=2?`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+        <button class="sgbtn" data-slipview="individual" aria-selected="${!showGroup}">Individual odds</button>
+        <button class="sgbtn" data-slipview="group" aria-selected="${showGroup}">Group odds only</button>
+      </div>`:''}
       ${legs.length?legs.map((l,i)=>`<div class="hist">
-          <span class="pill" style="background:${l.kind==='cfb'?'var(--hl-long)':(l.kind==='custom'?'var(--hl-flyer)':'var(--ink-soft)')}">${l.kind==='cfb'?'NCAA':(l.kind==='custom'?'PROP':'NFL')}</span>
-          <span class="t">${l.match?`<strong>${esc(l.match)}</strong><br>`:''}${esc(l.desc)} <strong>${fmtAm(l.odds)}</strong></span>
+          <span class="pill" style="background:${l.kind==='cfb'?'var(--hl-long)':(l.kind==='prop'?'var(--hl-slot)':(l.kind==='custom'?'var(--hl-flyer)':'var(--ink-soft)'))}">${l.kind==='cfb'?'NCAA':(l.kind==='prop'?'PROP':(l.kind==='custom'?'OTHER':'NFL'))}</span>
+          <span class="t">${l.match?`<strong>${esc(l.match)}</strong><br>`:''}${esc(l.desc)}${showGroup?'':` <strong>${l.odds!=null&&l.odds!==''?fmtAm(l.odds):'<span style=\"color:var(--hl-long)\">no price</span>'}</strong>`}</span>
           <button class="x" data-sliprm="${i}" aria-label="Remove leg">×</button>
-        </div>`).join(''):`<div class="note" style="margin:0 0 8px">Empty. Tap <strong>+ Parlay</strong> on any game below, or add a leg by hand for something not on the board.</div>`}
+        </div>`).join(''):`<div class="note" style="margin:0 0 8px">Empty. Tap <strong>+ Parlay</strong> on any pick or game below, or add a leg by hand for something not on the board.</div>`}
 
       <div style="display:grid;grid-template-columns:1fr 84px;gap:6px;margin-top:10px">
         <input data-sl="desc" placeholder="Custom leg — e.g. Nabers anytime TD" style="grid-column:1/-1">
-        <input data-sl="odds" placeholder="+140" inputmode="text">
+        <input data-sl="odds" placeholder="+140 (optional)" inputmode="text">
         <button class="btn ghost" data-slipadd="custom">Add leg</button>
       </div>
 
+      <div style="height:8px"></div>
+      <span class="lab">Or skip the leg prices and just type the total price the book shows</span>
+      <input data-sl="manual" placeholder="e.g. +650" inputmode="text" value="${esc(s.manualOdds!=null?String(s.manualOdds):'')}">
+
       ${legs.length>=2?`
-        <div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)} — 1 unit returns ${money(U()*d)}. Every leg has to land.</div>
+        ${missing?`<div class="note" style="margin:8px 0 0;color:var(--hl-long)">One or more legs has no price and there's no overall price typed above — enter one or the other before placing.</div>`
+          :`<div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)}${usingManual?' (your price)':''} — 1 unit returns ${money(U()*d)}. Every leg has to land.</div>`}
         <div class="units">
           <button class="ubtn" data-slipu="1">1 unit<span>${money(U())}</span></button>
           <button class="ubtn" data-slipu="2">2 units<span>${money(2*U())}</span></button>
@@ -2533,61 +2560,23 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
       b.setAttribute('aria-selected', String(b===mk)));
     return;
   }
-  // ---- parlay slip ----
+  // + Parlay from a game row on the Sides board — the generic slip
+  // handlers (add/remove/place/etc) live in the shared #main listener now,
+  // since the slip panel also renders on the Props page.
   const pl=e.target.closest('[data-parlay]');
   if(pl){
     const box=pl.closest('.add'), v=f=>box.querySelector(`[data-gs="${f}"]`);
-    const desc=v('pick').value.trim(), odds=parseInt(v('odds').value,10)||-110;
+    const desc=v('pick').value.trim();
+    const oddsRaw=v('odds').value.trim();
+    const odds=oddsRaw===''?null:parseInt(oddsRaw,10);   // blank is fine now
     if(!desc){toast('Describe the leg first');return;}
     const g=GM().find(x=>x.id===pl.dataset.parlay)||{};
     const sel=box.querySelector('.sgbtn[aria-selected="true"]');
-    // The sheet's week is the one bookkeeping number that matters here — a
-    // game's own native week (NFL vs college number their weeks
-    // differently) would silently misfile this a week off from wherever
-    // the sheet actually is.
     slip().legs.push({desc,odds,kind:LG()==='cfb'?'cfb':'nfl',
       market:(sel&&sel.dataset.mk)||'side',
       match:(g.away&&g.home)?`${g.away} @ ${g.home}`:'', game:g.id||'', wk:S.week});
     v('pick').value='';v('odds').value='';
     save();renderSides();toast('Leg added');
-    return;
-  }
-  const srm=e.target.closest('[data-sliprm]');
-  if(srm){ slip().legs.splice(Number(srm.dataset.sliprm),1); save(); renderSides(); return; }
-  const sclr=e.target.closest('[data-slipclear]');
-  if(sclr){ slip().legs=[]; save(); renderSides(); return; }
-  const sadd=e.target.closest('[data-slipadd]');
-  if(sadd){
-    const box=sadd.closest('.pbody'), v=f=>box.querySelector(`[data-sl="${f}"]`);
-    const desc=v('desc').value.trim(), odds=parseInt(v('odds').value,10);
-    if(!desc||!odds){toast('Needs a leg and a price');return;}
-    slip().legs.push({desc,odds,kind:'custom',market:'other',match:'',wk:S.week});
-    save();renderSides();toast('Leg added');
-    return;
-  }
-  const su=e.target.closest('[data-slipu]');
-  if(su){
-    const legs=slip().legs;
-    if(legs.length<2){toast('A parlay needs two legs');return;}
-    if(su.dataset.slipu==='x'){
-      const c=su.closest('.pbody').querySelector('[data-slipcustom]');
-      c.hidden=!c.hidden; return;
-    }
-    const box=su.closest('.pbody');
-    const stake = su.dataset.slipu==='c'
-      ? Number(box.querySelector('[data-sl="stake"]').value)
-      : Number(su.dataset.slipu)*U();
-    if(!stake||stake<=0){toast('Needs a stake');return;}
-    if(!confirmIfClosed(S.week))return;
-    const d=slipOdds();
-    addBet({
-      desc:legs.map(l=>l.desc).join(' + '),
-      odds:toAm(d), stake, kind:'parlay', league:slipLeague(),
-      legs:legs.slice(), wk:S.week,
-      match:`${legs.length}-leg parlay`
-    });
-    slip().legs=[]; save(); renderSides(); renderBank(); renderLedger();
-    toast(money(stake)+' parlay placed');
     return;
   }
 
@@ -2743,6 +2732,79 @@ document.getElementById('main').addEventListener('click',e=>{
     S.groupByGame[gg.dataset.c]=gg.dataset.groupgame==='1';
     save(); renderCards(); return;
   }
+
+  // ---- parlay slip: shared by the Props and Sides pages, so any change
+  // here re-renders both rather than guessing which page you're on ----
+  const rerenderSlip=()=>{ renderCards(); renderSides(); };
+  // The manual overall-price box isn't saved on every keystroke (that was
+  // the source of an earlier bug with a different input) — instead, any
+  // button click within the same slip panel grabs whatever's currently
+  // typed there first, so a re-render never wipes it.
+  const captureManual=box=>{
+    const mi=box&&box.querySelector('[data-sl="manual"]');
+    if(mi)slip().manualOdds=mi.value;
+  };
+
+  // + Parlay on an individual prop pick — pulls the pick's own player,
+  // description and price straight in, no retyping.
+  const ppl=e.target.closest('[data-propparlay]');
+  if(ppl){
+    const [cid,i]=ppl.dataset.propparlay.split(':');
+    const p=card(cid).picks[Number(i)];
+    if(!p)return;
+    slip().legs.push({desc:p.what,odds:(p.odds!=null?p.odds:null),kind:'prop',
+      market:'other', match:p.who, pid:p.pid||null, card:cid, wk:S.week});
+    save();rerenderSlip();toast('Leg added');
+    return;
+  }
+  const srm=e.target.closest('[data-sliprm]');
+  if(srm){ captureManual(srm.closest('.pbody')); slip().legs.splice(Number(srm.dataset.sliprm),1); save(); rerenderSlip(); return; }
+  const sclr=e.target.closest('[data-slipclear]');
+  if(sclr){ slip().legs=[]; slip().manualOdds=''; save(); rerenderSlip(); return; }
+  const sview=e.target.closest('[data-slipview]');
+  if(sview){ captureManual(sview.closest('.pbody')); slip().oddsView=sview.dataset.slipview; save(); rerenderSlip(); return; }
+  const sadd=e.target.closest('[data-slipadd]');
+  if(sadd){
+    const box=sadd.closest('.pbody'), v=f=>box.querySelector(`[data-sl="${f}"]`);
+    captureManual(box);
+    const desc=v('desc').value.trim();
+    const oddsRaw=v('odds').value.trim();
+    const odds=oddsRaw===''?null:parseInt(oddsRaw,10);   // blank is fine —
+    // the overall-price box below can cover it instead
+    if(!desc){toast('Needs a description for the leg');return;}
+    slip().legs.push({desc,odds,kind:'custom',market:'other',match:'',wk:S.week});
+    save();rerenderSlip();toast('Leg added');
+    return;
+  }
+  const su=e.target.closest('[data-slipu]');
+  if(su){
+    const legs=slip().legs;
+    if(legs.length<2){toast('A parlay needs two legs');return;}
+    const box=su.closest('.pbody');
+    if(su.dataset.slipu==='x'){
+      captureManual(box);
+      const c=box.querySelector('[data-slipcustom]');
+      c.hidden=!c.hidden; return;
+    }
+    captureManual(box);
+    const d=slipOdds();
+    if(d==null){toast('Enter a price for every leg, or type the overall price above');return;}
+    const stake = su.dataset.slipu==='c'
+      ? Number(box.querySelector('[data-sl="stake"]').value)
+      : Number(su.dataset.slipu)*U();
+    if(!stake||stake<=0){toast('Needs a stake');return;}
+    if(!confirmIfClosed(S.week))return;
+    addBet({
+      desc:legs.map(l=>l.desc).join(' + '),
+      odds:toAm(d), stake, kind:'parlay', league:slipLeague(),
+      legs:legs.slice(), wk:S.week,
+      match:`${legs.length}-leg parlay`
+    });
+    slip().legs=[]; slip().manualOdds=''; save(); rerenderSlip(); renderBank(); renderLedger();
+    toast(money(stake)+' parlay placed');
+    return;
+  }
+
   const pb=e.target.closest('[data-place]');
   if(pb){
     const [cid,i]=pb.dataset.place.split(':');
