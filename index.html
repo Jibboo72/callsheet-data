@@ -362,10 +362,60 @@ let S={week:1,budget:40,cards:{},ledger:{},collapsed:{},players:{}};
 const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 let openPid=null;
 
+/* One-time archive, run automatically the first time this update loads.
+   Whatever week you were on gets relabeled 0 and marked closed — same
+   bets, same picks, nothing deleted, just renumbered. The sheet then
+   starts clean at week 1, and boardWeek() no longer tries to reconcile
+   NFL and college numbering at all — each board just uses its own
+   schedule's native week number directly from here on. */
+function archiveCurrentWeekAsZero(){
+  if(S._migratedWk0)return null;              // never run twice
+  S._migratedWk0=true;
+  const old=Number(S.week)||1;
+  if(old===0)return null;                     // already on 0, nothing to archive
+
+  let movedBets=0, movedPicks=0, movedGames=0;
+
+  // bets
+  (S.bank&&S.bank.bets||[]).forEach(b=>{
+    if(Number(b.wk)===old){ b.wk=0; movedBets++; }
+  });
+
+  // prop card picks
+  if(S.cards&&S.cards[old]){
+    S.cards[0]=S.cards[0]||{};
+    Object.entries(S.cards[old]).forEach(([cid,cd])=>{
+      const dest=S.cards[0][cid];
+      if(dest){ dest.picks=(dest.picks||[]).concat(cd.picks||[]); movedPicks+=(cd.picks||[]).length; }
+      else { S.cards[0][cid]=cd; movedPicks+=(cd.picks||[]).length; }
+    });
+    delete S.cards[old];
+  }
+
+  // manually-added games, either board
+  ['nfl','cfb'].forEach(lg=>{
+    S.mine=S.mine||{}; S.mine[lg]=S.mine[lg]||[];
+    S.mine[lg].forEach(g=>{ if(Number(g.wk)===old){ g.wk=0; movedGames++; } });
+  });
+
+  // close it, and make sure the old close-flag (if any) doesn't linger
+  // under the old number
+  S.closed=S.closed||{};
+  delete S.closed[String(old)];
+  S.closed['0']=true;
+
+  // fresh start
+  S.week=1;
+
+  return {old,movedBets,movedPicks,movedGames};
+}
+
 async function load(){
   let saved=await store.get(KEY);
   if(!saved){ const old=await store.get(OLD); if(old){ saved=Object.assign({players:{}},old); } }
   if(saved) S=Object.assign(S,saved);
+  const migration=archiveCurrentWeekAsZero();
+  save();
   // backfill player keys on any existing picks
   Object.values(S.cards||{}).forEach(wk=>Object.values(wk).forEach(cd=>
     (cd.picks||[]).forEach(p=>{ if(!p.pid){ p.pid=slug(p.who); ensurePlayer(p.pid,p.who); } })));
@@ -373,6 +423,9 @@ async function load(){
   if(S.importUrl) document.getElementById('impUrl').value=S.importUrl;
   renderAll();
   syncSampleBtn();
+  if(migration){
+    setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
+  }
 }
 let t; function save(){clearTimeout(t);t=setTimeout(()=>store.set(KEY,S),150);}
 
@@ -1412,52 +1465,11 @@ const LG=()=>S.league||'nfl';
 const SRC=()=>LG()==='cfb'?S.cfb:S.games;
 /* Games you added by hand, kept separate from the imported feed so a
    re-import never wipes them. Merged in at read time. */
-/* The sheet's week pointer tracks COLLEGE numbering — college's season
-   starts a week before the NFL's, so sheet week 1 is college-only (no NFL
-   games exist yet), and from there college week N lines up with NFL week
-   N-1 for the rest of the season. Derived from real date-range overlap
-   rather than a hardcoded -1, so a bye or schedule quirk can't break it:
-   if a CFB week's dates and an NFL week's dates genuinely overlap, that's
-   the match. CFB week 1 ending before the NFL even starts correctly finds
-   no match at all, rather than wrongly grabbing NFL week 1. */
-let _nflWkMap=null;
-function nflWeekFor(cfbWk){
-  const nflG=(S.games&&S.games.games)||[], cfbG=(S.cfb&&S.cfb.games)||[];
-  if(!nflG.length||!cfbG.length)return null;
-  if(!_nflWkMap){
-    _nflWkMap={};
-    const spanOf=games=>{
-      const s={};
-      games.forEach(g=>{ if(!g.date)return;
-        const w=Number(g.wk); s[w]=s[w]||[g.date,g.date];
-        if(g.date<s[w][0])s[w][0]=g.date;
-        if(g.date>s[w][1])s[w][1]=g.date; });
-      return s;
-    };
-    const cfbSpan=spanOf(cfbG), nflSpan=spanOf(nflG);
-    Object.entries(cfbSpan).forEach(([cw,[clo,chi]])=>{
-      let best=null,bestDays=0;
-      Object.entries(nflSpan).forEach(([nw,[nlo,nhi]])=>{
-        const lo=clo>nlo?clo:nlo, hi=chi<nhi?chi:nhi;
-        if(lo<=hi){
-          const days=(new Date(hi)-new Date(lo))/864e5;
-          if(days>=bestDays){bestDays=days;best=Number(nw);}
-        }
-      });
-      if(best!=null)_nflWkMap[cw]=best;
-    });
-  }
-  return _nflWkMap[Number(cfbWk)]??null;
-}
-/* the week number to filter by on whichever board is showing. S.week is
-   always the college number; 0 for NFL when no real NFL week overlaps
-   (the pre-season college-only week) deliberately matches nothing rather
-   than falling back to a guess. */
-function boardWeek(){
-  if(LG()==='cfb')return Number(S.week);
-  const m=nflWeekFor(S.week);
-  return m==null?0:m;
-}
+/* No cross-league derivation. The sheet's week number is applied directly
+   to whichever schedule is showing — each board just uses its own
+   imported "wk" field as-is. Simple and predictable; it's on you to know
+   which real week a sheet number lines up with on each board. */
+function boardWeek(){ return Number(S.week); }
 
 function myGames(){
   S.mine=S.mine||{};
@@ -1738,8 +1750,6 @@ function renderSides(){
     return;
   }
   const wk=boardWeek();
-  const noNflYet = !cfb && wk===0;
-  const nflShift = !cfb && !noNflYet && wk!==Number(S.week);
   // A search overrides the week filter — if you're hunting a team you don't
   // want to already know which week they play.
   const q=(sidesQuery||'').trim().toLowerCase();
@@ -1758,21 +1768,15 @@ function renderSides(){
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
-  const nflLabel = noNflYet ? 'No NFL yet' : `Week ${wk}`;
   let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`
-        :`${cfb?`College week ${wk}`:nflLabel} · ${games.length} games`}</div><div class="pbody">
-    ${noNflYet?`<div class="note" style="margin:0 0 6px">Sheet week ${S.week} is college-only — the NFL hasn't started yet this far back. The sheet's week number tracks college's calendar since it starts a week earlier; NFL week 1 lands on sheet week ${(()=>{
-        // find the first sheet week where the NFL actually has games, for a concrete pointer
-        for(let w=Number(S.week)+1; w<=Number(S.week)+3; w++){ if(nflWeekFor(w))return w; } return Number(S.week)+1;
-      })()}.</div>`:''}
-    ${nflShift?`<div class="note" style="margin:0 0 6px">Sheet week ${S.week} is <strong>NFL week ${wk}</strong> — the sheet's week number tracks college's calendar, which starts a week earlier, so NFL always reads one behind. The page turn follows the same weekend either way.</div>`:''}
+        :`${cfb?'College week':'Week'} ${wk} · ${games.length} games`}</div><div class="pbody">
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
   </div></div>`;
 
   if(!games.length){
-    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':(noNflYet?'No NFL games yet — check back once the season starts.':'No games that week.')}</div></div></div>`;
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}</div></div></div>`;
     host.innerHTML=html; return;
   }
 
@@ -2904,7 +2908,7 @@ document.getElementById('bookPick').addEventListener('click',e=>{
 
 document.getElementById('setBudget').addEventListener('change',e=>{S.budget=Number(e.target.value)||0;save();renderTotals();});
 document.getElementById('wkUp').addEventListener('click',()=>{S.week=Math.min(22,S.week+1);save();renderAll();});
-document.getElementById('wkDown').addEventListener('click',()=>{S.week=Math.max(1,S.week-1);save();renderAll();});
+document.getElementById('wkDown').addEventListener('click',()=>{S.week=Math.max(0,S.week-1);save();renderAll();});
 /* ---------------- 2025 test data ---------------- */
 /* Weekly receiving logs, 2025 regular season. No target column in the source,
    so catch rate stays hidden for these two. Both logs sum exactly to their
