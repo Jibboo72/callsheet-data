@@ -294,6 +294,12 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
     <button class="btn ghost" id="backupRestore">Restore from paste</button>
     <div id="backupMsg" class="note" style="margin:8px 0 0"></div>
   </div></div>
+  <div class="hr"></div>
+  <div class="pblock"><div class="pbh">Share with friends</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">A read-only link — everything you've picked and bet, no way for anyone to change anything. Save the file below, upload it to your repo as <code>data/shared.json</code>, and send friends this link: <br><strong style="word-break:break-all">https://jibboo72.github.io/callsheet-data/share.html</strong><br>Whatever's in that file is what they see. Publish again whenever you want them to see something newer — nothing updates on its own.</div>
+    <button class="btn" id="shareOut">Save share file</button>
+    <div id="shareMsg" class="note" style="margin:8px 0 0"></div>
+  </div></div>
   </div>
 </section>
 
@@ -1509,7 +1515,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-10 13:05 UTC';
+const BUILD_STAMP='2026-09-10 21:50 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3239,6 +3245,17 @@ function backupBlob(){
   out._backup={at:new Date().toISOString(),app:'callsheet',v:3};
   return JSON.stringify(out);
 }
+/* Same underlying data as a backup — bets, picks, ledger, everything you
+   typed — packaged for a read-only public viewer instead of a private
+   restore file. Kept as its own function/button rather than reusing the
+   backup one, since "for me if I lose my phone" and "for friends to look
+   at" are different intents even though the shape is identical right now. */
+function shareBlob(){
+  const out=JSON.parse(backupBlob());
+  out._share={at:new Date().toISOString(),app:'callsheet-share',v:1};
+  delete out._backup;
+  return JSON.stringify(out);
+}
 document.getElementById('backupOut').addEventListener('click',async()=>{
   const blob=backupBlob();
   const box=document.getElementById('backupIn');
@@ -3260,6 +3277,20 @@ document.getElementById('backupFile').addEventListener('click',()=>{
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),2000);
   backupMsg('Saved. Pick "Save to Files" — iCloud Drive keeps it off this device.');
+});
+document.getElementById('shareOut').addEventListener('click',()=>{
+  const blob=new Blob([shareBlob()],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  // the filename must be exactly this — the viewer page fetches
+  // data/shared.json specifically, not a dated filename like the backup
+  a.download='shared.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+  const el=document.getElementById('shareMsg');
+  el.textContent='Saved as shared.json. Upload it to data/shared.json in your repo to publish — friends see whatever\'s there when they open the link.';
+  el.style.color='var(--ink-soft)';
 });
 /* Restoring from the saved .json is one tap — reading the text out of a
    file by hand on iOS is miserable. */
