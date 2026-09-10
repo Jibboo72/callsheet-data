@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Call Sheet — Shared Picks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --stock:#DED3B4; --stock-2:#E9E1C9; --ink:#16150F; --ink-soft:#4A4739;
+  --hl-slot:#F2E23C; --hl-long:#FF8A1F; --hl-fade:#3FC1F2; --hl-qb:#5FE39A; --hl-flyer:#FF5FA2;
+  --win:#1F7A44; --loss:#B0301F;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--stock);
+  background-image:repeating-linear-gradient(90deg,rgba(22,21,15,.035) 0 1px,transparent 1px 4px),
+                   repeating-linear-gradient(0deg,rgba(22,21,15,.03) 0 1px,transparent 1px 4px);
+  color:var(--ink);font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:14px;
+  padding:0 0 60px;-webkit-text-size-adjust:100%;
+}
+.wrap{max-width:720px;margin:0 auto;padding:0 14px}
+header{border-bottom:3px solid var(--ink);padding:calc(env(safe-area-inset-top) + 16px) 0 12px;margin-bottom:16px}
+.title{font-family:Oswald,sans-serif;font-weight:700;font-size:26px;line-height:1;letter-spacing:.02em;text-transform:uppercase;margin:0}
+.sub{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);margin-top:6px}
+.badge{display:inline-block;font-family:Oswald,sans-serif;font-weight:700;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:var(--ink);color:var(--stock);padding:3px 8px;margin-top:8px}
+
+.pblock{border:2px solid var(--ink);background:var(--stock-2);margin-bottom:16px}
+.pbh{font-family:Oswald,sans-serif;font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;padding:8px 10px;border-bottom:2px solid var(--ink);background:var(--ink);color:var(--stock)}
+.pbody{padding:10px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{border:2px solid var(--ink);padding:9px 6px;text-align:center;background:var(--stock)}
+.stat .n{font-family:Oswald,sans-serif;font-weight:700;font-size:19px;line-height:1}
+.stat .l{font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);margin-top:5px;line-height:1.3}
+
+.wk-head{display:flex;align-items:center;justify-content:space-between;background:var(--stock-2);border:2px solid var(--ink);padding:8px 10px;margin:0 0 0}
+.wk-head .l{font-family:Oswald,sans-serif;font-weight:700;font-size:14px;text-transform:uppercase;letter-spacing:.06em}
+.wk-head .r{font-family:Oswald,sans-serif;font-weight:700;font-size:15px}
+.wk-body{border:2px solid var(--ink);border-top:0;background:var(--stock-2);padding:0}
+.row{padding:9px 10px;border-bottom:1px dashed rgba(22,21,15,.3);display:flex;gap:8px;align-items:flex-start}
+.row:last-child{border-bottom:0}
+.row .pick{flex:1;min-width:0}
+.row .who{font-weight:600;font-size:13px}
+.row .what{font-size:11px;color:var(--ink-soft);margin-top:2px;line-height:1.4}
+.row .amt{font-family:Oswald,sans-serif;font-weight:700;font-size:14px;text-align:right;white-space:nowrap}
+.pill{display:inline-block;font-family:Oswald,sans-serif;font-weight:700;font-size:9px;letter-spacing:.08em;padding:2px 6px;color:#fff;margin-right:5px;vertical-align:middle}
+.leg{padding:5px 0 5px 14px;font-size:11px;color:var(--ink-soft);border-top:1px dotted rgba(22,21,15,.25)}
+.empty{padding:14px 10px;font-size:11px;color:var(--ink-soft);font-style:italic}
+.note{font-size:11px;line-height:1.55;color:var(--ink-soft);margin:10px 0}
+.err{border:2px solid var(--loss);color:var(--loss);background:rgba(176,48,31,.08);padding:12px;font-size:12px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="title">Call Sheet</div>
+  <div class="sub" id="subhead">Shared picks · read only</div>
+  <div class="badge">View only — nothing here can be changed</div>
+</header>
+<div id="content">
+  <div class="empty">Loading…</div>
+</div>
+</div>
+
+<script>
+const SHARE_URL='https://raw.githubusercontent.com/Jibboo72/callsheet-data/main/data/shared.json';
+
+const toDec=a=>{a=Number(a);if(!a||isNaN(a))return null;return a>0?1+a/100:1+100/Math.abs(a);};
+const fmtAm=a=>{a=Math.round(Number(a));return (a>0?'+':'')+a;};
+const money=v=>(v<0?'-$':'$')+Math.abs(Number(v)).toFixed(2);
+const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+function payout(bet){
+  if(bet.fixedReturn!=null)return Number(bet.fixedReturn);
+  const d=toDec(bet.odds);
+  return d?Number(bet.stake)*d:Number(bet.stake);
+}
+
+const KIND_LABEL={side:'NFL',cfb:'College',parlay:'Parlay',prop:'Prop'};
+const KIND_COLOR={side:'var(--ink-soft)',cfb:'var(--hl-long)',parlay:'var(--hl-qb)',prop:'var(--hl-slot)'};
+
+function render(data){
+  const bank=data.bank||{start:0,unit:14,bets:[]};
+  const bets=(bank.bets||[]).filter(b=>!b.paper);   // friends see real action, not practice reps
+  const host=document.getElementById('content');
+
+  if(data._share&&data._share.at){
+    document.getElementById('subhead').textContent=
+      'Shared picks · published '+String(data._share.at).slice(0,16).replace('T',' ')+' UTC';
+  }
+
+  if(!bets.length){
+    host.innerHTML='<div class="pblock"><div class="pbody"><div class="empty">No bets published yet.</div></div></div>';
+    return;
+  }
+
+  // ---- bankroll summary ----
+  let staked=0,ret=0,w=0,l=0,open=0;
+  bets.forEach(b=>{
+    const st=Number(b.stake)||0;
+    if(b.result==='W'){w++;staked+=st;ret+=payout(b);}
+    else if(b.result==='L'){l++;staked+=st;}
+    else if(b.result==='P'){staked+=st;ret+=st;}
+    else open+=st;
+  });
+  const pl=ret-staked;
+  const bal=Number(bank.start||0)+pl;
+  const col=pl>0?'var(--win)':(pl<0?'var(--loss)':'var(--ink)');
+  let html=`<div class="pblock"><div class="pbh">Bankroll</div><div class="pbody">
+    <div class="stats">
+      <div class="stat"><div class="n" style="color:${col}">${money(bal)}</div><div class="l">Balance</div></div>
+      <div class="stat"><div class="n" style="color:${col}">${pl>=0?'+':''}${money(pl)}</div><div class="l">Profit / loss</div></div>
+      <div class="stat"><div class="n">${w}-${l}</div><div class="l">Record${open?`<br>${money(open)} open`:''}</div></div>
+    </div>
+  </div></div>`;
+
+  // ---- group by week, most recent first ----
+  const byWeek={};
+  bets.forEach(b=>{ const k=Number(b.wk)||0; (byWeek[k]=byWeek[k]||[]).push(b); });
+  const weeks=Object.keys(byWeek).map(Number).sort((a,b)=>b-a);
+
+  weeks.forEach(wk=>{
+    const wb=byWeek[wk];
+    let ws=0,wret=0,ww=0,wl=0;
+    wb.forEach(b=>{ const st=Number(b.stake)||0;
+      if(b.result==='W'){ww++;ws+=st;wret+=payout(b);}
+      else if(b.result==='L'){wl++;ws+=st;}
+      else if(b.result==='P'){ws+=st;wret+=st;} });
+    const wpl=wret-ws;
+    const wcol=wpl>0?'var(--win)':(wpl<0?'var(--loss)':'var(--ink-soft)');
+    html+=`<div class="wk-head"><span class="l">Week ${wk}</span>
+      <span class="r" style="color:${wcol}">${ws?(wpl>=0?'+':'')+money(wpl):'—'}</span></div>
+      <div class="wk-body">`;
+
+    wb.sort((a,b)=>(b.ts||0)-(a.ts||0)).forEach(b=>{
+      const st=Number(b.stake)||0;
+      const rescol=b.result==='W'?'var(--win)':(b.result==='L'?'var(--loss)':'var(--ink-soft)');
+      const resTxt=b.result==='W'?'+'+money(payout(b)-st).replace('$',''):
+                   b.result==='L'?'-'+money(st).replace('$',''):
+                   b.result==='P'?'push':'open';
+      const kindLbl=KIND_LABEL[b.kind]||b.kind||'bet';
+      const kindCol=KIND_COLOR[b.kind]||'var(--ink-soft)';
+      html+=`<div class="row">
+        <div class="pick">
+          <div class="who"><span class="pill" style="background:${kindCol}">${esc(kindLbl)}</span>${esc(b.match||'')}</div>
+          <div class="what">${esc(b.desc||'')} · ${fmtAm(b.odds)} · ${money(st)}</div>
+          ${(b.kind==='parlay'&&b.legs)?b.legs.map(lg=>`<div class="leg">${esc(lg.match?lg.match+' — ':'')}${esc(lg.desc)} ${lg.odds!=null?fmtAm(lg.odds):''}</div>`).join(''):''}
+        </div>
+        <div class="amt" style="color:${rescol}">${resTxt}</div>
+      </div>`;
+    });
+    html+='</div><div style="height:14px"></div>';
+  });
+
+  host.innerHTML=html;
+}
+
+fetch(SHARE_URL,{cache:'no-store'})
+  .then(r=>{ if(!r.ok)throw new Error('HTTP '+r.status); return r.json(); })
+  .then(render)
+  .catch(err=>{
+    document.getElementById('content').innerHTML=
+      `<div class="err"><strong>Couldn't load the shared picks.</strong><br>${esc(err.message)}<br><br>
+       If this is a brand new share, the file may not be published yet.</div>`;
+  });
+</script>
+</body>
+</html>
