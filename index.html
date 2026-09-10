@@ -365,9 +365,9 @@ let openPid=null;
 /* One-time archive, run automatically the first time this update loads.
    Whatever week you were on gets relabeled 0 and marked closed — same
    bets, same picks, nothing deleted, just renumbered. The sheet then
-   starts clean at week 1, and boardWeek() no longer tries to reconcile
-   NFL and college numbering at all — each board just uses its own
-   schedule's native week number directly from here on. */
+   starts clean at week 1, which is defined by real calendar dates (see
+   weekBounds() below), not by either league's own week numbering. */
+
 function archiveCurrentWeekAsZero(){
   if(S._migratedWk0)return null;              // never run twice
   S._migratedWk0=true;
@@ -1470,31 +1470,68 @@ const LG=()=>S.league||'nfl';
 const SRC=()=>LG()==='cfb'?S.cfb:S.games;
 /* Games you added by hand, kept separate from the imported feed so a
    re-import never wipes them. Merged in at read time. */
-/* No cross-league derivation. The sheet's week number is applied directly
-   to whichever schedule is showing — each board just uses its own
-   imported "wk" field as-is. Simple and predictable; it's on you to know
-   which real week a sheet number lines up with on each board. */
-function boardWeek(){ return Number(S.week); }
 
-/* Which native week, for a given league's own schedule, actually contains
-   today — or the next one coming up if today falls in a gap between weeks
-   (like the days between one league's week ending and the other's
-   starting). Computed fresh from the real game dates and the real clock,
-   so "which number should I be on" never has to be counted by hand. */
-function currentWeekFor(league){
-  const games=league==='cfb'?((S.cfb&&S.cfb.games)||[]):((S.games&&S.games.games)||[]);
-  if(!games.length)return null;
-  const today=new Date().toISOString().slice(0,10);
-  const spans={};
-  games.forEach(g=>{ if(!g.date)return;
-    const w=Number(g.wk); spans[w]=spans[w]||[g.date,g.date];
-    if(g.date<spans[w][0])spans[w][0]=g.date;
-    if(g.date>spans[w][1])spans[w][1]=g.date; });
-  const weeks=Object.keys(spans).map(Number).sort((a,b)=>a-b);
-  for(const w of weeks){ if(today>=spans[w][0]&&today<=spans[w][1])return w; }
-  for(const w of weeks){ if(spans[w][1]>=today)return w; }
-  return weeks.length?weeks[weeks.length-1]:null;
+/* Sheet weeks are a fixed, recurring calendar span — NOT either league's
+   own internal week numbering. Week 1 starts on the NFL season's actual
+   opening date (whatever day of the week that happens to fall on this
+   year) and runs through the following Monday night. Every week after
+   that is a standard Tuesday-through-Monday block. Week 0 is everything
+   before the season opener. A game from EITHER schedule belongs to
+   whichever week's calendar span its own date falls in — completely
+   independent of what "week number" either schedule's own file assigns
+   it. Verified against the real files: week 0 = 51 CFB/0 NFL, week 1
+   (9/9-9/14) = 49 CFB/16 NFL, week 2 (9/15-9/21) = 57 CFB/16 NFL. */
+let _seasonStart=null;
+function seasonStartDate(){
+  if(_seasonStart)return _seasonStart;
+  const dates=((S.games&&S.games.games)||[]).map(g=>g.date).filter(Boolean);
+  _seasonStart=dates.length?dates.reduce((a,b)=>a<b?a:b):null;
+  return _seasonStart;
 }
+function addDays(dateStr,n){
+  const d=new Date(dateStr+'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate()+n);
+  return d.toISOString().slice(0,10);
+}
+function nextMondayOnOrAfter(dateStr){
+  const d=new Date(dateStr+'T00:00:00Z');
+  const add=(1-d.getUTCDay()+7)%7;      // 0=Sun..6=Sat; days until Monday
+  return addDays(dateStr,add);
+}
+/* [startDate,endDate] inclusive ISO strings for sheet week n. Week 0's
+   start is open-ended (null) so it catches everything before the season,
+   whenever it actually began. */
+function weekBounds(n){
+  const start=seasonStartDate();
+  if(!start)return [null,null];
+  const week1End=nextMondayOnOrAfter(start);
+  n=Number(n);
+  if(n<=0)return [null,addDays(start,-1)];
+  if(n===1)return [start,week1End];
+  return [addDays(week1End,1+7*(n-2)),addDays(week1End,7*(n-1))];
+}
+function dateInWeek(dateStr,n){
+  if(!dateStr)return false;
+  const [lo,hi]=weekBounds(n);
+  if(hi==null)return false;
+  if(lo!=null&&dateStr<lo)return false;
+  return dateStr<=hi;
+}
+/* Which sheet week a given date falls into (today, by default). One
+   answer now — both leagues share the same calendar weeks, so there's no
+   more "which league's current week" ambiguity to resolve. */
+function weekForDate(dateStr){
+  const start=seasonStartDate();
+  if(!start||!dateStr)return null;
+  if(dateStr<start)return 0;
+  for(let n=1;n<=30;n++){
+    const [,hi]=weekBounds(n);
+    if(hi==null)break;
+    if(dateStr<=hi)return n;
+  }
+  return null;
+}
+function weekForToday(){ return weekForDate(new Date().toISOString().slice(0,10)); }
 
 function myGames(){
   S.mine=S.mine||{};
@@ -1765,7 +1802,7 @@ function addGameForm(){
   const open=!!S.addOpen;
   if(!open)return `<button class="btn ghost" data-addgame="open" style="margin-bottom:16px">+ Add a game</button>`;
   return `<div class="pblock" style="margin-bottom:16px">
-    <div class="pbh">Add a game · ${LG()==='cfb'?`college week ${boardWeek()}`:`week ${boardWeek()}`}</div>
+    <div class="pbh">Add a game · ${LG()==='cfb'?`college week ${S.week}`:`week ${S.week}`}</div>
     <div class="pbody">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
         <div><span class="lab">Away</span><input data-ag="away" placeholder="Montana"></div>
@@ -1776,7 +1813,7 @@ function addGameForm(){
       </div>
       <div class="note" style="margin:8px 0">Spread is from the home team's side: <strong>-7.5</strong> means the home team is favored by 7.5. Leave blank if you don't have a number.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <button class="btn" data-addgame="save">Add to week ${boardWeek()}</button>
+        <button class="btn" data-addgame="save">Add to week ${S.week}</button>
         <button class="btn ghost" data-addgame="cancel">Cancel</button>
       </div>
     </div></div>`;
@@ -1796,32 +1833,35 @@ function renderSides(){
       <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Import <code>${cfb?'cfb':'games'}-2026.json</code> on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
     return;
   }
-  const wk=boardWeek();
+  const wk=Number(S.week);
   // A search overrides the week filter — if you're hunting a team you don't
   // want to already know which week they play.
   const q=(sidesQuery||'').trim().toLowerCase();
   // NFL teams are stored as abbreviations, so match the full nickname too —
   // "seahawks" should find SEA without you knowing the code.
   const nick=t=>(TEAMS[t]?TEAMS[t][0]:'');
+  // A game belongs to whichever sheet week its own DATE falls into — see
+  // weekBounds() above. Identical rule for both leagues; nobody's native
+  // week number matters here.
   const base=q
     ? all.filter(g=>[g.away,g.home,nick(g.away),nick(g.home),g.aconf,g.hconf]
         .filter(Boolean).join(' ').toLowerCase().includes(q))
-    : all.filter(g=>Number(g.wk)===Number(wk));
+    : all.filter(g=>dateInWeek(g.date,wk));
   const games=base.slice().sort((a,b)=>{
-    if(q&&Number(a.wk)!==Number(b.wk))return Number(a.wk)-Number(b.wk);
+    if(q){ const d=String(a.date||'').localeCompare(String(b.date||'')); if(d)return d; }
     const fa=('margin' in a)?1:0, fb=('margin' in b)?1:0;
     if(fa!==fb)return fa-fb;
     return String(a.date||'').localeCompare(String(b.date||''))
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
-  const todayWk=currentWeekFor(cfb?'cfb':'nfl');
+  const todayWk=weekForToday();
   const onTodayWk = todayWk!=null && Number(wk)===Number(todayWk);
   let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`
         :`${cfb?'College week':'Week'} ${wk} · ${games.length} games`}</div><div class="pbody">
     ${todayWk!=null?`<div class="note" style="margin:0 0 6px">${onTodayWk
-        ? `You're on ${cfb?'college':'NFL'} week ${todayWk} — that's the one with today's date in it.`
-        : `Today's date falls in ${cfb?'college':'NFL'} week ${todayWk}, not week ${wk}. <button class="btn ghost" data-jumptoday="${todayWk}" style="width:auto;padding:5px 10px;margin-left:4px">Jump there</button>`
+        ? `You're on this week — the one with today's date in it.`
+        : `Today's date falls in week ${todayWk}, not week ${wk}. <button class="btn ghost" data-jumptoday="${todayWk}" style="width:auto;padding:5px 10px;margin-left:4px">Jump there</button>`
       }</div>`:''}
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
@@ -1829,7 +1869,7 @@ function renderSides(){
   </div></div>`;
 
   if(!games.length){
-    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}${todayWk!=null&&!onTodayWk?` <button class="btn ghost" data-jumptoday="${todayWk}" style="width:auto;padding:5px 10px;margin-top:8px">Jump to ${cfb?'college':'NFL'} week ${todayWk} instead</button>`:''}</div></div></div>`;
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}${todayWk!=null&&!onTodayWk?` <button class="btn ghost" data-jumptoday="${todayWk}" style="width:auto;padding:5px 10px;margin-top:8px">Jump to week ${todayWk} instead</button>`:''}</div></div></div>`;
     host.innerHTML=html; return;
   }
 
@@ -2558,14 +2598,14 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
     if(act==='open'){ S.addOpen=true; save(); renderSides(); return; }
     if(act==='cancel'){ S.addOpen=false; save(); renderSides(); return; }
     const box=ag.closest('.pbody'), v=f=>box.querySelector(`[data-ag="${f}"]`).value.trim();
-    const away=v('away'), home=v('home');
+    const away=v('away'), home=v('home'), date=v('date');
     if(!away||!home){ toast('Needs both teams'); return; }
+    if(!date){ toast('Needs a date — the schedule is sorted into weeks by date now'); return; }
     if(!confirmIfClosed(S.week))return;
     const sp=v('spread'), tot=v('total');
     myGames().push({
-      id:'my'+Date.now(), wk:boardWeek(), mine:true,
-      away, home,
-      date:v('date')||'',
+      id:'my'+Date.now(), wk:weekForDate(date)??Number(S.week), mine:true,
+      away, home, date,
       spread: sp===''?null:Number(sp),
       total: tot===''?null:Number(tot),
       proj:null
