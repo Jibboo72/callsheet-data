@@ -296,6 +296,8 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   </div>
 </section>
 
+<div id="buildInfo" style="text-align:center;padding:18px 0 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;color:var(--ink-soft);opacity:.6"></div>
+
 </div>
 
 <div class="totals" id="totalsBar">
@@ -423,6 +425,8 @@ async function load(){
   if(S.importUrl) document.getElementById('impUrl').value=S.importUrl;
   renderAll();
   syncSampleBtn();
+  const bi=document.getElementById('buildInfo');
+  if(bi)bi.textContent=`build ${BUILD_STAMP} · week 1 starts ${WEEK1_START}`;
   if(migration){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
   }
@@ -1476,18 +1480,22 @@ const SRC=()=>LG()==='cfb'?S.cfb:S.games;
    opening date (whatever day of the week that happens to fall on this
    year) and runs through the following Monday night. Every week after
    that is a standard Tuesday-through-Monday block. Week 0 is everything
-   before the season opener. A game from EITHER schedule belongs to
-   whichever week's calendar span its own date falls in — completely
-   independent of what "week number" either schedule's own file assigns
-   it. Verified against the real files: week 0 = 51 CFB/0 NFL, week 1
-   (9/9-9/14) = 49 CFB/16 NFL, week 2 (9/15-9/21) = 57 CFB/16 NFL. */
-let _seasonStart=null;
-function seasonStartDate(){
-  if(_seasonStart)return _seasonStart;
-  const dates=((S.games&&S.games.games)||[]).map(g=>g.date).filter(Boolean);
-  _seasonStart=dates.length?dates.reduce((a,b)=>a<b?a:b):null;
-  return _seasonStart;
-}
+   before that. A game from EITHER schedule belongs to whichever week's
+   calendar span its own date falls in — completely independent of what
+   "week number" either schedule's own file assigns it.
+
+   The anchor date below is a FIXED CONSTANT, not derived from any
+   imported file's own earliest date. It was derived from a schedule
+   file once, that produced 9/9 (the NFL's actual opening day) instead of
+   the 9/8 (the Tuesday before it) you specified — rather than debug
+   which file disagreed with which, this removes that dependency
+   entirely, so the boundary can't drift if a file changes. */
+const WEEK1_START='2026-09-08';
+/* Bump this on every upload — it's the only way to tell from the live app
+   whether you're looking at this file or a cached older one. Shown at the
+   very bottom of every tab. */
+const BUILD_STAMP='2026-09-10 11:55 UTC';
+function seasonStartDate(){ return WEEK1_START; }
 function addDays(dateStr,n){
   const d=new Date(dateStr+'T00:00:00Z');
   d.setUTCDate(d.getUTCDate()+n);
