@@ -1476,6 +1476,26 @@ const SRC=()=>LG()==='cfb'?S.cfb:S.games;
    which real week a sheet number lines up with on each board. */
 function boardWeek(){ return Number(S.week); }
 
+/* Which native week, for a given league's own schedule, actually contains
+   today — or the next one coming up if today falls in a gap between weeks
+   (like the days between one league's week ending and the other's
+   starting). Computed fresh from the real game dates and the real clock,
+   so "which number should I be on" never has to be counted by hand. */
+function currentWeekFor(league){
+  const games=league==='cfb'?((S.cfb&&S.cfb.games)||[]):((S.games&&S.games.games)||[]);
+  if(!games.length)return null;
+  const today=new Date().toISOString().slice(0,10);
+  const spans={};
+  games.forEach(g=>{ if(!g.date)return;
+    const w=Number(g.wk); spans[w]=spans[w]||[g.date,g.date];
+    if(g.date<spans[w][0])spans[w][0]=g.date;
+    if(g.date>spans[w][1])spans[w][1]=g.date; });
+  const weeks=Object.keys(spans).map(Number).sort((a,b)=>a-b);
+  for(const w of weeks){ if(today>=spans[w][0]&&today<=spans[w][1])return w; }
+  for(const w of weeks){ if(spans[w][1]>=today)return w; }
+  return weeks.length?weeks[weeks.length-1]:null;
+}
+
 function myGames(){
   S.mine=S.mine||{};
   S.mine[LG()]=S.mine[LG()]||[];
@@ -1795,15 +1815,21 @@ function renderSides(){
         || String(a.kick||'').localeCompare(String(b.kick||''));
   });
   const cal=(SRC()&&SRC().calibration)||{};
+  const todayWk=currentWeekFor(cfb?'cfb':'nfl');
+  const onTodayWk = todayWk!=null && Number(wk)===Number(todayWk);
   let html=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${q?`"${esc(q)}" · ${games.length} game${games.length===1?'':'s'}`
         :`${cfb?'College week':'Week'} ${wk} · ${games.length} games`}</div><div class="pbody">
+    ${todayWk!=null?`<div class="note" style="margin:0 0 6px">${onTodayWk
+        ? `You're on ${cfb?'college':'NFL'} week ${todayWk} — that's the one with today's date in it.`
+        : `Today's date falls in ${cfb?'college':'NFL'} week ${todayWk}, not week ${wk}. <button class="btn ghost" data-jumptoday="${todayWk}" style="width:auto;padding:5px 10px;margin-left:4px">Jump there</button>`
+      }</div>`:''}
     <div class="note" style="margin:0 0 4px">${cfb
       ? 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. No model here either, by design.'
       : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
   </div></div>`;
 
   if(!games.length){
-    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}</div></div></div>`;
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">${q?'Nobody matches that.':'No games that week.'}${todayWk!=null&&!onTodayWk?` <button class="btn ghost" data-jumptoday="${todayWk}" style="width:auto;padding:5px 10px;margin-top:8px">Jump to ${cfb?'college':'NFL'} week ${todayWk} instead</button>`:''}</div></div></div>`;
     host.innerHTML=html; return;
   }
 
@@ -2522,6 +2548,9 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 document.getElementById('sidesBoard').addEventListener('click',e=>{
   const lg=e.target.closest('[data-lg]');
   if(lg){ S.league=lg.dataset.lg; save(); renderSides(); return; }
+
+  const jt=e.target.closest('[data-jumptoday]');
+  if(jt){ S.week=Number(jt.dataset.jumptoday); save(); renderAll(); toast('Jumped to week '+S.week); return; }
 
   const ag=e.target.closest('[data-addgame]');
   if(ag){
