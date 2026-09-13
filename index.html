@@ -362,7 +362,10 @@ const CATS=[
    def:{mode:'single',size:2,stake:1}},
   {id:'flyer',name:'Injury Flyer',color:'var(--hl-flyer)',
    blurb:'A backup slot or committee back absorbing targets after the Wednesday report, before the line catches up.',
-   def:{mode:'single',size:2,stake:1}}
+   def:{mode:'single',size:2,stake:1}},
+  {id:'gparlay',name:'Group Parlay',color:'var(--hl-fade)',
+   blurb:'Anything, combined — a side, a total, a player prop, whatever. Type each leg and its price like the parlay slip up top; this one just lives on its own card and tracks in the ledger like everything else.',
+   def:{mode:'parlay',size:2,stake:1}}
 ];
 const catById=id=>CATS.find(c=>c.id===id);
 const MODES=[{v:'single',label:'Singles — one bet per leg'},{v:'rr',label:'Round robin'},{v:'parlay',label:'Straight parlay — all legs, one bet'}];
@@ -424,6 +427,14 @@ async function load(){
   if(!saved){ const old=await store.get(OLD); if(old){ saved=Object.assign({players:{}},old); } }
   if(saved) S=Object.assign(S,saved);
   const migration=archiveCurrentWeekAsZero();
+  // The shared parlay slip used to live at S.slip directly; it's now one
+  // of possibly several named slips under S.slips. Move it once so an
+  // in-progress draft doesn't disappear.
+  if(S.slip&&!(S.slips&&S.slips.main)){
+    S.slips=S.slips||{};
+    S.slips.main=S.slip;
+    delete S.slip;
+  }
   save();
   // backfill player keys on any existing picks
   Object.values(S.cards||{}).forEach(wk=>Object.values(wk).forEach(cd=>
@@ -701,7 +712,7 @@ function renderCards(){
       const ga=pickGame(cd.picks[a])||'zzz', gb=pickGame(cd.picks[b])||'zzz';
       return ga.localeCompare(gb);
     });
-    if(!cd.picks.length)rows=`<div class="empty">Nothing on this card yet.</div>`;
+    if(!cd.picks.length&&c.id!=='gparlay')rows=`<div class="empty">Nothing on this card yet.</div>`;
     else{
       let lastGame=null;
       order.map(i=>[cd.picks[i],i]).forEach(([p,i])=>{
@@ -761,7 +772,7 @@ function renderCards(){
       <div${collapsed?' hidden':''}>
         <div class="blurb">${c.blurb}</div>
         ${rows}
-        <div class="add">
+        ${c.id==='gparlay'?'':`<div class="add">
           <input class="full" data-f="who" placeholder="${c.id==='ctd'?'Player — any name, no roster lookup':'Player'}" style="grid-column:1/-1"${c.id==='ctd'?'':' list="rosterNames"'}>
           <select data-f="mkt" style="grid-column:1/-1">${MKT.map(m=>`<option value="${m.v}">${m.label}</option>`).join('')}</select>
           <select data-f="side">${SIDES.map(s=>`<option value="${s.v}">${s.label}</option>`).join('')}</select>
@@ -771,8 +782,8 @@ function renderCards(){
           <input class="full" data-f="game" placeholder="Game (optional — e.g. NE @ SEA)" style="grid-column:1/-1">
           <div class="full" data-preview="${c.id}" style="grid-column:1/-1"></div>
           <button class="btn" data-add="${c.id}" style="grid-column:1/-1">Add to card</button>
-        </div>
-        <div class="slip">
+        </div>`}
+        ${c.id==='gparlay'?slipPanel('gparlay'):`<div class="slip">
           <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
             <button class="sgbtn" data-groupgame="0" data-c="${c.id}" aria-selected="${!grouped}">Order added</button>
             <button class="sgbtn" data-groupgame="1" data-c="${c.id}" aria-selected="${grouped}">Group by game</button>
@@ -799,7 +810,7 @@ function renderCards(){
             return `<div class="note" style="margin:8px 0 6px">${s.won} of ${s.bets} bets won · staked ${money(s.staked)} · returned ${money(s.ret)} · <strong style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</strong></div>
               <button class="btn ghost" data-settle="${c.id}">Settle to bankroll</button>`;
           })()}
-        </div>
+        </div>`}
       </div>`;
     host.appendChild(el);
   });
@@ -1515,7 +1526,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-10 21:50 UTC';
+const BUILD_STAMP='2026-09-11 03:20 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1713,26 +1724,37 @@ function closeWeek(wk){
    Straight-bet parlays, kept entirely separate from the five prop cards.
    Legs can come off either board or be typed in (anytime TD, etc), so a
    slip can mix NFL and college. */
-function slip(){ S.slip=S.slip||{legs:[]}; S.slip.legs=S.slip.legs||[]; return S.slip; }
+/* One shared slip mechanism, now supporting more than one named instance.
+   'main' is the original shared parlay slip (Props top + Sides); every
+   existing call site defaults to it, so nothing already built changes
+   behavior. Group Parlay gets its own independent 'gparlay' instance —
+   same mechanism, separate legs, separate manual-odds override. */
+function slip(name='main'){
+  S.slips=S.slips||{};
+  S.slips[name]=S.slips[name]||{legs:[]};
+  S.slips[name].legs=S.slips[name].legs||[];
+  return S.slips[name];
+}
 /* The combined parlay price. A manually-typed overall number always wins —
    that's what the book actually shows you, and it may include adjustments
    (parlay tax, promos) the pure math wouldn't know about. Without one,
    every leg needs its own odds; a partial mix would silently understate
    the true price, so that returns null (undetermined) rather than a
    quietly-wrong number. */
-function slipOdds(){
-  const manual=(slip().manualOdds!=null && slip().manualOdds!=='') ? toDec(slip().manualOdds) : null;
+function slipOdds(name='main'){
+  const s=slip(name);
+  const manual=(s.manualOdds!=null && s.manualOdds!=='') ? toDec(s.manualOdds) : null;
   if(manual)return manual;
-  const legs=slip().legs;
+  const legs=s.legs;
   if(!legs.length)return null;
   const dec=legs.map(l=>toDec(l.odds));
   if(dec.some(d=>!d))return null;      // someone's missing a price and there's no override
   return dec.reduce((a,d)=>a*d,1);
 }
-function slipLeague(){
+function slipLeague(name='main'){
   // A custom leg (anytime TD and the like) doesn't decide the league — only
   // an actual NFL+college combination counts as mixed.
-  const k=new Set(slip().legs.map(l=>l.kind).filter(x=>x==='nfl'||x==='cfb'));
+  const k=new Set(slip(name).legs.map(l=>l.kind).filter(x=>x==='nfl'||x==='cfb'));
   if(k.size>1)return 'mixed';
   if(k.has('cfb'))return 'cfb';
   return 'nfl';
@@ -1831,53 +1853,57 @@ function propSettlement(cid){
   return {bets:bets.length,won,staked,ret,pl:ret-staked};
 }
 
-function slipPanel(){
-  const s=slip(), legs=s.legs;
-  const d=slipOdds();
+function slipPanel(name='main'){
+  const s=slip(name), legs=s.legs;
+  const d=slipOdds(name);
   const am=d?toAm(d):null;
   const usingManual = s.manualOdds!=null && s.manualOdds!=='';
   const showGroup = s.oddsView==='group';    // default is per-leg
   const missing = !usingManual && legs.some(l=>!toDec(l.odds));
+  const title = name==='main' ? 'Parlay slip' : 'Group Parlay';
+  const emptyHint = name==='main'
+    ? 'Empty. Tap <strong>+ Parlay</strong> on any pick or game below, or add a leg by hand for something not on the board.'
+    : 'Empty. Type each leg below — a side, a total, a player prop, anything — and its price if you have one.';
   return `<div class="pblock" style="margin-bottom:16px;${legs.length?'border-width:3px':''}">
-    <div class="pbh">Parlay slip${legs.length?` · ${legs.length} leg${legs.length===1?'':'s'}${am!=null?` · ${fmtAm(am)}${usingManual?' (your price)':''}`:''}`:''}</div>
+    <div class="pbh">${title}${legs.length?` · ${legs.length} leg${legs.length===1?'':'s'}${am!=null?` · ${fmtAm(am)}${usingManual?' (your price)':''}`:''}`:''}</div>
     <div class="pbody">
       ${legs.length>=2?`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
-        <button class="sgbtn" data-slipview="individual" aria-selected="${!showGroup}">Individual odds</button>
-        <button class="sgbtn" data-slipview="group" aria-selected="${showGroup}">Group odds only</button>
+        <button class="sgbtn" data-slipview="individual" data-slipname="${name}" aria-selected="${!showGroup}">Individual odds</button>
+        <button class="sgbtn" data-slipview="group" data-slipname="${name}" aria-selected="${showGroup}">Group odds only</button>
       </div>`:''}
       ${legs.length?legs.map((l,i)=>`<div class="hist">
           <span class="pill" style="background:${l.kind==='cfb'?'var(--hl-long)':(l.kind==='prop'?'var(--hl-slot)':(l.kind==='custom'?'var(--hl-flyer)':'var(--ink-soft)'))}">${l.kind==='cfb'?'NCAA':(l.kind==='prop'?'PROP':(l.kind==='custom'?'OTHER':'NFL'))}</span>
           <span class="t">${l.match?`<strong>${esc(l.match)}</strong><br>`:''}${esc(l.desc)}${showGroup?'':` <strong>${l.odds!=null&&l.odds!==''?fmtAm(l.odds):'<span style=\"color:var(--hl-long)\">no price</span>'}</strong>`}</span>
-          <button class="x" data-sliprm="${i}" aria-label="Remove leg">×</button>
-        </div>`).join(''):`<div class="note" style="margin:0 0 8px">Empty. Tap <strong>+ Parlay</strong> on any pick or game below, or add a leg by hand for something not on the board.</div>`}
+          <button class="x" data-sliprm="${i}" data-slipname="${name}" aria-label="Remove leg">×</button>
+        </div>`).join(''):`<div class="note" style="margin:0 0 8px">${emptyHint}</div>`}
 
       <div style="display:grid;grid-template-columns:1fr 84px;gap:6px;margin-top:10px">
-        <input data-sl="desc" placeholder="Custom leg — e.g. Nabers anytime TD" style="grid-column:1/-1">
-        <input data-sl="odds" placeholder="+140 (optional)" inputmode="text">
-        <button class="btn ghost" data-slipadd="custom">Add leg</button>
+        <input data-sl="desc" data-slipname="${name}" placeholder="${name==='main'?'Custom leg — e.g. Nabers anytime TD':'Leg — e.g. SEA -3.5, or Mahomes 2+ TD'}" style="grid-column:1/-1">
+        <input data-sl="odds" data-slipname="${name}" placeholder="+140 (optional)" inputmode="text">
+        <button class="btn ghost" data-slipadd="${name}">Add leg</button>
       </div>
 
       <div style="height:8px"></div>
       <span class="lab">Or skip the leg prices and just type the total price the book shows</span>
-      <input data-sl="manual" placeholder="e.g. +650" inputmode="text" value="${esc(s.manualOdds!=null?String(s.manualOdds):'')}">
+      <input data-sl="manual" data-slipname="${name}" placeholder="e.g. +650" inputmode="text" value="${esc(s.manualOdds!=null?String(s.manualOdds):'')}">
 
       ${legs.length>=2?`
         ${missing?`<div class="note" style="margin:8px 0 0;color:var(--hl-long)">One or more legs has no price and there's no overall price typed above — enter one or the other before placing.</div>`
           :`<div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)}${usingManual?' (your price)':''} — 1 unit returns ${money(U()*d)}. Every leg has to land.</div>`}
         <div class="units">
-          <button class="ubtn" data-slipu="1">1 unit<span>${money(U())}</span></button>
-          <button class="ubtn" data-slipu="2">2 units<span>${money(2*U())}</span></button>
-          <button class="ubtn" data-slipu="3">3 units<span>${money(3*U())}</span></button>
-          <button class="ubtn" data-slipu="x">✱<span>custom</span></button>
+          <button class="ubtn" data-slipu="1" data-slipname="${name}">1 unit<span>${money(U())}</span></button>
+          <button class="ubtn" data-slipu="2" data-slipname="${name}">2 units<span>${money(2*U())}</span></button>
+          <button class="ubtn" data-slipu="3" data-slipname="${name}">3 units<span>${money(3*U())}</span></button>
+          <button class="ubtn" data-slipu="x" data-slipname="${name}">✱<span>custom</span></button>
         </div>
         <div class="custom" data-slipcustom hidden>
           <div style="display:grid;grid-template-columns:1fr 90px;gap:6px">
-            <input data-sl="stake" placeholder="Custom $" inputmode="decimal">
-            <button class="btn" data-slipu="c">Place</button>
+            <input data-sl="stake" data-slipname="${name}" placeholder="Custom $" inputmode="decimal">
+            <button class="btn" data-slipu="c" data-slipname="${name}">Place</button>
           </div>
         </div>
         <div style="height:8px"></div>
-        <button class="btn ghost" data-slipclear="1">Clear slip</button>`
+        <button class="btn ghost" data-slipclear="1" data-slipname="${name}">Clear slip</button>`
       :(legs.length===1?`<div class="note" style="margin:10px 0 0">One more leg and you can place it.</div>`:'')}
     </div></div>`;
 }
@@ -2929,10 +2955,11 @@ document.getElementById('main').addEventListener('click',e=>{
   // typed there first, so a re-render never wipes it.
   const captureManual=box=>{
     const mi=box&&box.querySelector('[data-sl="manual"]');
-    if(mi)slip().manualOdds=mi.value;
+    if(mi)slip(mi.dataset.slipname||'main').manualOdds=mi.value;
   };
 
-  // + Parlay on an individual prop pick — pulls the pick's own player,
+  // + Parlay on an individual prop pick — always targets the shared top
+  // slip specifically, not Group Parlay. Pulls the pick's own player,
   // description and price straight in, no retyping.
   const ppl=e.target.closest('[data-propparlay]');
   if(ppl){
@@ -2945,13 +2972,14 @@ document.getElementById('main').addEventListener('click',e=>{
     return;
   }
   const srm=e.target.closest('[data-sliprm]');
-  if(srm){ captureManual(srm.closest('.pbody')); slip().legs.splice(Number(srm.dataset.sliprm),1); save(); rerenderSlip(); return; }
+  if(srm){ const nm=srm.dataset.slipname||'main'; captureManual(srm.closest('.pbody')); slip(nm).legs.splice(Number(srm.dataset.sliprm),1); save(); rerenderSlip(); return; }
   const sclr=e.target.closest('[data-slipclear]');
-  if(sclr){ slip().legs=[]; slip().manualOdds=''; save(); rerenderSlip(); return; }
+  if(sclr){ const nm=sclr.dataset.slipname||'main'; slip(nm).legs=[]; slip(nm).manualOdds=''; save(); rerenderSlip(); return; }
   const sview=e.target.closest('[data-slipview]');
-  if(sview){ captureManual(sview.closest('.pbody')); slip().oddsView=sview.dataset.slipview; save(); rerenderSlip(); return; }
+  if(sview){ const nm=sview.dataset.slipname||'main'; captureManual(sview.closest('.pbody')); slip(nm).oddsView=sview.dataset.slipview; save(); rerenderSlip(); return; }
   const sadd=e.target.closest('[data-slipadd]');
   if(sadd){
+    const nm=sadd.dataset.slipadd||'main';
     const box=sadd.closest('.pbody'), v=f=>box.querySelector(`[data-sl="${f}"]`);
     captureManual(box);
     const desc=v('desc').value.trim();
@@ -2959,13 +2987,14 @@ document.getElementById('main').addEventListener('click',e=>{
     const odds=oddsRaw===''?null:parseInt(oddsRaw,10);   // blank is fine —
     // the overall-price box below can cover it instead
     if(!desc){toast('Needs a description for the leg');return;}
-    slip().legs.push({desc,odds,kind:'custom',market:'other',match:'',wk:S.week});
+    slip(nm).legs.push({desc,odds,kind:'custom',market:'other',match:'',wk:S.week});
     save();rerenderSlip();toast('Leg added');
     return;
   }
   const su=e.target.closest('[data-slipu]');
   if(su){
-    const legs=slip().legs;
+    const nm=su.dataset.slipname||'main';
+    const legs=slip(nm).legs;
     if(legs.length<2){toast('A parlay needs two legs');return;}
     const box=su.closest('.pbody');
     if(su.dataset.slipu==='x'){
@@ -2974,7 +3003,7 @@ document.getElementById('main').addEventListener('click',e=>{
       c.hidden=!c.hidden; return;
     }
     captureManual(box);
-    const d=slipOdds();
+    const d=slipOdds(nm);
     if(d==null){toast('Enter a price for every leg, or type the overall price above');return;}
     const stake = su.dataset.slipu==='c'
       ? Number(box.querySelector('[data-sl="stake"]').value)
@@ -2983,11 +3012,11 @@ document.getElementById('main').addEventListener('click',e=>{
     if(!confirmIfClosed(S.week))return;
     addBet({
       desc:legs.map(l=>l.desc).join(' + '),
-      odds:toAm(d), stake, kind:'parlay', league:slipLeague(),
+      odds:toAm(d), stake, kind:'parlay', league:slipLeague(nm),
       legs:legs.slice(), wk:S.week,
       match:`${legs.length}-leg parlay`
     });
-    slip().legs=[]; slip().manualOdds=''; save(); rerenderSlip(); renderBank(); renderLedger();
+    slip(nm).legs=[]; slip(nm).manualOdds=''; save(); rerenderSlip(); renderBank(); renderLedger();
     toast(money(stake)+' parlay placed');
     return;
   }
