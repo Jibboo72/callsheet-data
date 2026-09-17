@@ -802,9 +802,19 @@ function renderCards(){
           ${flags.map(f=>`<div class="flag">${f}</div>`).join('')}
           ${screenPanel(c.id)}
           ${(()=>{
+            const placed=placedPropBet(c.id);
             const s=propSettlement(c.id);
-            const done=(S.bank&&S.bank.bets||[]).some(b=>b.kind==='prop'&&b.card===c.id&&Number(b.wk)===Number(S.week));
-            if(done)return `<div class="note" style="margin:8px 0 0">Settled to bankroll.</div>`;
+            if(placed&&placed.result!=null){
+              const col=placed.fixedReturn>=placed.stake?'var(--win)':'var(--loss)';
+              return `<div class="note" style="margin:8px 0 0">Settled — ${esc(placed.desc)} · <strong style="color:${col}">${placed.fixedReturn>=placed.stake?'+':''}${money(placed.fixedReturn-placed.stake).replace('$','')}</strong></div>`;
+            }
+            if(placed){
+              return `<div class="note" style="margin:8px 0 0">Placed — ${money(placed.stake)} on ${m.bets} bet${m.bets===1?'':'s'}, waiting on grades. Grading every leg here settles it automatically.</div>`;
+            }
+            if(m.bets>=2){
+              return `<div class="note" style="margin:8px 0 6px">${m.bets} bets at ${money(c.stake)} each — ${money(m.stake)} total. Places now, before anything's graded; settles itself once every leg has a result.</div>
+                <button class="btn" data-place-rr="${c.id}">Place ${c.mode==='parlay'?'parlay':'round robin'} — ${money(m.stake)}</button>`;
+            }
             if(!s)return m.bets?`<div class="note" style="margin:8px 0 0">Grade every leg to settle this card to the bankroll.</div>`:'';
             const col=s.pl>=0?'var(--win)':'var(--loss)';
             return `<div class="note" style="margin:8px 0 6px">${s.won} of ${s.bets} bets won · staked ${money(s.staked)} · returned ${money(s.ret)} · <strong style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</strong></div>
@@ -1526,7 +1536,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 03:20 UTC';
+const BUILD_STAMP='2026-09-11 09:15 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1836,6 +1846,13 @@ function placePick(cid,i,stake){
 }
 
 /* how many round-robin combos actually won, from the graded legs */
+/* The bank bet already placed for this card this week, if any — lets a
+   round robin or parlay-mode card be committed as a real bet BEFORE the
+   legs are graded, then have that same bet record filled in automatically
+   once results come in, instead of needing a separate settle click. */
+function placedPropBet(cid){
+  return (S.bank&&S.bank.bets||[]).find(b=>b.kind==='prop'&&b.card===cid&&Number(b.wk)===Number(S.week));
+}
 function propSettlement(cid){
   const c=card(cid),legs=activeLegs(cid),stake=Number(c.stake)||0;
   const graded=legs.filter(p=>p.grade==='W'||p.grade==='L');
@@ -3049,6 +3066,19 @@ document.getElementById('main').addEventListener('click',e=>{
     S.screenOpen = sc.dataset.screen==='close' ? null : sc.dataset.screen;
     save(); renderCards(); return;
   }
+  const pr=e.target.closest('[data-place-rr]');
+  if(pr){
+    const cid=pr.dataset.placeRr, m=slipMath(cid), c=card(cid);
+    if(m.bets<2)return;
+    if(!confirmIfClosed(S.week))return;
+    if(!confirm(`Place ${m.bets} bets at ${money(c.stake)} each — ${money(m.stake)} total?`))return;
+    const b=BANKKEY();
+    b.bets.push({id:'b'+Date.now(),wk:S.week,kind:'prop',card:cid,paper:!!b.paper,
+      desc:`${catById(cid).name} · ${m.bets} bet${m.bets===1?'':'s'}, pending`,
+      odds:null, stake:m.stake, result:null, ts:Date.now(), fixedReturn:null});
+    save();renderCards();renderBank();renderLedger();toast(money(m.stake)+' placed');
+    return;
+  }
   const st=e.target.closest('[data-settle]');
   if(st){
     const cid=st.dataset.settle, s=propSettlement(cid);
@@ -3104,6 +3134,17 @@ document.getElementById('main').addEventListener('click',e=>{
     if(p.betId){
       const b=BANKKEY().bets.find(x=>x.id===p.betId);
       if(b)b.result=p.grade;
+    }
+    // a round robin or parlay already placed on this card settles itself
+    // the moment every leg has a result — no separate click needed
+    const placed=placedPropBet(cid);
+    if(placed&&placed.result==null){
+      const s=propSettlement(cid);
+      if(s){
+        placed.result=s.pl>=0?'W':'L';
+        placed.fixedReturn=s.ret;
+        placed.desc=`${catById(cid).name} · ${s.won}/${s.bets} won`;
+      }
     }
     save();renderCards();renderRoster();renderBank();renderLedger();
   }
