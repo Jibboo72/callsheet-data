@@ -804,21 +804,30 @@ function renderCards(){
           ${(()=>{
             const placed=placedPropBet(c.id);
             const s=propSettlement(c.id);
+            const combos=propCombos(c.id);
+            const showCombos=!!(S.showCombos&&S.showCombos[c.id]);
+            const comboBlock = combos.length>=2 ? `
+              <button class="btn ghost" data-showcombos="${c.id}" style="margin-top:6px">${showCombos?'Hide':'See'} the ${combos.length} combo${combos.length===1?'':'s'}</button>
+              ${showCombos?`<div style="margin-top:6px">${combos.map(cb=>{
+                const col=cb.status==='W'?'var(--win)':(cb.status==='L'?'var(--loss)':'var(--ink-soft)');
+                const badge=cb.status==='W'?'WON':(cb.status==='L'?'lost':'pending');
+                return `<div class="hist"><span class="t">${esc(cb.names.join(' + '))}</span><span style="font-family:Oswald,sans-serif;font-weight:700;color:${col}">${badge}</span></div>`;
+              }).join('')}</div>`:''}` : '';
             if(placed&&placed.result!=null){
               const col=placed.fixedReturn>=placed.stake?'var(--win)':'var(--loss)';
-              return `<div class="note" style="margin:8px 0 0">Settled — ${esc(placed.desc)} · <strong style="color:${col}">${placed.fixedReturn>=placed.stake?'+':''}${money(placed.fixedReturn-placed.stake).replace('$','')}</strong></div>`;
+              return `<div class="note" style="margin:8px 0 0">Settled — ${esc(placed.desc)} · <strong style="color:${col}">${placed.fixedReturn>=placed.stake?'+':''}${money(placed.fixedReturn-placed.stake).replace('$','')}</strong></div>${comboBlock}`;
             }
             if(placed){
-              return `<div class="note" style="margin:8px 0 0">Placed — ${money(placed.stake)} on ${m.bets} bet${m.bets===1?'':'s'}, waiting on grades. Grading every leg here settles it automatically.</div>`;
+              return `<div class="note" style="margin:8px 0 0">Placed — ${money(placed.stake)} on ${m.bets} bet${m.bets===1?'':'s'}, waiting on grades. Grading every leg here settles it automatically.</div>${comboBlock}`;
             }
             if(m.bets>=2){
               return `<div class="note" style="margin:8px 0 6px">${m.bets} bets at ${money(c.stake)} each — ${money(m.stake)} total. Places now, before anything's graded; settles itself once every leg has a result.</div>
-                <button class="btn" data-place-rr="${c.id}">Place ${c.mode==='parlay'?'parlay':'round robin'} — ${money(m.stake)}</button>`;
+                <button class="btn" data-place-rr="${c.id}">Place ${c.mode==='parlay'?'parlay':'round robin'} — ${money(m.stake)}</button>${comboBlock}`;
             }
             if(!s)return m.bets?`<div class="note" style="margin:8px 0 0">Grade every leg to settle this card to the bankroll.</div>`:'';
             const col=s.pl>=0?'var(--win)':'var(--loss)';
             return `<div class="note" style="margin:8px 0 6px">${s.won} of ${s.bets} bets won · staked ${money(s.staked)} · returned ${money(s.ret)} · <strong style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</strong></div>
-              <button class="btn ghost" data-settle="${c.id}">Settle to bankroll</button>`;
+              <button class="btn ghost" data-settle="${c.id}">Settle to bankroll</button>${comboBlock}`;
           })()}
         </div>`}
       </div>`;
@@ -1536,7 +1545,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 09:15 UTC';
+const BUILD_STAMP='2026-09-11 09:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1852,6 +1861,24 @@ function placePick(cid,i,stake){
    once results come in, instead of needing a separate settle click. */
 function placedPropBet(cid){
   return (S.bank&&S.bank.bets||[]).find(b=>b.kind==='prop'&&b.card===cid&&Number(b.wk)===Number(S.week));
+}
+/* Every individual combo with its own player names and status, not just
+   the aggregate count — this is what actually answers "why didn't more
+   of these hit," since most combos in a round robin are expected to
+   miss (every leg in that specific group has to land). */
+function propCombos(cid){
+  const c=card(cid), legs=activeLegs(cid);
+  const items=legs.map(p=>({who:p.who,d:toDec(p.odds),grade:p.grade||null}));
+  let combos=[];
+  if(c.mode==='single')combos=items.map(x=>[x]);
+  else if(c.mode==='parlay'){if(items.length>=2)combos=[items];}
+  else{const k=Math.max(2,Math.min(Number(c.size)||2,items.length));if(items.length>=k)combos=combosOf(items,k);}
+  return combos.map(cb=>{
+    const allGraded=cb.every(x=>x.grade);
+    const win=allGraded&&cb.every(x=>x.grade==='W');
+    return {names:cb.map(x=>x.who), status: !allGraded?'pending':(win?'W':'L'),
+      dec:cb.reduce((a,x)=>a*(x.d||1),1)};
+  });
 }
 function propSettlement(cid){
   const c=card(cid),legs=activeLegs(cid),stake=Number(c.stake)||0;
@@ -3065,6 +3092,13 @@ document.getElementById('main').addEventListener('click',e=>{
   if(sc){
     S.screenOpen = sc.dataset.screen==='close' ? null : sc.dataset.screen;
     save(); renderCards(); return;
+  }
+  const shc=e.target.closest('[data-showcombos]');
+  if(shc){
+    S.showCombos=S.showCombos||{};
+    const cid=shc.dataset.showcombos;
+    S.showCombos[cid]=!S.showCombos[cid];
+    save();renderCards();return;
   }
   const pr=e.target.closest('[data-place-rr]');
   if(pr){
