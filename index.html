@@ -792,7 +792,9 @@ function renderCards(){
             <div><span class="lab">Bet type</span><select data-set="mode" data-c="${c.id}">${MODES.map(o=>`<option value="${o.v}"${cd.mode===o.v?' selected':''}>${o.label}</option>`).join('')}</select></div>
             <div><span class="lab">Size</span><select data-set="size" data-c="${c.id}"${cd.mode==='rr'?'':' disabled'}>${sizes||'<option>2-pick</option>'}</select></div>
             <div><span class="lab">Per bet</span><input data-set="stake" data-c="${c.id}" type="number" step="0.25" min="0" inputmode="decimal" value="${cd.stake}"></div>
+            ${cd.mode!=='single'?`<div><span class="lab">Boost %</span><input data-set="boost" data-c="${c.id}" type="number" step="1" min="0" inputmode="decimal" value="${cd.boost||''}" placeholder="0"></div>`:''}
           </div>
+          ${cd.mode!=='single'&&cd.boost?`<div class="note" style="margin:6px 0 0">A ${cd.boost}% boost applies to each combo's winnings, not your stake back — that's how these promos actually work.</div>`:''}
           <div class="tline"><span class="k">Active legs</span><span class="v">${m.legs}</span></div>
           <div class="tline"><span class="k">Bets placed</span><span class="v">${m.bets}</span></div>
           <div class="tline"><span class="k">Total stake</span><span class="v">${money(m.stake)}</span></div>
@@ -810,8 +812,11 @@ function renderCards(){
               <button class="btn ghost" data-showcombos="${c.id}" style="margin-top:6px">${showCombos?'Hide':'See'} the ${combos.length} combo${combos.length===1?'':'s'}</button>
               ${showCombos?`<div style="margin-top:6px">${combos.map(cb=>{
                 const col=cb.status==='W'?'var(--win)':(cb.status==='L'?'var(--loss)':'var(--ink-soft)');
-                const badge=cb.status==='W'?'WON':(cb.status==='L'?'lost':'pending');
-                return `<div class="hist"><span class="t">${esc(cb.names.join(' + '))}</span><span style="font-family:Oswald,sans-serif;font-weight:700;color:${col}">${badge}</span></div>`;
+                const price=cb.dec>1?fmtAm(toAm(cb.dec)):'—';
+                const rawPay=(Number(cd.stake)||0)*cb.dec;
+                const pay=cb.boosted?applyBoost(rawPay,Number(cd.stake)||0,cd.boost):rawPay;
+                const payLabel=cb.status==='W'?money(pay)+(cb.boosted?' (boosted)':''):(cb.status==='L'?'lost':'pending');
+                return `<div class="hist"><span class="t">${esc(cb.names.join(' + '))}<br><span style="color:var(--ink-soft)">${price} · ${cb.names.length} legs</span></span><span style="font-family:Oswald,sans-serif;font-weight:700;color:${col}">${payLabel}</span></div>`;
               }).join('')}</div>`:''}` : '';
             if(placed&&placed.result!=null){
               const col=placed.fixedReturn>=placed.stake?'var(--win)':'var(--loss)';
@@ -821,8 +826,8 @@ function renderCards(){
               return `<div class="note" style="margin:8px 0 0">Placed — ${money(placed.stake)} on ${m.bets} bet${m.bets===1?'':'s'}, waiting on grades. Grading every leg here settles it automatically.</div>${comboBlock}`;
             }
             if(m.bets>=2){
-              return `<div class="note" style="margin:8px 0 6px">${m.bets} bets at ${money(c.stake)} each — ${money(m.stake)} total. Places now, before anything's graded; settles itself once every leg has a result.</div>
-                <button class="btn" data-place-rr="${c.id}">Place ${c.mode==='parlay'?'parlay':'round robin'} — ${money(m.stake)}</button>${comboBlock}`;
+              return `<div class="note" style="margin:8px 0 6px">${m.bets} bets at ${money(cd.stake)} each — ${money(m.stake)} total. Places now, before anything's graded; settles itself once every leg has a result.</div>
+                <button class="btn" data-place-rr="${c.id}">Place ${cd.mode==='parlay'?'parlay':'round robin'} — ${money(m.stake)}</button>${comboBlock}`;
             }
             if(!s)return m.bets?`<div class="note" style="margin:8px 0 0">Grade every leg to settle this card to the bankroll.</div>`:'';
             const col=s.pl>=0?'var(--win)':'var(--loss)';
@@ -1545,7 +1550,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 11:10 UTC';
+const BUILD_STAMP='2026-09-11 12:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1651,9 +1656,19 @@ function unitStr(v){
   return (clean?`${Math.round(u)}u`:`${u.toFixed(2)}u`)+` (${money(v)})`;
 }
 
+/* A promo boost increases your WINNINGS, never your own stake back — that's
+   how every real sportsbook boost token works. $5 at even odds pays $10;
+   a 50% boost doesn't turn your $5 into $7.50, it turns your $5 profit
+   into $7.50 profit, for a $12.50 total payout. */
+function applyBoost(totalPayout,stake,boostPct){
+  if(!boostPct)return totalPayout;
+  const profit=totalPayout-stake;
+  return stake+profit*(1+Number(boostPct)/100);
+}
 function payout(stake,odds,bet){
   if(bet&&bet.fixedReturn!=null)return Number(bet.fixedReturn);
-  const d=toDec(odds); return d?stake*d:stake;
+  const d=toDec(odds); const base=d?stake*d:stake;
+  return (bet&&bet.boost)?applyBoost(base,stake,bet.boost):base;
 }
 /* A bet stores a game id; this finds that game no matter which league or
    source it came from, so the log can show the matchup even when you're
@@ -1867,7 +1882,7 @@ function placedPropBet(cid){
    of these hit," since most combos in a round robin are expected to
    miss (every leg in that specific group has to land). */
 function propCombos(cid){
-  const c=card(cid), legs=activeLegs(cid);
+  const c=card(cid), legs=activeLegs(cid), boost=Number(c.boost)||0;
   const items=legs.map(p=>({who:p.who,d:toDec(p.odds),grade:p.grade||null}));
   let combos=[];
   if(c.mode==='single')combos=items.map(x=>[x]);
@@ -1876,12 +1891,13 @@ function propCombos(cid){
   return combos.map(cb=>{
     const allGraded=cb.every(x=>x.grade);
     const win=allGraded&&cb.every(x=>x.grade==='W');
+    const dec=cb.reduce((a,x)=>a*(x.d||1),1);
     return {names:cb.map(x=>x.who), status: !allGraded?'pending':(win?'W':'L'),
-      dec:cb.reduce((a,x)=>a*(x.d||1),1)};
+      dec, boosted: cb.length>1&&boost?true:false};
   });
 }
 function propSettlement(cid){
-  const c=card(cid),legs=activeLegs(cid),stake=Number(c.stake)||0;
+  const c=card(cid),legs=activeLegs(cid),stake=Number(c.stake)||0,boost=Number(c.boost)||0;
   const graded=legs.filter(p=>p.grade==='W'||p.grade==='L');
   if(!graded.length||graded.length<legs.length)return null;   // not fully graded
   const decs=legs.map(p=>({d:toDec(p.odds),win:p.grade==='W'}));
@@ -1892,7 +1908,11 @@ function propSettlement(cid){
   let staked=0,ret=0,won=0;
   bets.forEach(bt=>{
     staked+=stake;
-    if(bt.every(x=>x.win)){ret+=stake*bt.reduce((a,x)=>a*x.d,1);won++;}
+    if(bt.every(x=>x.win)){
+      let pay=stake*bt.reduce((a,x)=>a*x.d,1);
+      if(bt.length>1&&boost)pay=applyBoost(pay,stake,boost);   // boost applies to combos, not single legs
+      ret+=pay;won++;
+    }
   });
   return {bets:bets.length,won,staked,ret,pl:ret-staked};
 }
@@ -1931,9 +1951,13 @@ function slipPanel(name='main'){
       <span class="lab">Or skip the leg prices and just type the total price the book shows</span>
       <input data-sl="manual" data-slipname="${name}" placeholder="e.g. +650" inputmode="text" value="${esc(s.manualOdds!=null?String(s.manualOdds):'')}">
 
+      <div style="height:8px"></div>
+      <span class="lab">Promo boost, if you used one — applies to your winnings, not your stake back</span>
+      <input data-sl="boost" data-slipname="${name}" placeholder="0" inputmode="decimal" value="${esc(s.boost!=null?String(s.boost):'')}">
+
       ${legs.length>=2?`
         ${missing?`<div class="note" style="margin:8px 0 0;color:var(--hl-long)">One or more legs has no price and there's no overall price typed above — enter one or the other before placing.</div>`
-          :`<div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)}${usingManual?' (your price)':''} — 1 unit returns ${money(U()*d)}. Every leg has to land.</div>`}
+          :`<div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)}${usingManual?' (your price)':''} — 1 unit returns ${money(applyBoost(U()*d,U(),s.boost))}${s.boost?` (${s.boost}% boost applied)`:''}. Every leg has to land.</div>`}
         <div class="units">
           <button class="ubtn" data-slipu="1" data-slipname="${name}">1 unit<span>${money(U())}</span></button>
           <button class="ubtn" data-slipu="2" data-slipname="${name}">2 units<span>${money(2*U())}</span></button>
@@ -3002,6 +3026,8 @@ document.getElementById('main').addEventListener('click',e=>{
   const captureManual=box=>{
     const mi=box&&box.querySelector('[data-sl="manual"]');
     if(mi)slip(mi.dataset.slipname||'main').manualOdds=mi.value;
+    const bi=box&&box.querySelector('[data-sl="boost"]');
+    if(bi)slip(bi.dataset.slipname||'main').boost=Number(bi.value)||0;
   };
 
   // + Parlay on an individual prop pick — always targets the shared top
@@ -3059,10 +3085,10 @@ document.getElementById('main').addEventListener('click',e=>{
     addBet({
       desc:legs.map(l=>l.desc).join(' + '),
       odds:toAm(d), stake, kind:'parlay', league:slipLeague(nm),
-      legs:legs.slice(), wk:S.week,
+      legs:legs.slice(), wk:S.week, boost:Number(slip(nm).boost)||0,
       match:`${legs.length}-leg parlay`
     });
-    slip(nm).legs=[]; slip(nm).manualOdds=''; save(); rerenderSlip(); renderBank(); renderLedger();
+    slip(nm).legs=[]; slip(nm).manualOdds=''; slip(nm).boost=''; save(); rerenderSlip(); renderBank(); renderLedger();
     toast(money(stake)+' parlay placed');
     return;
   }
@@ -3194,6 +3220,7 @@ document.getElementById('main').addEventListener('change',e=>{
   const cd=card(s.dataset.c),f=s.dataset.set;
   if(f==='stake')cd.stake=Math.max(0,Number(s.value)||0);
   else if(f==='size')cd.size=Number(s.value)||2;
+  else if(f==='boost')cd.boost=Math.max(0,Number(s.value)||0);
   else cd.mode=s.value;
   save();renderCards();
 });
