@@ -1545,7 +1545,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 10:20 UTC';
+const BUILD_STAMP='2026-09-11 11:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2273,8 +2273,9 @@ function renderBank(){
         <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
         <button class="x" data-bdel="${esc(x.id)}" aria-label="Remove">×</button>
         <div class="grade">
+          ${x.card?`<span style="font-size:9px;color:var(--ink-soft);text-align:center;line-height:1.3;padding:0 2px">Grade on<br>the card</span>`:`
           <button data-bg="W" data-bid="${esc(x.id)}" data-on="${x.result==='W'?1:0}">W</button>
-          <button data-bg="L" data-bid="${esc(x.id)}" data-on="${x.result==='L'?1:0}">L</button>
+          <button data-bg="L" data-bid="${esc(x.id)}" data-on="${x.result==='L'?1:0}">L</button>`}
         </div></div>`;
     }).join(''):`<div class="empty">${bq?'No bets match that.':'Nothing logged yet. Add bets from the Sides board, or settle a prop card.'}</div>`}
     </div>`;
@@ -2902,6 +2903,7 @@ document.getElementById('bankList').addEventListener('click',e=>{
   const g=e.target.closest('[data-bg]');
   if(g){
     const b=BANKKEY(), x=b.bets.find(y=>y.id===g.dataset.bid);
+    if(x&&x.card){toast('Grade the individual legs on the card — this one settles itself');return;}
     if(x){x.result=x.result===g.dataset.bg?null:g.dataset.bg;save();renderBank();renderLedger();}
     return;
   }
@@ -3170,9 +3172,12 @@ document.getElementById('main').addEventListener('click',e=>{
       if(b)b.result=p.grade;
     }
     // a round robin or parlay already placed on this card settles itself
-    // the moment every leg has a result — no separate click needed
+    // the moment every leg has a result — no separate click needed. Always
+    // recompute here rather than only the first time, so this stays
+    // correct even if something else touched the bet's result in the
+    // meantime.
     const placed=placedPropBet(cid);
-    if(placed&&placed.result==null){
+    if(placed){
       const s=propSettlement(cid);
       if(s){
         placed.result=s.pl>=0?'W':'L';
