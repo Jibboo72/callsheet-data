@@ -1545,7 +1545,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 09:45 UTC';
+const BUILD_STAMP='2026-09-11 10:20 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2246,7 +2246,7 @@ function renderBank(){
           </div>`}
           <div style="height:6px"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-            <div><span class="lab">Odds</span><input data-eb="odds" value="${esc(String(x.odds))}" inputmode="text"></div>
+            <div><span class="lab">Odds</span><input data-eb="odds" value="${x.odds!=null?esc(String(x.odds)):''}" inputmode="text" placeholder="${x.odds==null?'no single price':''}"></div>
             <div><span class="lab">Stake</span><input data-eb="stake" value="${esc(String(x.stake))}" inputmode="decimal"></div>
             <div><span class="lab">Week</span><input data-eb="wk" value="${esc(String(x.wk))}" inputmode="numeric"></div>
           </div>
@@ -2268,7 +2268,7 @@ function renderBank(){
           ${match?`<div class="who">${x.paper?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(match)}</div>`:''}
           <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${(!match&&x.paper)?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(x.desc)}</div>
           ${outcome}
-          <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''} · ${fmtAm(x.odds)} · ${unitStr(st)}</div>
+          <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''}${x.odds!=null?' · '+fmtAm(x.odds):''} · ${unitStr(st)}</div>
         </div>
         <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
         <button class="x" data-bdel="${esc(x.id)}" aria-label="Remove">×</button>
