@@ -469,7 +469,7 @@ function card(cid){
 // round-robin/parlay combo math entirely — otherwise the same real-world
 // wager would get paid out twice: once as the straight bet, once again
 // when the round robin settles.
-const activeLegs=cid=>card(cid).picks.filter(p=>!p.benched&&!p.betId);
+const activeLegs=cid=>card(cid).picks.filter(p=>!p.benched&&!p.betId&&!p.rrBatch);
 
 const toDec=am=>{am=Number(am);if(!am||isNaN(am))return null;return am>0?1+am/100:1+100/Math.abs(am);};
 const toAm=d=>d>=2?Math.round((d-1)*100):-Math.round(100/(d-1));
@@ -804,35 +804,48 @@ function renderCards(){
           ${flags.map(f=>`<div class="flag">${f}</div>`).join('')}
           ${screenPanel(c.id)}
           ${(()=>{
-            const placed=placedPropBet(c.id);
-            const s=propSettlement(c.id);
+            const renderCombos=(combos,showKey,stakeForBoost,boostForBoost)=>{
+              const showCombos=!!(S.showCombos&&S.showCombos[showKey]);
+              if(combos.length<2)return '';
+              return `<button class="btn ghost" data-showcombos="${showKey}" style="margin-top:6px">${showCombos?'Hide':'See'} the ${combos.length} combo${combos.length===1?'':'s'}</button>
+                ${showCombos?`<div style="margin-top:6px">${combos.map(cb=>{
+                  const col=cb.status==='W'?'var(--win)':(cb.status==='L'?'var(--loss)':'var(--ink-soft)');
+                  const price=cb.dec>1?fmtAm(toAm(cb.dec)):'—';
+                  const rawPay=stakeForBoost*cb.dec;
+                  const pay=cb.boosted?applyBoost(rawPay,stakeForBoost,boostForBoost):rawPay;
+                  const payLabel=cb.status==='W'?money(pay)+(cb.boosted?' (boosted)':''):(cb.status==='L'?'lost':'pending');
+                  return `<div class="hist"><span class="t">${esc(cb.names.join(' + '))}<br><span style="color:var(--ink-soft)">${price} · ${cb.names.length} legs</span></span><span style="font-family:Oswald,sans-serif;font-weight:700;color:${col}">${payLabel}</span></div>`;
+                }).join('')}</div>`:''}`;
+            };
+            // every already-placed batch on this card, oldest first — each
+            // one is a fully independent round robin with its own legs,
+            // settings and settlement
+            const batches=placedPropBets(c.id).sort((a,b)=>a.ts-b.ts).map((bet,i)=>{
+              const combos=combosForBatch(c.id,bet);
+              const comboBlock=renderCombos(combos,`${c.id}:${bet.id}`,Number(bet.rrStake)||0,Number(bet.rrBoost)||0);
+              if(bet.result!=null){
+                const col=bet.fixedReturn>=bet.stake?'var(--win)':'var(--loss)';
+                return `<div class="note" style="margin:8px 0 0"><strong>Batch ${i+1}</strong> — Settled: ${esc(bet.desc)} · <strong style="color:${col}">${bet.fixedReturn>=bet.stake?'+':''}${money(bet.fixedReturn-bet.stake).replace('$','')}</strong></div>${comboBlock}`;
+              }
+              return `<div class="note" style="margin:8px 0 0"><strong>Batch ${i+1}</strong> — Placed, ${money(bet.stake)}, waiting on grades.</div>${comboBlock}`;
+            }).join('');
+            // whatever's left over after already-placed batches are
+            // excluded — this is what a fresh "Place round robin" acts on
             const combos=propCombos(c.id);
-            const showCombos=!!(S.showCombos&&S.showCombos[c.id]);
-            const comboBlock = combos.length>=2 ? `
-              <button class="btn ghost" data-showcombos="${c.id}" style="margin-top:6px">${showCombos?'Hide':'See'} the ${combos.length} combo${combos.length===1?'':'s'}</button>
-              ${showCombos?`<div style="margin-top:6px">${combos.map(cb=>{
-                const col=cb.status==='W'?'var(--win)':(cb.status==='L'?'var(--loss)':'var(--ink-soft)');
-                const price=cb.dec>1?fmtAm(toAm(cb.dec)):'—';
-                const rawPay=(Number(cd.stake)||0)*cb.dec;
-                const pay=cb.boosted?applyBoost(rawPay,Number(cd.stake)||0,cd.boost):rawPay;
-                const payLabel=cb.status==='W'?money(pay)+(cb.boosted?' (boosted)':''):(cb.status==='L'?'lost':'pending');
-                return `<div class="hist"><span class="t">${esc(cb.names.join(' + '))}<br><span style="color:var(--ink-soft)">${price} · ${cb.names.length} legs</span></span><span style="font-family:Oswald,sans-serif;font-weight:700;color:${col}">${payLabel}</span></div>`;
-              }).join('')}</div>`:''}` : '';
-            if(placed&&placed.result!=null){
-              const col=placed.fixedReturn>=placed.stake?'var(--win)':'var(--loss)';
-              return `<div class="note" style="margin:8px 0 0">Settled — ${esc(placed.desc)} · <strong style="color:${col}">${placed.fixedReturn>=placed.stake?'+':''}${money(placed.fixedReturn-placed.stake).replace('$','')}</strong></div>${comboBlock}`;
-            }
-            if(placed){
-              return `<div class="note" style="margin:8px 0 0">Placed — ${money(placed.stake)} on ${m.bets} bet${m.bets===1?'':'s'}, waiting on grades. Grading every leg here settles it automatically.</div>${comboBlock}`;
-            }
+            const comboBlock=renderCombos(combos,c.id,Number(cd.stake)||0,Number(cd.boost)||0);
+            const s=propSettlement(c.id);
+            let fresh;
             if(m.bets>=2){
-              return `<div class="note" style="margin:8px 0 6px">${m.bets} bets at ${money(cd.stake)} each — ${money(m.stake)} total. Places now, before anything's graded; settles itself once every leg has a result.</div>
+              fresh=`<div class="note" style="margin:8px 0 6px">${m.bets} bets at ${money(cd.stake)} each — ${money(m.stake)} total. Places now, before anything's graded; settles itself once every leg has a result.</div>
                 <button class="btn" data-place-rr="${c.id}">Place ${cd.mode==='parlay'?'parlay':'round robin'} — ${money(m.stake)}</button>${comboBlock}`;
+            } else if(!s){
+              fresh=m.bets?`<div class="note" style="margin:8px 0 0">Grade every leg to settle this card to the bankroll.</div>`:'';
+            } else {
+              const col=s.pl>=0?'var(--win)':'var(--loss)';
+              fresh=`<div class="note" style="margin:8px 0 6px">${s.won} of ${s.bets} bets won · staked ${money(s.staked)} · returned ${money(s.ret)} · <strong style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</strong></div>
+                <button class="btn ghost" data-settle="${c.id}">Settle to bankroll</button>${comboBlock}`;
             }
-            if(!s)return m.bets?`<div class="note" style="margin:8px 0 0">Grade every leg to settle this card to the bankroll.</div>`:'';
-            const col=s.pl>=0?'var(--win)':'var(--loss)';
-            return `<div class="note" style="margin:8px 0 6px">${s.won} of ${s.bets} bets won · staked ${money(s.staked)} · returned ${money(s.ret)} · <strong style="color:${col}">${s.pl>=0?'+':''}${money(s.pl).replace('$','')}</strong></div>
-              <button class="btn ghost" data-settle="${c.id}">Settle to bankroll</button>${comboBlock}`;
+            return batches+fresh;
           })()}
         </div>`}
       </div>`;
@@ -1550,7 +1563,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 12:30 UTC';
+const BUILD_STAMP='2026-09-11 13:15 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1873,9 +1886,53 @@ function placePick(cid,i,stake){
 /* The bank bet already placed for this card this week, if any — lets a
    round robin or parlay-mode card be committed as a real bet BEFORE the
    legs are graded, then have that same bet record filled in automatically
-   once results come in, instead of needing a separate settle click. */
-function placedPropBet(cid){
-  return (S.bank&&S.bank.bets||[]).find(b=>b.kind==='prop'&&b.card===cid&&Number(b.wk)===Number(S.week));
+   once results come in, instead of needing a separate settle click.
+   Returns ALL placed bets for this card this week — you can place a
+   round robin Thursday and a completely separate one Sunday, and each
+   is tracked independently. */
+function placedPropBets(cid){
+  return (S.bank&&S.bank.bets||[]).filter(b=>b.kind==='prop'&&b.card===cid&&Number(b.wk)===Number(S.week));
+}
+/* A placed batch's own legs and settlement, using the mode/size/stake/
+   boost it was placed WITH (snapshotted onto the bet), not whatever the
+   card's controls currently say — otherwise changing the size for a
+   second round robin would retroactively change the first one's math. */
+function batchLegs(cid,batchId){
+  return card(cid).picks.filter(p=>p.rrBatch===batchId);
+}
+function settlementForBatch(cid,bet){
+  const legs=batchLegs(cid,bet.id), stake=Number(bet.rrStake)||0, boost=Number(bet.rrBoost)||0;
+  const graded=legs.filter(p=>p.grade==='W'||p.grade==='L');
+  if(!graded.length||graded.length<legs.length)return null;
+  const decs=legs.map(p=>({d:toDec(p.odds),win:p.grade==='W'}));
+  let bets=[];
+  if(bet.rrMode==='single')bets=decs.map(x=>[x]);
+  else if(bet.rrMode==='parlay'){if(decs.length>=2)bets=[decs];}
+  else{const k=Math.max(2,Math.min(Number(bet.rrSize)||2,decs.length));if(decs.length>=k)bets=combosOf(decs,k);}
+  let staked=0,ret=0,won=0;
+  bets.forEach(bt=>{
+    staked+=stake;
+    if(bt.every(x=>x.win)){
+      let pay=stake*bt.reduce((a,x)=>a*x.d,1);
+      if(bt.length>1&&boost)pay=applyBoost(pay,stake,boost);
+      ret+=pay;won++;
+    }
+  });
+  return {bets:bets.length,won,staked,ret,pl:ret-staked};
+}
+function combosForBatch(cid,bet){
+  const legs=batchLegs(cid,bet.id), stake=Number(bet.rrStake)||0, boost=Number(bet.rrBoost)||0;
+  const items=legs.map(p=>({who:p.who,d:toDec(p.odds),grade:p.grade||null}));
+  let combos=[];
+  if(bet.rrMode==='single')combos=items.map(x=>[x]);
+  else if(bet.rrMode==='parlay'){if(items.length>=2)combos=[items];}
+  else{const k=Math.max(2,Math.min(Number(bet.rrSize)||2,items.length));if(items.length>=k)combos=combosOf(items,k);}
+  return combos.map(cb=>{
+    const allGraded=cb.every(x=>x.grade);
+    const win=allGraded&&cb.every(x=>x.grade==='W');
+    return {names:cb.map(x=>x.who), status: !allGraded?'pending':(win?'W':'L'),
+      dec:cb.reduce((a,x)=>a*(x.d||1),1), boosted: cb.length>1&&boost?true:false};
+  });
 }
 /* Every individual combo with its own player names and status, not just
    the aggregate count — this is what actually answers "why didn't more
@@ -3135,9 +3192,16 @@ document.getElementById('main').addEventListener('click',e=>{
     if(!confirmIfClosed(S.week))return;
     if(!confirm(`Place ${m.bets} bets at ${money(c.stake)} each — ${money(m.stake)} total?`))return;
     const b=BANKKEY();
-    b.bets.push({id:'b'+Date.now(),wk:S.week,kind:'prop',card:cid,paper:!!b.paper,
+    const id='b'+Date.now();
+    b.bets.push({id,wk:S.week,kind:'prop',card:cid,paper:!!b.paper,
       desc:`${catById(cid).name} · ${m.bets} bet${m.bets===1?'':'s'}, pending`,
-      odds:null, stake:m.stake, result:null, ts:Date.now(), fixedReturn:null});
+      odds:null, stake:m.stake, result:null, ts:Date.now(), fixedReturn:null,
+      // snapshotted so a later round robin on this same card, with
+      // different settings, can never retroactively change this one
+      rrMode:c.mode, rrSize:c.size, rrStake:c.stake, rrBoost:c.boost});
+    // this batch's legs are now spoken for — they drop out of
+    // activeLegs(), leaving a clean slate for the next round robin
+    activeLegs(cid).forEach(p=>{ p.rrBatch=id; });
     save();renderCards();renderBank();renderLedger();toast(money(m.stake)+' placed');
     return;
   }
@@ -3180,6 +3244,7 @@ document.getElementById('main').addEventListener('click',e=>{
     const[cid,i]=del.dataset.del.split(':');
     const p=card(cid).picks[Number(i)];
     if(p&&p.betId&&!confirm('This pick has a bet logged against it. Remove the pick? The bet stays in the bankroll.'))return;
+    if(p&&p.rrBatch&&!confirm('This pick is part of an already-placed round robin. Remove it anyway? The placed bet stays in the bankroll unchanged.'))return;
     card(cid).picks.splice(Number(i),1);save();renderCards();renderRoster();return;}
   const bench=e.target.closest('[data-bench]');
   if(bench){const[cid,i]=bench.dataset.bench.split(':');const p=card(cid).picks[Number(i)];p.benched=!p.benched;save();renderCards();return;}
@@ -3197,18 +3262,18 @@ document.getElementById('main').addEventListener('click',e=>{
       const b=BANKKEY().bets.find(x=>x.id===p.betId);
       if(b)b.result=p.grade;
     }
-    // a round robin or parlay already placed on this card settles itself
-    // the moment every leg has a result — no separate click needed. Always
-    // recompute here rather than only the first time, so this stays
-    // correct even if something else touched the bet's result in the
-    // meantime.
-    const placed=placedPropBet(cid);
-    if(placed){
-      const s=propSettlement(cid);
-      if(s){
-        placed.result=s.pl>=0?'W':'L';
-        placed.fixedReturn=s.ret;
-        placed.desc=`${catById(cid).name} · ${s.won}/${s.bets} won`;
+    // if this leg belongs to an already-placed round robin, settle THAT
+    // specific batch — there can be more than one on the same card, so
+    // this only ever touches the one this leg is actually part of
+    if(p.rrBatch){
+      const bet=BANKKEY().bets.find(x=>x.id===p.rrBatch);
+      if(bet){
+        const s=settlementForBatch(cid,bet);
+        if(s){
+          bet.result=s.pl>=0?'W':'L';
+          bet.fixedReturn=s.ret;
+          bet.desc=`${catById(cid).name} · ${s.won}/${s.bets} won`;
+        }
       }
     }
     save();renderCards();renderRoster();renderBank();renderLedger();
