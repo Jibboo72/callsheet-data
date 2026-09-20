@@ -67,6 +67,10 @@ nav.tabs button[aria-selected="true"]{background:var(--ink);color:var(--stock)}
 .row .grade button + button{border-top:1px solid rgba(22,21,15,.3)}
 .row .grade button[data-on="1"][data-g="W"]{background:var(--win);color:#fff}
 .row .grade button[data-on="1"][data-g="L"]{background:var(--loss);color:#fff}
+.row .grade button[data-on="1"][data-g="P"]{background:var(--ink-soft);color:#fff}
+.row .grade button[data-on="1"][data-bg="W"]{background:var(--win);color:#fff}
+.row .grade button[data-on="1"][data-bg="L"]{background:var(--loss);color:#fff}
+.row .grade button[data-on="1"][data-bg="P"]{background:var(--ink-soft);color:#fff}
 .betbtn{
   display:block;width:100%;box-sizing:border-box;
   font-family:Oswald,sans-serif;font-weight:700;font-size:12px;letter-spacing:.08em;
@@ -733,6 +737,7 @@ function renderCards(){
         <button class="x" data-del="${c.id}:${i}" aria-label="Remove ${esc(p.who)}">×</button>
         <div class="grade">
           <button data-g="W" data-k="${c.id}:${i}" data-on="${p.grade==='W'?1:0}">W</button>
+          <button data-g="P" data-k="${c.id}:${i}" data-on="${p.grade==='P'?1:0}" aria-label="Push">P</button>
           <button data-g="L" data-k="${c.id}:${i}" data-on="${p.grade==='L'?1:0}">L</button>
         </div></div>
       <div style="display:grid;grid-template-columns:1fr 90px;gap:0">
@@ -934,7 +939,7 @@ function renderRoster(){
       shown.length<ids.length?`<span class="cnt">showing ${shown.length}</span>`:''}</div>${
     shown.map(pid=>{
       const p=P(pid),h=propHistory(pid);
-      const w=h.filter(x=>x.grade==='W').length,l=h.filter(x=>x.grade==='L').length;
+      const w=h.filter(x=>x.grade==='W'||x.grade==='P').length,l=h.filter(x=>x.grade==='L').length;
       return `<div class="row">
         <button class="av" data-open="${pid}" aria-label="Open ${esc(p.name)}">${chipHTML(pid)}</button>
         <div class="pick" data-open="${pid}">
@@ -1563,7 +1568,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 13:15 UTC';
+const BUILD_STAMP='2026-09-11 14:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1826,7 +1831,7 @@ function bankStats(wk){
     const st=Number(x.stake)||0;
     if(x.result==="W"){staked+=st;ret+=payout(st,x.odds,x);w++;}
     else if(x.result==='L'){staked+=st;l++;}
-    else if(x.result==='P'){staked+=st;ret+=st;p++;}
+    else if(x.result==='P'){staked+=st;ret+=st;w++;p++;}
     else open+=st;
   });
   const pl=ret-staked;
@@ -1844,6 +1849,7 @@ function paperStats(wk){
     const st=Number(x.stake)||0;
     if(x.result==='W'){w++;staked+=st;ret+=payout(st,x.odds,x);}
     else if(x.result==='L'){l++;staked+=st;}
+    else if(x.result==='P'){w++;staked+=st;ret+=st;}
     else open+=st;
   });
   return {w,l,staked,pl:ret-staked,open,n:w+l,roi:staked?(ret-staked)/staked:0};
@@ -1902,9 +1908,11 @@ function batchLegs(cid,batchId){
 }
 function settlementForBatch(cid,bet){
   const legs=batchLegs(cid,bet.id), stake=Number(bet.rrStake)||0, boost=Number(bet.rrBoost)||0;
-  const graded=legs.filter(p=>p.grade==='W'||p.grade==='L');
+  const graded=legs.filter(p=>p.grade==='W'||p.grade==='L'||p.grade==='P');
   if(!graded.length||graded.length<legs.length)return null;
-  const decs=legs.map(p=>({d:toDec(p.odds),win:p.grade==='W'}));
+  // a push counts as a win for qualifying the combo, but contributes a
+  // neutral 1x — no added profit from a leg that didn't actually pay out
+  const decs=legs.map(p=>({d:p.grade==='P'?1:toDec(p.odds),win:p.grade==='W'||p.grade==='P'}));
   let bets=[];
   if(bet.rrMode==='single')bets=decs.map(x=>[x]);
   else if(bet.rrMode==='parlay'){if(decs.length>=2)bets=[decs];}
@@ -1929,9 +1937,9 @@ function combosForBatch(cid,bet){
   else{const k=Math.max(2,Math.min(Number(bet.rrSize)||2,items.length));if(items.length>=k)combos=combosOf(items,k);}
   return combos.map(cb=>{
     const allGraded=cb.every(x=>x.grade);
-    const win=allGraded&&cb.every(x=>x.grade==='W');
+    const win=allGraded&&cb.every(x=>x.grade==='W'||x.grade==='P');
     return {names:cb.map(x=>x.who), status: !allGraded?'pending':(win?'W':'L'),
-      dec:cb.reduce((a,x)=>a*(x.d||1),1), boosted: cb.length>1&&boost?true:false};
+      dec:cb.reduce((a,x)=>a*(x.grade==='P'?1:(x.d||1)),1), boosted: cb.length>1&&boost?true:false};
   });
 }
 /* Every individual combo with its own player names and status, not just
@@ -1947,17 +1955,17 @@ function propCombos(cid){
   else{const k=Math.max(2,Math.min(Number(c.size)||2,items.length));if(items.length>=k)combos=combosOf(items,k);}
   return combos.map(cb=>{
     const allGraded=cb.every(x=>x.grade);
-    const win=allGraded&&cb.every(x=>x.grade==='W');
-    const dec=cb.reduce((a,x)=>a*(x.d||1),1);
+    const win=allGraded&&cb.every(x=>x.grade==='W'||x.grade==='P');
+    const dec=cb.reduce((a,x)=>a*(x.grade==='P'?1:(x.d||1)),1);
     return {names:cb.map(x=>x.who), status: !allGraded?'pending':(win?'W':'L'),
       dec, boosted: cb.length>1&&boost?true:false};
   });
 }
 function propSettlement(cid){
   const c=card(cid),legs=activeLegs(cid),stake=Number(c.stake)||0,boost=Number(c.boost)||0;
-  const graded=legs.filter(p=>p.grade==='W'||p.grade==='L');
+  const graded=legs.filter(p=>p.grade==='W'||p.grade==='L'||p.grade==='P');
   if(!graded.length||graded.length<legs.length)return null;   // not fully graded
-  const decs=legs.map(p=>({d:toDec(p.odds),win:p.grade==='W'}));
+  const decs=legs.map(p=>({d:p.grade==='P'?1:toDec(p.odds),win:p.grade==='W'||p.grade==='P'}));
   let bets=[];
   if(c.mode==='single')bets=decs.map(x=>[x]);
   else if(c.mode==='parlay'){if(decs.length>=2)bets=[decs];}
@@ -2356,6 +2364,7 @@ function renderBank(){
         <div class="grade">
           ${x.card?`<span style="font-size:9px;color:var(--ink-soft);text-align:center;line-height:1.3;padding:0 2px">Grade on<br>the card</span>`:`
           <button data-bg="W" data-bid="${esc(x.id)}" data-on="${x.result==='W'?1:0}">W</button>
+          <button data-bg="P" data-bid="${esc(x.id)}" data-on="${x.result==='P'?1:0}" aria-label="Push">P</button>
           <button data-bg="L" data-bid="${esc(x.id)}" data-on="${x.result==='L'?1:0}">L</button>`}
         </div></div>`;
     }).join(''):`<div class="empty">${bq?'No bets match that.':'Nothing logged yet. Add bets from the Sides board, or settle a prop card.'}</div>`}
@@ -2402,7 +2411,7 @@ function bucketStats(kind,market){
     const st=Number(x.stake)||0;
     if(x.result==='W'){w++;staked+=st;ret+=payout(st,x.odds,x);}
     else if(x.result==='L'){l++;staked+=st;}
-    else if(x.result==='P'){staked+=st;ret+=st;}
+    else if(x.result==='P'){w++;staked+=st;ret+=st;}
     else open+=st;
   });
   return {w,l,staked,pl:ret-staked,open,n:w+l};
@@ -2447,7 +2456,7 @@ function stakeStats(){
     r.n++;
     if(x.result==='W'){r.w++;r.staked+=st;r.ret+=payout(st,x.odds,x);}
     else if(x.result==='L'){r.l++;r.staked+=st;}
-    else if(x.result==='P'){r.push++;r.staked+=st;r.ret+=st;}
+    else if(x.result==='P'){r.w++;r.push++;r.staked+=st;r.ret+=st;}
     else {r.open++;r.openAmt+=st;}
   });
   return out;
@@ -2473,12 +2482,12 @@ function weeklyHistory(){
     const bd=stakeBand(st);
     const bn=w.bands[bd]=w.bands[bd]||{n:0,w:0,l:0,open:0};
     bn.n++;
-    if(x.result==='W')bn.w++; else if(x.result==='L')bn.l++; else if(!x.result)bn.open++;
+    if(x.result==='W')bn.w++; else if(x.result==='L')bn.l++; else if(x.result==='P')bn.w++; else if(!x.result)bn.open++;
     w.n++; t.n++;
     if(x.result==='W'){w.w++;t.w++;w.staked+=st;t.staked+=st;
       const r=payout(st,x.odds,x);w.ret+=r;t.ret+=r;}
     else if(x.result==='L'){w.l++;t.l++;w.staked+=st;t.staked+=st;}
-    else if(x.result==='P'){w.push++;w.staked+=st;t.staked+=st;w.ret+=st;t.ret+=st;}
+    else if(x.result==='P'){w.w++;t.w++;w.push++;w.staked+=st;t.staked+=st;w.ret+=st;t.ret+=st;}
     else {w.open++;w.openAmt+=st;}
   });
   const rows=Object.values(wk).sort((a,b)=>b.wk-a.wk);
@@ -3252,10 +3261,10 @@ document.getElementById('main').addEventListener('click',e=>{
   if(gr){
     const[cid,i]=gr.dataset.k.split(':'),g=gr.dataset.g,p=card(cid).picks[Number(i)];
     S.ledger[cid]=S.ledger[cid]||{w:0,l:0};
-    if(p.grade==='W')S.ledger[cid].w=Math.max(0,S.ledger[cid].w-1);
+    if(p.grade==='W'||p.grade==='P')S.ledger[cid].w=Math.max(0,S.ledger[cid].w-1);
     if(p.grade==='L')S.ledger[cid].l=Math.max(0,S.ledger[cid].l-1);
     p.grade=p.grade===g?null:g;
-    if(p.grade==='W')S.ledger[cid].w++;
+    if(p.grade==='W'||p.grade==='P')S.ledger[cid].w++;
     if(p.grade==='L')S.ledger[cid].l++;
     // a pick placed as its own bet grades in one place, not two
     if(p.betId){
