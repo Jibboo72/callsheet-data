@@ -24,6 +24,7 @@ UNTESTED AGAINST THE LIVE API
 """
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -151,6 +152,14 @@ def pull(season, key, days=8, league="NFL"):
         odds = ev.get("odds") or {}
         props = []
         for oid, o in (odds.items() if isinstance(odds, dict) else []):
+            # The API returns a separate copy of every prop for full game,
+            # each half, and each quarter (e.g. "...-game-yn-yes" vs
+            # "...-1q-yn-yes"). Nothing in this app models period-specific
+            # props — only full game ever gets used — so those variants
+            # are pure dead weight: they alone accounted for roughly 60%
+            # of a typical game's prop count with zero upside.
+            if not re.search(r"-game-", oid):
+                continue
             name = str(o.get("statID") or o.get("marketName") or oid).lower()
             if not any(w in name for w in WANT):
                 continue
