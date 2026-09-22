@@ -330,9 +330,11 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 const store={
   async get(k){try{if(window.storage){const r=await window.storage.get(k,false);return r?JSON.parse(r.value):null;}}catch(e){}
     try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}},
+  // returns true on success, false if every storage path failed — save()
+  // uses this to warn rather than lose data silently
   async set(k,v){const s=JSON.stringify(v);
-    try{if(window.storage){await window.storage.set(k,s,false);return;}}catch(e){}
-    try{localStorage.setItem(k,s);}catch(e){}}
+    try{if(window.storage){await window.storage.set(k,s,false);return true;}}catch(e){}
+    try{localStorage.setItem(k,s);return true;}catch(e){return false;}}
 };
 
 const TEAMS={
@@ -381,6 +383,13 @@ let S={week:1,budget:40,cards:{},ledger:{},collapsed:{},players:{}};
 // persisted, since it's only relevant until you confirm or cancel it
 let CSV_PREVIEW=null;
 const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
+// games/cfb/odds/players are all re-downloadable from the import URLs —
+// never anything the user typed. Keeping them in their own storage slot
+// means a large odds pull can never eat into the space bets, picks and
+// settings need to save correctly; those are irreplaceable and this file
+// is not. Also used by backup/share to exclude these from that export.
+const REFKEY=KEY+'-ref';
+const REDOWNLOADABLE=['players','games','cfb','odds'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -435,6 +444,11 @@ async function load(){
   let saved=await store.get(KEY);
   if(!saved){ const old=await store.get(OLD); if(old){ saved=Object.assign({players:{}},old); } }
   if(saved) S=Object.assign(S,saved);
+  // reference data (games/cfb/odds/players) lives in its own slot as of
+  // this build; older saves still have it inline in the main key above,
+  // and this simply finds nothing yet until the next save splits it out
+  const ref=await store.get(REFKEY);
+  if(ref) S=Object.assign(S,ref);
   const migration=archiveCurrentWeekAsZero();
   // The shared parlay slip used to live at S.slip directly; it's now one
   // of possibly several named slips under S.slips. Move it once so an
@@ -460,7 +474,38 @@ async function load(){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
   }
 }
-let t; function save(){clearTimeout(t);t=setTimeout(()=>store.set(KEY,S),150);}
+let t; function save(){
+  clearTimeout(t);
+  t=setTimeout(async()=>{
+    const core={}, ref={};
+    Object.keys(S).forEach(k=>{ if(REDOWNLOADABLE.includes(k)) ref[k]=S[k]; else core[k]=S[k]; });
+    const coreOk=await store.set(KEY,core);
+    const refOk=await store.set(REFKEY,ref);
+    // core failing means bets/picks/settings themselves aren't saving —
+    // this is exactly the failure mode that caused silent data loss
+    // before, so it can never again pass without the user knowing
+    if(!coreOk) warnSaveFailed(true);
+    else if(!refOk) warnSaveFailed(false);
+  },150);
+}
+let _saveWarnShown=false;
+function warnSaveFailed(critical){
+  if(_saveWarnShown)return;
+  _saveWarnShown=true;
+  const banner=document.createElement('div');
+  banner.className='flag';
+  banner.style.cssText='position:fixed;left:12px;right:12px;bottom:220px;z-index:81;background:var(--stock);border-color:var(--loss)';
+  banner.innerHTML=critical
+    ? `<strong>Your bets and picks just failed to save — storage is full.</strong> Nothing new is being kept until this clears. Go to the Roster tab and clear the odds import (it's the largest thing in here), then back up immediately from the Ledger tab.
+       <div style="height:8px"></div><button class="btn" id="saveWarnGo">Take me there</button>`
+    : `<strong>Roster or odds data didn't save this time — storage is full.</strong> Your bets and picks are fine; just re-import if something looks stale.
+       <div style="height:8px"></div><button class="btn ghost" id="saveWarnDismiss">Dismiss</button>`;
+  document.body.appendChild(banner);
+  const go=document.getElementById('saveWarnGo');
+  if(go)go.addEventListener('click',()=>{ banner.remove(); _saveWarnShown=false; showTab('Roster'); });
+  const dis=document.getElementById('saveWarnDismiss');
+  if(dis)dis.addEventListener('click',()=>{ banner.remove(); _saveWarnShown=false; });
+}
 
 const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'x';
 function ensurePlayer(pid,name){
@@ -1574,7 +1619,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-22 01:15 UTC';
+const BUILD_STAMP='2026-09-22 03:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3668,7 +3713,6 @@ function backupMsg(t,bad){
 /* Players, games, odds and schedules all come back from a URL in seconds,
    so they stay out of the backup. What can never be recovered is what you
    typed: bets, card picks, settings. That's a few KB instead of hundreds. */
-const REDOWNLOADABLE=['players','games','cfb','odds'];
 function backupBlob(){
   const out={};
   Object.keys(S).forEach(k=>{ if(!REDOWNLOADABLE.includes(k)) out[k]=S[k]; });
