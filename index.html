@@ -225,6 +225,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <div id="closeWeek"></div>
   <div id="moveBets"></div>
   <div id="bulkAdd"></div>
+  <div id="csvImport"></div>
   <div id="bankSummary"></div>
   <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
@@ -376,6 +377,9 @@ const catById=id=>CATS.find(c=>c.id===id);
 const MODES=[{v:'single',label:'Singles — one bet per leg'},{v:'rr',label:'Round robin'},{v:'parlay',label:'Straight parlay — all legs, one bet'}];
 
 let S={week:1,budget:40,cards:{},ledger:{},collapsed:{},players:{}};
+// transient — the currently-loaded CSV import's parsed preview, not
+// persisted, since it's only relevant until you confirm or cancel it
+let CSV_PREVIEW=null;
 const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 let openPid=null;
 
@@ -1570,7 +1574,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-21 20:30 UTC';
+const BUILD_STAMP='2026-09-22 01:15 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1868,7 +1872,7 @@ function bankStats(wk){
   return {staked,ret,pl,open,w,l,p,
     bal:Number(b.start||0)+pl,
     roi:staked?pl/staked:0,
-    settled:w+l+p};
+    settled:w+l};
 }
 function paperStats(wk){
   const b=BANKKEY();
@@ -1889,6 +1893,71 @@ function paperStats(wk){
    — built for catching up after a gap, especially from a sportsbook
    screenshot transcribed by hand. Every line is independent; one bad line
    doesn't block the rest. */
+/* Splits one CSV line respecting quoted fields (so a comma inside a
+   quoted description doesn't misalign every column after it). Handles
+   "" as an escaped quote inside a quoted field, per RFC 4180. */
+function parseCSVLine(line){
+  const out=[]; let cur='', q=false;
+  for(let i=0;i<line.length;i++){
+    const c=line[i];
+    if(q){
+      if(c==='"'){
+        if(line[i+1]==='"'){cur+='"';i++;} else q=false;
+      } else cur+=c;
+    } else {
+      if(c==='"')q=true;
+      else if(c===','){out.push(cur);cur='';}
+      else cur+=c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+/* Juice Reel exports one row per LEG, several rows sharing one
+   juice_bet_id for a parlay. Groups those back into single bets and
+   maps to this app's own bet shape. Column order isn't assumed — the
+   header row is read to find each field, so a reordered export still
+   works. */
+function parseJuiceCSV(text){
+  const lines=(text||'').split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2)return {bets:[],error:'That file has no rows to read.'};
+  const header=parseCSVLine(lines[0]).map(h=>h.trim());
+  const col=name=>header.indexOf(name);
+  const need=['juice_bet_id','risk_amount','bet_result','odds_american','sportsbook','leg_league','leg_description','event_start_date'];
+  const missing=need.filter(n=>col(n)<0);
+  if(missing.length)return {bets:[],error:`Missing column${missing.length===1?'':'s'}: ${missing.join(', ')}. Is this a Juice Reel export?`};
+  const iId=col('juice_bet_id'),iRisk=col('risk_amount'),iResult=col('bet_result'),
+    iOdds=col('odds_american'),iBook=col('sportsbook'),iLeague=col('leg_league'),
+    iDesc=col('leg_description'),iEvent=col('event_start_date');
+  const groups={};
+  for(let i=1;i<lines.length;i++){
+    const cols=parseCSVLine(lines[i]);
+    if(cols.length<header.length)continue;   // skip anything truncated/blank
+    const id=cols[iId]; if(!id)continue;
+    (groups[id]=groups[id]||[]).push(cols);
+  }
+  const resultMap={Won:'W',Lost:'L',Push:'P'};
+  const bets=Object.entries(groups).map(([jbid,legs])=>{
+    const f=legs[0];
+    const stake=Number(f[iRisk]), odds=Number(f[iOdds]);
+    const result=resultMap[f[iResult]]!=null?resultMap[f[iResult]]:null;
+    const leagues=new Set(legs.map(l=>l[iLeague]));
+    const isCfb=leagues.size===1 && [...leagues][0]==='NCAA Football';
+    const eventDate=(f[iEvent]||'').slice(0,10);
+    const wk=(eventDate&&weekForDate(eventDate)!=null)?weekForDate(eventDate):S.week;
+    const book=f[iBook];
+    const base={stake,odds,result,wk,jbid,book};
+    if(legs.length===1){
+      return Object.assign(base,{desc:f[iDesc],kind:isCfb?'cfb':'side',market:'side'});
+    }
+    return Object.assign(base,{
+      desc:legs.map(l=>l[iDesc]).join(' + '),
+      kind:'parlay', league:isCfb?'cfb':'nfl',
+      legs:legs.map(l=>({desc:l[iDesc],odds:null,kind:'custom',market:'other',match:'',wk}))
+    });
+  }).filter(b=>b.desc&&!isNaN(b.stake)&&!isNaN(b.odds));
+  return {bets,error:null};
+}
 function parseBulkBets(text){
   const lines=(text||'').split('\n').map(l=>l.trim()).filter(Boolean);
   return lines.map((raw,i)=>{
@@ -2280,6 +2349,36 @@ function renderBank(){
       ${bad.length?`<div class="flag" style="margin-bottom:8px">${bad.map(p=>`Line ${p.line}: "${esc(p.raw)}" — ${esc(p.error)}`).join('<br>')}</div>`:''}
       <button class="btn" id="bulkAddBtn" ${ok?'':'disabled'}>Add ${ok||''} bet${ok===1?'':'s'}</button>
     </div></div>`;
+  }
+
+  // CSV import — Juice Reel bet-history export
+  const csvHost=document.getElementById('csvImport');
+  if(csvHost){
+    if(!CSV_PREVIEW){
+      csvHost.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Import bet history</div><div class="pbody">
+        <div class="note" style="margin:0 0 8px">Upload a Juice Reel bet-history CSV — each bet lands here with its stake, odds, and result already filled in.</div>
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" style="margin-bottom:0">
+      </div></div>`;
+    } else if(CSV_PREVIEW.error){
+      csvHost.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Import bet history</div><div class="pbody">
+        <div class="flag" style="margin-bottom:8px">${esc(CSV_PREVIEW.error)}</div>
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" style="margin-bottom:0">
+      </div></div>`;
+    } else {
+      const bets=CSV_PREVIEW.bets;
+      const existing=new Set((S.bank.bets||[]).map(b=>b.jbid).filter(Boolean));
+      const dupes=bets.filter(b=>existing.has(b.jbid)).length;
+      const fresh=bets.length-dupes;
+      const staked=bets.filter(b=>!existing.has(b.jbid)).reduce((a,b)=>a+b.stake,0);
+      const dates=bets.map(b=>b.wk).filter(w=>w!=null);
+      const wkMin=dates.length?Math.min(...dates):null, wkMax=dates.length?Math.max(...dates):null;
+      const books=[...new Set(bets.map(b=>b.book))];
+      csvHost.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Import bet history</div><div class="pbody">
+        <div class="note" style="margin:0 0 8px">Found ${bets.length} bet${bets.length===1?'':'s'} (${books.join(', ')})${wkMin!=null?`, week${wkMin===wkMax?` ${wkMin}`:`s ${wkMin}–${wkMax}`}`:''}. ${dupes?`${dupes} already imported — those are skipped automatically. `:''}${fresh} new bet${fresh===1?'':'s'}, ${money(staked)} staked.</div>
+        <button class="btn" id="csvConfirmBtn" ${fresh?'':'disabled'}>Import ${fresh||''} bet${fresh===1?'':'s'}</button>
+        <button class="btn ghost" id="csvCancelBtn" style="margin-top:6px">Cancel</button>
+      </div></div>`;
+    }
   }
 
   // Balance is always the full bankroll — that number can't be "this week".
@@ -3114,6 +3213,29 @@ document.getElementById('bulkAdd').addEventListener('click',e=>{
   S.bulkAddText='';
   save();renderBank();renderLedger();
   toast(`Added ${parsed.length} bet${parsed.length===1?'':'s'}`);
+});
+document.getElementById('csvImport').addEventListener('change',e=>{
+  const inp=e.target.closest('#csvFileInput'); if(!inp||!inp.files[0])return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    CSV_PREVIEW=parseJuiceCSV(reader.result);
+    renderBank();
+  };
+  reader.onerror=()=>{ CSV_PREVIEW={bets:[],error:'Could not read that file.'}; renderBank(); };
+  reader.readAsText(inp.files[0]);
+});
+document.getElementById('csvImport').addEventListener('click',e=>{
+  if(e.target.closest('#csvCancelBtn')){ CSV_PREVIEW=null; renderBank(); return; }
+  if(e.target.closest('#csvConfirmBtn')){
+    const existing=new Set((S.bank.bets||[]).map(b=>b.jbid).filter(Boolean));
+    const fresh=(CSV_PREVIEW.bets||[]).filter(b=>!existing.has(b.jbid));
+    if(!fresh.length)return;
+    fresh.forEach(b=>addBet(b));
+    const n=fresh.length;
+    CSV_PREVIEW=null;
+    save();renderBank();renderLedger();
+    toast(`Imported ${n} bet${n===1?'':'s'}`);
+  }
 });
 document.getElementById('closeWeek').addEventListener('click',e=>{
   const c=e.target.closest('[data-close]');
