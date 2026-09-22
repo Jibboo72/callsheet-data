@@ -224,6 +224,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 <section id="paneBank" hidden>
   <div id="closeWeek"></div>
   <div id="moveBets"></div>
+  <div id="bulkAdd"></div>
   <div id="bankSummary"></div>
   <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
@@ -450,6 +451,7 @@ async function load(){
   const bi=document.getElementById('buildInfo');
   if(bi)bi.textContent=`build ${BUILD_STAMP} · week 1 starts ${WEEK1_START}`;
   checkForNewerBuild();   // async, non-blocking — the rest of the app doesn't wait on this
+  checkBackupReminder();
   if(migration){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
   }
@@ -1568,7 +1570,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-11 14:00 UTC';
+const BUILD_STAMP='2026-09-21 20:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -1609,6 +1611,34 @@ async function checkForNewerBuild(){
     // offline, or the fetch failed for some other reason — this is a
     // best-effort convenience, not core functionality, so fail silently
   }
+}
+/* A stray cache issue or a re-cleared site can wipe local storage with
+   zero warning — that's exactly what just happened. This can't back
+   anything up automatically (there's nowhere to send it without putting
+   a write credential in a page anyone can view), but it can make it
+   impossible to forget to do it yourself. */
+const BACKUP_REMIND_MS=3*24*60*60*1000;   // 3 days
+function checkBackupReminder(){
+  const hasData=(S.bank&&S.bank.bets||[]).length>0;
+  if(!hasData)return;
+  const last=S.lastBackupAt;
+  const overdue=!last||(Date.now()-last)>BACKUP_REMIND_MS;
+  if(!overdue)return;
+  const days=last?Math.floor((Date.now()-last)/86400000):null;
+  const banner=document.createElement('div');
+  banner.className='flag';
+  banner.style.cssText='position:fixed;left:12px;right:12px;bottom:150px;z-index:79;background:var(--stock);border-color:var(--hl-long)';
+  banner.innerHTML=`<strong>${days!=null?`It's been ${days} day${days===1?'':'s'} since your last backup.`:'You have bets logged but no backup on file yet.'}</strong> Everything here lives only on this device — Ledger tab → Backup, save a file, takes a few seconds.
+    <div style="height:8px"></div>
+    <button class="btn" id="backupRemindBtn">Take me there</button>
+    <button class="btn ghost" id="backupDismissBtn" style="margin-top:6px">Remind me later</button>`;
+  document.body.appendChild(banner);
+  document.getElementById('backupRemindBtn').addEventListener('click',()=>{
+    banner.remove();
+    showTab('Ledger');
+    setTimeout(()=>document.getElementById('backupFile')?.scrollIntoView({block:'center'}),150);
+  });
+  document.getElementById('backupDismissBtn').addEventListener('click',()=>banner.remove());
 }
 function seasonStartDate(){ return WEEK1_START; }
 function addDays(dateStr,n){
@@ -1855,6 +1885,37 @@ function paperStats(wk){
   return {w,l,staked,pl:ret-staked,open,n:w+l,roi:staked?(ret-staked)/staked:0};
 }
 
+/* Parses "description | odds | stake | result | date" lines for bulk entry
+   — built for catching up after a gap, especially from a sportsbook
+   screenshot transcribed by hand. Every line is independent; one bad line
+   doesn't block the rest. */
+function parseBulkBets(text){
+  const lines=(text||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  return lines.map((raw,i)=>{
+    const parts=raw.split('|').map(s=>s.trim());
+    const [desc,oddsRaw,stakeRaw,resultRaw,dateRaw]=parts;
+    if(!desc)return {line:i+1,raw,error:'missing a description'};
+    if(parts.length<3)return {line:i+1,raw,error:'needs at least description | odds | stake'};
+    const odds=parseInt((oddsRaw||'').replace(/[^\d+-]/g,''),10);
+    if(!oddsRaw||isNaN(odds))return {line:i+1,raw,error:'odds not readable'};
+    const stake=Number((stakeRaw||'').replace(/[^\d.]/g,''));
+    if(!stakeRaw||!stake||stake<=0)return {line:i+1,raw,error:'stake not readable'};
+    let result=null;
+    const r=(resultRaw||'').trim().toUpperCase();
+    if(r==='W'||r==='WIN')result='W';
+    else if(r==='L'||r==='LOSS'||r==='LOSE')result='L';
+    else if(r==='P'||r==='PUSH')result='P';
+    else if(r&&r!=='OPEN'&&r!=='PENDING')return {line:i+1,raw,error:`result "${resultRaw}" not recognized — use W, L, P, or leave blank`};
+    let wk=S.week;
+    const d=(dateRaw||'').trim();
+    if(d){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return {line:i+1,raw,error:'date should look like 2026-09-19'};
+      const w=weekForDate(d);
+      if(w!=null)wk=w;
+    }
+    return {line:i+1,raw,desc,odds,stake,result,wk};
+  });
+}
 function addBet(rec){
   const b=BANKKEY();
   b.bets.push(Object.assign({id:'b'+Date.now()+Math.random().toString(36).slice(2,6),
@@ -2202,6 +2263,22 @@ function renderBank(){
       </div>
       <div class="note" style="margin:8px 0">${n} bet${n===1?'':'s'} currently in week ${from}.</div>
       <button class="btn" id="moveBetsBtn" ${n?'':'disabled'}>Move ${n||''} bet${n===1?'':'s'} from week ${from} to week ${to}</button>
+    </div></div>`;
+  }
+
+  // bulk-add utility — paste multiple bets at once, one per line
+  const baHost=document.getElementById('bulkAdd');
+  if(baHost){
+    const raw=S.bulkAddText||'';
+    const parsed=parseBulkBets(raw);
+    const ok=parsed.filter(p=>!p.error).length;
+    const bad=parsed.filter(p=>p.error);
+    baHost.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Add multiple bets at once</div><div class="pbody">
+      <div class="note" style="margin:0 0 8px">One bet per line: <code>description | odds | stake | result | date</code>. Result is W, L, P, or leave blank for open. Date is optional (YYYY-MM-DD) — used to file it under the right week; without one, it uses whatever week you're currently on.<br>Example: <code>SEA -3.5 | -110 | 14 | W | 2026-09-19</code></div>
+      <textarea id="bulkAddBox" placeholder="Paste bets here, one per line" style="min-height:110px">${esc(raw)}</textarea>
+      <div class="note" style="margin:8px 0">${parsed.length?`${ok} bet${ok===1?'':'s'} ready${bad.length?`, ${bad.length} line${bad.length===1?'':'s'} couldn't be read`:''}.`:'Nothing pasted yet.'}</div>
+      ${bad.length?`<div class="flag" style="margin-bottom:8px">${bad.map(p=>`Line ${p.line}: "${esc(p.raw)}" — ${esc(p.error)}`).join('<br>')}</div>`:''}
+      <button class="btn" id="bulkAddBtn" ${ok?'':'disabled'}>Add ${ok||''} bet${ok===1?'':'s'}</button>
     </div></div>`;
   }
 
@@ -3017,6 +3094,27 @@ document.getElementById('moveBets').addEventListener('click',e=>{
   renderAll();
   toast(`Moved ${moved} bet${moved===1?'':'s'} to week ${to}`);
 });
+document.getElementById('bulkAdd').addEventListener('input',e=>{
+  const box=e.target.closest('#bulkAddBox'); if(!box)return;
+  S.bulkAddText=box.value;
+  save();
+  const pos=box.selectionStart;
+  renderBank();
+  const again=document.getElementById('bulkAddBox');
+  if(again){again.focus();try{again.setSelectionRange(pos,pos);}catch(err){}}
+});
+document.getElementById('bulkAdd').addEventListener('click',e=>{
+  const btn=e.target.closest('#bulkAddBtn'); if(!btn)return;
+  const parsed=parseBulkBets(S.bulkAddText||'').filter(p=>!p.error);
+  if(!parsed.length)return;
+  if(!confirm(`Add ${parsed.length} bet${parsed.length===1?'':'s'}? Each one is checked for its own week from the date you gave it.`))return;
+  parsed.forEach(p=>{
+    addBet({desc:p.desc,odds:p.odds,stake:p.stake,result:p.result,kind:'side',market:'side',wk:p.wk});
+  });
+  S.bulkAddText='';
+  save();renderBank();renderLedger();
+  toast(`Added ${parsed.length} bet${parsed.length===1?'':'s'}`);
+});
 document.getElementById('closeWeek').addEventListener('click',e=>{
   const c=e.target.closest('[data-close]');
   if(c){
@@ -3470,6 +3568,7 @@ document.getElementById('backupOut').addEventListener('click',async()=>{
   const blob=backupBlob();
   const box=document.getElementById('backupIn');
   box.value=blob;                       // always show it, clipboard may fail
+  S.lastBackupAt=Date.now(); save();
   try{
     await navigator.clipboard.writeText(blob);
     backupMsg(`Copied — ${(blob.length/1024).toFixed(1)} KB. Player and game data isn't included; you re-import that from the URLs.`);
@@ -3486,6 +3585,7 @@ document.getElementById('backupFile').addEventListener('click',()=>{
   a.download=`callsheet-backup-${new Date().toISOString().slice(0,10)}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),2000);
+  S.lastBackupAt=Date.now(); save();
   backupMsg('Saved. Pick "Save to Files" — iCloud Drive keeps it off this device.');
 });
 document.getElementById('shareOut').addEventListener('click',()=>{
@@ -3498,6 +3598,7 @@ document.getElementById('shareOut').addEventListener('click',()=>{
   a.download='shared.json';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),2000);
+  S.lastBackupAt=Date.now(); save();
   const el=document.getElementById('shareMsg');
   el.textContent='Saved as shared.json. Upload it to data/shared.json in your repo to publish — friends see whatever\'s there when they open the link.';
   el.style.color='var(--ink-soft)';
