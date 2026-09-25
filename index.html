@@ -365,6 +365,9 @@ const CATS=[
   {id:'td',name:'Anytime TD',color:'var(--hl-qb)',
    blurb:'Anytime touchdown scorers. Priced off your books, with the sharp number alongside. NFL names match your roster so the model can weigh in.',
    def:{mode:'single',size:2,stake:1}},
+  {id:'tetd',name:'TE Anytime TD',color:'var(--hl-fade)',
+   blurb:'Same anytime-TD model, narrowed to tight ends only. Lower volume than the WR pool, but red-zone role often prices soft relative to target share — this is where that shows up.',
+   def:{mode:'single',size:2,stake:1}},
   {id:'ctd',name:'College TD',color:'var(--hl-flyer)',
    blurb:'College anytime touchdown. No player logs exist for college, so there is no model here — type the name freely and the app just records the bet and the price.',
    def:{mode:'single',size:2,stake:1}},
@@ -1324,6 +1327,11 @@ function oddsIndex(){
       const bb=pr.books||{};
       Object.entries(bb).forEach(([bid,b])=>{
         const bo=parseInt(b.odds,10); if(isNaN(bo))return;
+        // a book's own line can disagree with this entry's top-level line
+        // (seen in the wild: consensus says 0.5, one book's breakdown says
+        // 1.5) — that book is quoting a different market, not a better
+        // price on this one, so it doesn't count as "your best" here
+        if(b.line!=null && Math.abs(Number(b.line)-Number(pr.line))>0.01)return;
         if(bid===SHARP){ sharp={odds:bo,line:b.line!=null?Number(b.line):Number(pr.line)}; return; }
         if(!myBooks().includes(bid))return;
         // higher decimal = better price for you
@@ -1475,7 +1483,19 @@ const SCREEN={
     ok:st=>st.recpg>=2,
     rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
     useDef:true,
-    note:'Touchdown props from your books. There is no TD column in the game logs, so the model can only work from posted prices — treat the probability column as the market\'s, not ours.'
+    note:'Fitted the same walk-forward way as the other markets — base rate 19.9%, shrunk toward it until a player earns enough games to move off it.'
+  },
+  tetd:{
+    label:'TE anytime TD',
+    pos:'TE',
+    // TEs run lower routes/targets than the WR pool the 2+ recpg gate was
+    // built for — a real red-zone TE can be a live TD price on 3-4
+    // catches a game, so the gate here is volume-of-any-kind, not a
+    // receptions floor tuned for wideouts.
+    ok:st=>st.recpg>=1,
+    rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
+    useDef:true,
+    note:'Same touchdown model as the main Anytime TD card, narrowed to tight ends. Same 19.9% base rate and shrinkage — nothing TE-specific in the model itself, just the player pool.'
   },
   slot:{
     label:'3+ receptions',
@@ -1529,7 +1549,12 @@ function screen(cid){
   const havePrices=!!(S.odds&&S.odds.games&&S.odds.games.length);
   const pricedOnly=havePrices&&S.screenPricedOnly!==false;
   Object.keys(S.players||{}).forEach(pid=>{
-    const p=P(pid), st=seasonStats(p);
+    const p=P(pid);
+    // position is an absolute gate — a TE screener should never surface a
+    // non-TE regardless of pricing or profile, unlike the stat-based gate
+    // below which priced-only mode is allowed to override
+    if(cfg.pos && p.pos!==cfg.pos)return;
+    const st=seasonStats(p);
     if(!st)return;
     // The profile filter (catch rate, depth, volume) is the right gate when
     // you're hunting names. But once real prices are loaded it was throwing
@@ -1619,7 +1644,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-22 03:00 UTC';
+const BUILD_STAMP='2026-09-24 22:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2041,7 +2066,7 @@ function addBet(rec){
    buckets; everything else counts as a prop leg. */
 function cardBetKind(cid){
   if(cid==='ctd')return {kind:'cfb', market:'td'};
-  if(cid==='td') return {kind:'side', market:'td'};
+  if(cid==='td'||cid==='tetd') return {kind:'side', market:'td'};
   return {kind:'prop', market:'side'};
 }
 function placePick(cid,i,stake){
