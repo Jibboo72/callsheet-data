@@ -24,13 +24,59 @@ ROSTER = "https://github.com/nflverse/nflverse-data/releases/download/rosters/ro
 SCHEDULE = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv"
 COLS = ["season", "season_type", "week", "posteam", "defteam",
         "receiver_player_id", "receiver_player_name",
-        "complete_pass", "pass_attempt", "yards_gained",
-        "pass_touchdown", "touchdown"]
+        "rusher_player_id", "rusher_player_name",
+        "complete_pass", "pass_attempt", "rush_attempt", "yards_gained",
+        "pass_touchdown", "rush_touchdown", "touchdown",
+        "yardline_100", "two_point_attempt", "sack"]
 ROSTER_COLS = ["gsis_id", "full_name", "position", "height", "weight",
                "college", "years_exp"]
 
 # Only keep players with enough volume to ever be worth a prop.
 MIN_SEASON_TARGETS = 20
+
+# ---------------------------------------------------------------------------
+# Expected-touchdown table: P(this play scores) by field position, fit
+# separately for targets and carries. This is NOT guessed — it's the actual
+# league-wide conversion rate, by yard line, computed from 2023-2024
+# play-by-play (98,825 scrimmage plays) and never touched since. Applying it
+# to a season that postdates both fitting years is walk-forward-safe by
+# construction — there's no way for this table to have seen the outcomes
+# it's being used to predict. Refit periodically by re-running the same
+# aggregation with newer seasons folded in; don't hand-tune individual cells.
+#
+#   bucket bounds are yardline_100 (distance to the end zone), inclusive
+TD_TABLE_PASS = {
+    (0, 1):   0.500000,
+    (2, 3):   0.457547,
+    (4, 5):   0.402597,
+    (6, 10):  0.276361,
+    (11, 15): 0.154138,
+    (16, 20): 0.109827,
+    (21, 30): 0.056628,
+    (31, 40): 0.030458,
+    (41, 50): 0.015084,
+    (51, 99): 0.006186,
+}
+TD_TABLE_RUSH = {
+    (0, 1):   0.575390,
+    (2, 3):   0.423762,
+    (4, 5):   0.232409,
+    (6, 10):  0.127148,
+    (11, 15): 0.052914,
+    (16, 20): 0.034263,
+    (21, 30): 0.015832,
+    (31, 40): 0.007595,
+    (41, 50): 0.007251,
+    (51, 99): 0.002231,
+}
+def _xtd_rate(table, yardline):
+    if yardline is None:
+        return 0.0
+    y = float(yardline)
+    for (lo, hi), rate in table.items():
+        if lo <= y <= hi:
+            return rate
+    return 0.0
 
 
 def _get(url, path):
@@ -164,22 +210,27 @@ def _s(v):
 
 def build(season, cache_dir=None):
     df, ros = load(season, cache_dir)
-    df = df[(df.season_type == "REG") & df.receiver_player_id.notna()]
-    df = df[df.pass_attempt == 1]
+    df = df[(df.season_type == "REG")]
+    # sacks carry pass_attempt=1 and two-point tries carry both attempt flags
+    # but never set pass_touchdown/rush_touchdown — both would corrupt the
+    # conversion-rate application if left in (a "target" that was actually a
+    # sack has no real yardline-of-target semantics)
+    scrim = df[(df.two_point_attempt != 1) & (df.sack != 1)]
 
-    df["rec"] = (df.complete_pass == 1).astype(int)
-    df["yds"] = df.yards_gained.where(df.complete_pass == 1, 0)
-    df["catch_len"] = df.yards_gained.where(df.complete_pass == 1)
-    # receiving touchdowns — the anytime-TD screener had nothing to work
-    # from without this
-    df["td"] = ((df.get("pass_touchdown", 0) == 1) & (df.complete_pass == 1)).astype(int)
+    rec_df = scrim[scrim.receiver_player_id.notna() & (scrim.pass_attempt == 1)].copy()
+    rec_df["rec"] = (rec_df.complete_pass == 1).astype(int)
+    rec_df["yds"] = rec_df.yards_gained.where(rec_df.complete_pass == 1, 0)
+    rec_df["catch_len"] = rec_df.yards_gained.where(rec_df.complete_pass == 1)
+    rec_df["td_rec"] = ((rec_df.get("pass_touchdown", 0) == 1) & (rec_df.complete_pass == 1)).astype(int)
+    rec_df["xtd_rec"] = rec_df.yardline_100.apply(lambda y: _xtd_rate(TD_TABLE_PASS, y))
 
-    g = df.groupby(["receiver_player_id", "receiver_player_name", "week"], as_index=False).agg(
+    g = rec_df.groupby(["receiver_player_id", "receiver_player_name", "week"], as_index=False).agg(
         tgt=("pass_attempt", "sum"),
         rec=("rec", "sum"),
         yds=("yds", "sum"),
         lng=("catch_len", "max"),
-        td=("td", "sum"),
+        td_rec=("td_rec", "sum"),
+        xtd_rec=("xtd_rec", "sum"),
         team=("posteam", "first"),
         opp=("defteam", "first"),
     )
@@ -188,6 +239,26 @@ def build(season, cache_dir=None):
     totals = g.groupby("receiver_player_id")["tgt"].sum()
     keep = set(totals[totals >= MIN_SEASON_TARGETS].index)
     g = g[g.receiver_player_id.isin(keep)]
+
+    # Rushing side, for the SAME qualifying pass-catchers only — this isn't
+    # widening who counts as a "receiver" here, it's making sure a player
+    # who already qualifies on targets doesn't have his goal-line carries
+    # silently invisible to an "Anytime TD" model. A pass-catching back who
+    # scores on a 1-yard run was previously a 0 in this file no matter what
+    # actually happened on the field.
+    rush_df = scrim[scrim.rusher_player_id.notna() & scrim.rusher_player_id.isin(keep) & (scrim.rush_attempt == 1)].copy()
+    rush_df["td_rush"] = (rush_df.get("rush_touchdown", 0) == 1).astype(int)
+    rush_df["xtd_rush"] = rush_df.yardline_100.apply(lambda y: _xtd_rate(TD_TABLE_RUSH, y))
+    rush_g = rush_df.groupby(["rusher_player_id", "week"], as_index=False).agg(
+        td_rush=("td_rush", "sum"),
+        xtd_rush=("xtd_rush", "sum"),
+    )
+
+    g = g.merge(rush_g, left_on=["receiver_player_id", "week"], right_on=["rusher_player_id", "week"], how="left")
+    g["td_rush"] = g["td_rush"].fillna(0)
+    g["xtd_rush"] = g["xtd_rush"].fillna(0)
+    g["td"] = g["td_rec"] + g["td_rush"]
+    g["xtd"] = g["xtd_rec"] + g["xtd_rush"]
 
     mu = load_matchup(cache_dir)
     teams = (mu or {}).get("teams", {})
@@ -212,6 +283,7 @@ def build(season, cache_dir=None):
             "log": [
                 {"wk": str(int(r.week)), "tgt": int(r.tgt), "rec": int(r.rec),
                  "yds": int(r.yds), "lng": int(r.lng), "td": int(r.td),
+                 "xtd": round(float(r.xtd), 3),
                  "opp": _s(r.opp)}
                 for r in chunk.itertuples()
             ],
