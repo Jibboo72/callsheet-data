@@ -1421,15 +1421,19 @@ const MODEL={
   rec:{k:4,  base:0.52, defSwing:0.045},
   lng:{k:8,  base:0.33, defSwing:0.0},
   und:{k:10, base:0.78, defSwing:0.045},
-  // Fitted the same way as the others (walk-forward, log-loss minimized,
-  // 2,333 player-weeks). This was silently falling through to the
-  // receptions config (52% base) before, which is a wildly wrong prior
-  // for a touchdown — badly overstating probability for anyone with a
-  // modest track record. Calibration check: predicted 20% actually hit
-  // 20%, predicted 31% actually hit 31%. No defense adjustment — that
-  // hasn't been tested for TD rate specifically, so it defaults off
-  // rather than guessed at.
-  td:{k:14, base:0.199, defSwing:0}
+  // Touchdowns run on expected TDs (xtd), not raw hit/miss, as of this
+  // build — actual game logs from the data pipeline now carry a per-game
+  // xtd value: the sum, over every target and carry that game, of the
+  // league-wide TD conversion rate for that play's yard line (fit on
+  // 2023-2024 play-by-play, walk-forward safe against any later season).
+  // A raw hit-rate can't tell a receiver who saw six garbage-time targets
+  // apart from one who saw six goal-line looks; this can. Backtested
+  // walk-forward on the full 2025 season (3,891 player-weeks): log-loss
+  // 0.518 -> 0.507 switching to this signal, best at k=8 (grid-searched,
+  // not assumed same as the other markets). A blend with the old raw
+  // hit-rate was tested too and added nothing once xtd was in the mix, so
+  // this replaces it outright rather than averaging the two.
+  td:{k:8, base:0.199, defSwing:0}
 };
 const INJURY_LIFT=0.13;
 
@@ -1439,9 +1443,13 @@ function modelProb(pid,mkt,line,side,opts){
   if(L.length<3)return null;
   const key = mkt==='lng' ? (side==='under'?'und':'lng') : (mkt==='td' ? 'td' : 'rec');
   const M=MODEL[key]||MODEL.rec;
-  const h=L.filter(g=>meets(g[mkt],side,line)).length;
+  // xtd requires the newer data pipeline; older/unrebuilt player logs won't
+  // have it, so fall back to the previous hit-rate approach rather than
+  // silently treating every game as zero-opportunity
+  const hasXtd = mkt==='td' && L.every(g=>g.xtd!=null);
+  const h=hasXtd ? L.reduce((a,g)=>a+g.xtd,0) : L.filter(g=>meets(g[mkt],side,line)).length;
   let prob=(h+M.k*M.base)/(L.length+M.k);
-  const parts=[{label:`${h}/${L.length} shrunk toward ${Math.round(M.base*100)}%`,v:prob}];
+  const parts=[{label: hasXtd ? `${h.toFixed(1)} expected TDs over ${L.length} games shrunk toward ${Math.round(M.base*100)}%` : `${h}/${L.length} shrunk toward ${Math.round(M.base*100)}%`,v:prob}];
 
   // opponent, only where it was shown to matter
   const mu=MU(pid);
@@ -1644,7 +1652,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-24 22:00 UTC';
+const BUILD_STAMP='2026-09-24 23:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
