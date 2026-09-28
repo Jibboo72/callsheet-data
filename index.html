@@ -283,8 +283,9 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <div style="height:10px"></div>
   <button class="btn ghost" id="clearAll">Reset the season ledger</button>
   <div class="hr"></div>
-  <div class="pblock"><div class="pbh">Backup</div><div class="pbody">
-    <div class="note" style="margin:0 0 8px">Bets, picks and settings live on this device only — deleting the icon or clearing Safari wipes them. Players, games and odds aren't backed up because they re-import from the URLs in seconds.</div>
+  <div class="pblock"><div class="pbh">Backup — save a copy now</div><div class="pbody">
+    <div class="note" id="backupStatus" style="margin:0 0 8px;font-weight:600"></div>
+    <div class="note" style="margin:0 0 8px">Bets, picks and settings live on this device only — deleting the icon or clearing Safari wipes them. Players, games and odds aren't backed up because they re-import from the URLs in seconds. Nothing here is saved until you tap a button below.</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
       <button class="btn" id="backupOut">Copy to clipboard</button>
       <button class="btn ghost" id="backupFile">Save as file</button>
@@ -473,6 +474,7 @@ async function load(){
   if(bi)bi.textContent=`build ${BUILD_STAMP} · week 1 starts ${WEEK1_START}`;
   checkForNewerBuild();   // async, non-blocking — the rest of the app doesn't wait on this
   checkBackupReminder();
+  renderBackupStatus();
   if(migration){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
   }
@@ -2822,6 +2824,7 @@ function renderHistory(){
 }
 
 function renderLedger(){
+  renderBackupStatus();
   const body=document.getElementById('ledBody');body.innerHTML='';
   const row=(label,st,swatch)=>{
     const tr=document.createElement('tr');
@@ -3743,6 +3746,24 @@ function backupMsg(t,bad){
   const el=document.getElementById('backupMsg');
   el.textContent=t; el.style.color=bad?'var(--loss)':'var(--ink-soft)';
 }
+/* Shown at the top of the Backup section so it's never ambiguous whether
+   a backup already exists somewhere — there is no such thing as a backup
+   you haven't explicitly created with one of the buttons below. */
+function renderBackupStatus(){
+  const el=document.getElementById('backupStatus');
+  if(!el)return;
+  const last=S.lastBackupAt;
+  if(!last){
+    el.textContent='No backup saved yet on this device.';
+    el.style.color='var(--loss)';
+    return;
+  }
+  const days=Math.floor((Date.now()-last)/86400000);
+  const when=new Date(last).toISOString().slice(0,16).replace('T',' ');
+  el.textContent=days===0?`Last backup: today (${when} UTC).`
+    :`Last backup: ${days} day${days===1?'':'s'} ago (${when} UTC).`;
+  el.style.color=days>3?'var(--loss)':'var(--ink-soft)';
+}
 /* Players, games, odds and schedules all come back from a URL in seconds,
    so they stay out of the backup. What can never be recovered is what you
    typed: bets, card picks, settings. That's a few KB instead of hundreds. */
@@ -3767,7 +3788,7 @@ document.getElementById('backupOut').addEventListener('click',async()=>{
   const blob=backupBlob();
   const box=document.getElementById('backupIn');
   box.value=blob;                       // always show it, clipboard may fail
-  S.lastBackupAt=Date.now(); save();
+  S.lastBackupAt=Date.now(); save(); renderBackupStatus();
   try{
     await navigator.clipboard.writeText(blob);
     backupMsg(`Copied — ${(blob.length/1024).toFixed(1)} KB. Player and game data isn't included; you re-import that from the URLs.`);
@@ -3784,7 +3805,7 @@ document.getElementById('backupFile').addEventListener('click',()=>{
   a.download=`callsheet-backup-${new Date().toISOString().slice(0,10)}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),2000);
-  S.lastBackupAt=Date.now(); save();
+  S.lastBackupAt=Date.now(); save(); renderBackupStatus();
   backupMsg('Saved. Pick "Save to Files" — iCloud Drive keeps it off this device.');
 });
 document.getElementById('shareOut').addEventListener('click',()=>{
