@@ -26,6 +26,14 @@ jobs:
           path: pbp*.parquet
           key: pbp-2015-2021-v1
 
+      # Next Gen Stats: one combined file per stat type, spans all seasons.
+      # Also doesn't change season to season, so cache it too.
+      - name: Cache Next Gen Stats
+        uses: actions/cache@v4
+        with:
+          path: ngs_*.parquet
+          key: ngs-v1
+
       - name: Step 3 — pull opening and closing lines
         run: python3 run_all.py 2015 2021
 
@@ -38,6 +46,13 @@ jobs:
       # See test_formula_weights.py for why this knob specifically.
       - name: Step 5 — test offense/defense weighting
         run: python3 test_formula_weights.py
+
+      # Step 2 of "tighten the formula": CPOE/RYOE from Next Gen Stats,
+      # opponent-adjusted the same way as EPA/success and swept one weight
+      # at a time (offense/defense x CPOE/RYOE = 4 sweeps). See
+      # test_cpoe_ryoe.py for why and how.
+      - name: Step 6 — test CPOE/RYOE
+        run: python3 test_cpoe_ryoe.py
 
       # Keeps the CSV and any cached parquet available for download
       # from the run summary page, so you can inspect the data itself.
