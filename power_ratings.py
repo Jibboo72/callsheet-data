@@ -19,6 +19,17 @@ METHOD (the short version)
    being garbage.
 5. Repeat the same regression with SUCCESS RATE as the target. Success rate is
    noisier-resistant; EPA is fat-tailed. Blend them.
+5b. STEP 2 ("tighten the formula"): a third signal, Next Gen Stats CPOE
+    (completion % above expectation) and RYOE (rush yards over expectation
+    per attempt), is blended in alongside EPA/success rate -- same idea,
+    different stat. NGS is weekly player-level data, not play-level, so it's
+    first aggregated to team-week grain (attempt-weighted) and opponent-
+    adjusted with its OWN ridge fit (fit_ngs_phase, below) that reuses the
+    exact same _weighted_ridge machinery as the EPA/success phases -- one
+    team-week row stands in for "one play". The weights that control how
+    much this counts (w_cpoe_off/def, w_ryoe_off/def) all default to 0.0, so
+    nothing about the live ratings changes until these are backtested and
+    turned on (see test_cpoe_ryoe.py).
 6. Recency-weight plays (exponential decay) and discount prior seasons.
 7. Convert the blended EPA/play index into points/game, calibrated so that
    (rating_A - rating_B + HFA) is on the same scale as a real point spread.
@@ -70,6 +81,25 @@ CONFIG = dict(
     # touching the default here.
     rating_off_weight=1.0,
     rating_def_weight=1.0,
+
+    # --- NGS CPOE / RYOE: a 3rd signal in the offense/defense blend ---
+    # fit_ngs_phase() opponent-adjusts CPOE (passing) and RYOE (rushing) the
+    # same way EPA/success are adjusted, just at team-week grain instead of
+    # play grain (see fit_ngs_phase below). alpha_cpoe/alpha_ryoe are the
+    # ridge shrinkage for THOSE fits -- much lower than alpha_pass/alpha_rush
+    # because there are ~17 team-week rows per team per season, not
+    # thousands of plays, so far less shrinkage is needed to avoid overfit.
+    # The w_* weights are how much CPOE/RYOE count in the final blend, each
+    # scaled to EPA's own spread before being applied (see blend() in
+    # build_ratings) so a weight of e.g. 0.15 means "15% as much swing as
+    # EPA gets", not a raw unit. All four default to 0.0 -- OFF -- until
+    # test_cpoe_ryoe.py's walk-forward backtest says otherwise.
+    alpha_cpoe=25.0,
+    alpha_ryoe=25.0,
+    w_cpoe_off=0.0,
+    w_cpoe_def=0.0,
+    w_ryoe_off=0.0,
+    w_ryoe_def=0.0,
 )
 
 TEAM_FIX = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA"}
@@ -113,6 +143,77 @@ def load_games(cache_dir="."):
     return g
 
 
+def load_ngs(stat_type, cache_dir="."):
+    """Load nflverse Next Gen Stats, player-week grain, ALL seasons in one
+    file (stat_type: 'passing' or 'rushing' -- 'receiving' also exists but
+    isn't used here). Drops the week=0 rows, which are season-long totals,
+    not point-in-time data -- using them would be a look-ahead leak."""
+    path = f"{cache_dir}/ngs_{stat_type}.parquet"
+    try:
+        df = pd.read_parquet(path)
+    except Exception:
+        url = ("https://github.com/nflverse/nflverse-data/releases/download/"
+               f"nextgen_stats/ngs_{stat_type}.parquet")
+        df = pd.read_parquet(url)
+        try:
+            df.to_parquet(path)
+        except Exception:
+            pass
+    df = df[df["week"] > 0].copy()
+    df["team_abbr"] = df["team_abbr"].replace(TEAM_FIX)
+    return df
+
+
+def _team_week_agg(ngs, value_col, weight_col):
+    """Collapse player-week NGS rows to one attempt/rush-weighted row per
+    team-week -- the grain the opponent-adjustment ridge needs."""
+    def _wavg(x):
+        w = x[weight_col].to_numpy(dtype=float)
+        v = x[value_col].to_numpy(dtype=float)
+        tot = w.sum()
+        return pd.Series({value_col: (np.average(v, weights=w) if tot > 0 else 0.0),
+                          weight_col: tot})
+    g = (ngs.groupby(["season", "week", "team_abbr"])
+            .apply(_wavg)
+            .reset_index())
+    return g
+
+
+def _attach_opponent(tw, games):
+    """Join each team-week row to its opponent (defteam) and the game's real
+    home team, via the schedule -- the columns fit_phase()/fit_ngs_phase()
+    need (posteam/defteam/home_team), same shape as play-level pbp rows."""
+    g = games[["season", "week", "home_team", "away_team"]]
+    home = tw.merge(g, left_on=["season", "week", "team_abbr"],
+                    right_on=["season", "week", "home_team"], how="inner")
+    home["defteam"] = home["away_team"]
+    away = tw.merge(g, left_on=["season", "week", "team_abbr"],
+                    right_on=["season", "week", "away_team"], how="inner")
+    away["defteam"] = away["home_team"]
+    out = pd.concat([home, away], ignore_index=True)
+    return out.rename(columns={"team_abbr": "posteam"})
+
+
+def load_ngs_pass_team_week(seasons=None, cache_dir="."):
+    """Opponent-joined, team-week CPOE table -- pass ngs_pass= into
+    build_ratings() to turn CPOE on (still gated by w_cpoe_off/w_cpoe_def)."""
+    ngs = load_ngs("passing", cache_dir)
+    if seasons is not None:
+        ngs = ngs[ngs["season"].isin(seasons)]
+    tw = _team_week_agg(ngs, "completion_percentage_above_expectation", "attempts")
+    return _attach_opponent(tw, load_games(cache_dir))
+
+
+def load_ngs_rush_team_week(seasons=None, cache_dir="."):
+    """Opponent-joined, team-week RYOE-per-attempt table -- pass ngs_rush=
+    into build_ratings() to turn RYOE on (gated by w_ryoe_off/w_ryoe_def)."""
+    ngs = load_ngs("rushing", cache_dir)
+    if seasons is not None:
+        ngs = ngs[ngs["season"].isin(seasons)]
+    tw = _team_week_agg(ngs, "rush_yards_over_expected_per_att", "rush_attempts")
+    return _attach_opponent(tw, load_games(cache_dir))
+
+
 # --------------------------------------------------------------------------
 # FILTERING
 # --------------------------------------------------------------------------
@@ -148,7 +249,9 @@ def special_teams_plays(pbp):
 # --------------------------------------------------------------------------
 
 def play_weights(d, as_of_season, as_of_week, cfg=CONFIG):
-    """Exponential recency decay in weeks, plus prior-season discount."""
+    """Exponential recency decay in weeks, plus prior-season discount.
+    Generic over grain -- only needs season/week columns, so it works
+    unchanged on play-level pbp rows AND on team-week NGS rows."""
     # weeks elapsed: approximate a season as 22 weeks
     weeks_ago = ((as_of_season - d["season"]) * 22.0) + (as_of_week - d["week"])
     weeks_ago = np.maximum(weeks_ago, 0.0)
@@ -208,9 +311,15 @@ def _weighted_ridge(off, dfn, home, y, w, k, alpha):
     P[-1, -1] = 0.0                      # intercept unpenalised
     return np.linalg.solve(A + P, b)[:2*k+1]
 
-def fit_phase(d, teams, target, alpha, weights):
-    """Return (offense_effect, defense_effect) Series in target units."""
-    if len(d) < 200:
+def fit_phase(d, teams, target, alpha, weights, min_rows=200):
+    """Return (offense_effect, defense_effect) Series in target units.
+    Grain-agnostic: needs posteam/defteam/home_team + a numeric target
+    column. Called on play-level pbp rows for EPA/success (min_rows=200,
+    the default -- thousands of plays is normal), and on team-week NGS
+    rows for CPOE/RYOE (fit_ngs_phase, below, passes a much lower min_rows
+    since a team-week row is a whole game's aggregate, not one play) --
+    same math either way, one row just means something different."""
+    if len(d) < min_rows:
         z = pd.Series(0.0, index=teams)
         return z.copy(), z.copy()
 
@@ -227,6 +336,38 @@ def fit_phase(d, teams, target, alpha, weights):
     dfn_s = pd.Series(coef[k:2 * k], index=teams)
     # center so league average is exactly 0
     return off_s - off_s.mean(), dfn_s - dfn_s.mean()
+
+
+def fit_ngs_phase(tw, teams, value_col, weight_col, alpha, as_of_season, as_of_week, cfg=CONFIG):
+    """Opponent-adjusted team-week ridge for a Next Gen Stats signal (CPOE or
+    RYOE-per-attempt). Reuses fit_phase()'s exact ridge machinery: each
+    team-week row (one team's aggregate CPOE/RYOE for one game, already
+    attempt-weighted across its players) stands in for "one play" in the
+    original EPA model. Needs STRICTLY prior data, same no-look-ahead rule
+    as build_ratings() itself -- tw is filtered to (season, week) < as_of
+    right here so every caller gets that for free.
+
+    tw: output of load_ngs_pass_team_week() / load_ngs_rush_team_week()
+        (has posteam, defteam, home_team, season, week, value_col, weight_col).
+    Returns (offense_effect, defense_effect) in value_col's own units --
+    e.g. for CPOE, offense_effect is "this team's opponent-adjusted
+    completion % above expectation when passing"; defense_effect is the
+    same thing allowed, when defending (higher = worse pass defense, same
+    direction as the EPA-allowed convention elsewhere in this file).
+    """
+    d = tw[(tw["season"] < as_of_season) |
+          ((tw["season"] == as_of_season) & (tw["week"] < as_of_week))]
+    if len(d) < 20:
+        z = pd.Series(0.0, index=teams)
+        return z.copy(), z.copy()
+    rw = play_weights(d, as_of_season, as_of_week, cfg)
+    w = rw * d[weight_col].to_numpy(dtype=float)
+    # min_rows=20, not fit_phase's play-level default of 200 -- a team-week
+    # row here is a whole game's attempt-weighted aggregate, not one play,
+    # so 20 of them is already a real sample (the len(d)<20 check above
+    # covers the "basically nothing yet" case).
+    return fit_phase(d.rename(columns={value_col: "_target"}), teams, "_target",
+                     alpha, w, min_rows=20)
 
 
 # --------------------------------------------------------------------------
@@ -296,8 +437,19 @@ def luck_flags(pbp, as_of_season, as_of_week):
 # MAIN RATING BUILD
 # --------------------------------------------------------------------------
 
-def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None):
-    """Ratings using ONLY data strictly before (as_of_season, as_of_week)."""
+def _fit_components(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
+                    ngs_pass=None, ngs_rush=None):
+    """Everything build_ratings() needs, BEFORE the final blend/combine
+    step -- split out so a backtest can fit this ONCE per (season, week)
+    and then cheaply try many blend weights against it (the same trick
+    test_formula_weights.py uses for rating_off_weight/rating_def_weight).
+    Returns a dict of team-indexed Series plus 'teams'.
+
+    ngs_pass / ngs_rush: optional pre-built team-week tables (see
+    load_ngs_pass_team_week() / load_ngs_rush_team_week()). Omit them (the
+    default) and cpoe_off/cpoe_def/ryoe_off/ryoe_def all come back as 0 --
+    build_ratings() is then byte-for-byte what it was before step 2.
+    """
     d = scrimmage_plays(pbp, cfg)
     d = d[(d["season"] < as_of_season) |
           ((d["season"] == as_of_season) & (d["week"] < as_of_week))]
@@ -314,21 +466,55 @@ def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None):
     po_s, pd_s = fit_phase(dp, teams, "success", cfg["alpha_pass"], dp["_w"].values)
     ro_s, rd_s = fit_phase(dr, teams, "success", cfg["alpha_rush"], dr["_w"].values)
 
-    def blend(e, s):
-        se, ss = e.std(), s.std()
-        s_scaled = s * (se / ss) if ss > 1e-9 else s * 0.0
-        return cfg["w_epa"] * e + cfg["w_sr"] * s_scaled
+    zero = pd.Series(0.0, index=teams)
+    cpoe_off = cpoe_def = ryoe_off = ryoe_def = zero
+    if ngs_pass is not None:
+        cpoe_off, cpoe_def = fit_ngs_phase(
+            ngs_pass, teams, "completion_percentage_above_expectation",
+            "attempts", cfg["alpha_cpoe"], as_of_season, as_of_week, cfg)
+    if ngs_rush is not None:
+        ryoe_off, ryoe_def = fit_ngs_phase(
+            ngs_rush, teams, "rush_yards_over_expected_per_att",
+            "rush_attempts", cfg["alpha_ryoe"], as_of_season, as_of_week, cfg)
 
-    pass_off = blend(po_e, po_s)
-    rush_off = blend(ro_e, ro_s)
-    pass_def = blend(pd_e, pd_s)
-    rush_def = blend(rd_e, rd_s)
+    st = special_teams_rating(pbp, teams, as_of_season, as_of_week, cfg) * 8.0
+
+    return dict(teams=teams, po_e=po_e, pd_e=pd_e, ro_e=ro_e, rd_e=rd_e,
+                po_s=po_s, pd_s=pd_s, ro_s=ro_s, rd_s=rd_s,
+                cpoe_off=cpoe_off, cpoe_def=cpoe_def,
+                ryoe_off=ryoe_off, ryoe_def=ryoe_def, st=st)
+
+
+def _scaled(base, extra):
+    """Scale extra to base's own spread, so a blend weight means 'this much
+    swing relative to EPA' rather than a raw, incomparable unit. Shared by
+    build_ratings() and any backtest that recombines _fit_components()."""
+    sb, se = base.std(), extra.std()
+    return extra * (sb / se) if se > 1e-9 else extra * 0.0
+
+
+def combine_components(c, cfg=CONFIG):
+    """The blend/combine step split out of build_ratings() -- turns the raw
+    fitted components into the same points-scale DataFrame build_ratings()
+    returns. Pulled out so test_cpoe_ryoe.py (and test_formula_weights.py's
+    successor, if it's ever extended) can call this directly per weight
+    candidate without re-running _fit_components()."""
+    def blend(e, s, extra, w_extra):
+        out = cfg["w_epa"] * e + cfg["w_sr"] * _scaled(e, s)
+        if w_extra:
+            out = out + w_extra * _scaled(e, extra)
+        return out
+
+    pass_off = blend(c["po_e"], c["po_s"], c["cpoe_off"], cfg["w_cpoe_off"])
+    rush_off = blend(c["ro_e"], c["ro_s"], c["ryoe_off"], cfg["w_ryoe_off"])
+    pass_def = blend(c["pd_e"], c["pd_s"], c["cpoe_def"], cfg["w_cpoe_def"])
+    rush_def = blend(c["rd_e"], c["rd_s"], c["ryoe_def"], cfg["w_ryoe_def"])
 
     off_idx = cfg["off_pass_weight"] * pass_off + cfg["off_rush_weight"] * rush_off
     def_idx = cfg["def_pass_weight"] * pass_def + cfg["def_rush_weight"] * rush_def
 
     ppg = cfg["plays_per_game"]
-    st = special_teams_rating(pbp, teams, as_of_season, as_of_week, cfg) * 8.0
+    teams = c["teams"]
 
     out = pd.DataFrame({
         "off_pass": pass_off * ppg,
@@ -337,14 +523,29 @@ def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None):
         "def_rush": -rush_def * ppg,
         "offense": off_idx * ppg,
         "defense": -def_idx * ppg,
-        "special": st * cfg["st_weight"],
-    })
+        "special": c["st"] * cfg["st_weight"],
+    }, index=teams)
     out["rating"] = (cfg["rating_off_weight"] * out["offense"]
                       + cfg["rating_def_weight"] * out["defense"]
                       + out["special"])
     out = out.sort_values("rating", ascending=False)
     out.index.name = "team"
     return out
+
+
+def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
+                  ngs_pass=None, ngs_rush=None):
+    """Ratings using ONLY data strictly before (as_of_season, as_of_week).
+
+    ngs_pass / ngs_rush: optional pre-built team-week tables (see
+    load_ngs_pass_team_week() / load_ngs_rush_team_week() above) that add
+    CPOE and RYOE as a third signal in the offense/defense blend. Omit them
+    (the default) and nothing changes -- CONFIG's w_cpoe_*/w_ryoe_* also
+    default to 0.0, so even passing them in changes nothing until those
+    weights are turned on and backtested (test_cpoe_ryoe.py).
+    """
+    c = _fit_components(pbp, as_of_season, as_of_week, cfg, teams, ngs_pass, ngs_rush)
+    return combine_components(c, cfg)
 
 
 # --------------------------------------------------------------------------
