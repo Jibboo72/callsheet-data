@@ -1,0 +1,52 @@
+name: Backtest vs opening lines
+
+on:
+  workflow_dispatch:        # manual trigger — the "Run workflow" button
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pandas numpy pyarrow lxml requests
+
+      # Play-by-play files are ~20MB each and don't change.
+      # Cache them so reruns skip the download entirely.
+      - name: Cache play-by-play
+        uses: actions/cache@v4
+        with:
+          path: pbp*.parquet
+          key: pbp-2015-2021-v1
+
+      - name: Step 3 — pull opening and closing lines
+        run: python3 run_all.py 2015 2021
+
+      - name: Step 4 — walk-forward test
+        run: python3 test_vs_open.py
+
+      # Sweeps offense-vs-defense weighting in the final rating, the same
+      # honest walk-forward way step 4 tests scale/HFA. Reuses the
+      # nfl_open_close.csv step 3 just wrote — no extra odds pull needed.
+      # See test_formula_weights.py for why this knob specifically.
+      - name: Step 5 — test offense/defense weighting
+        run: python3 test_formula_weights.py
+
+      # Keeps the CSV and any cached parquet available for download
+      # from the run summary page, so you can inspect the data itself.
+      - name: Save outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-data
+          path: |
+            nfl_open_close.csv
+            fetch_log.txt
+          if-no-files-found: warn
