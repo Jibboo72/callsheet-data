@@ -211,9 +211,9 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <button role="tab" id="tabCards" aria-selected="true">Props</button>
   <button role="tab" id="tabSides" aria-selected="false">Sides</button>
   <button role="tab" id="tabRoster" aria-selected="false">Roster</button>
-  <button role="tab" id="tabPower" aria-selected="false">Power</button>
   <button role="tab" id="tabBank" aria-selected="false">Bank</button>
   <button role="tab" id="tabLedger" aria-selected="false">Ledger</button>
+  <button role="tab" id="tabPower" aria-selected="false">Power</button>
 </nav>
 
 <section id="paneCards">
@@ -817,8 +817,8 @@ function renderCards(){
         <div class="lab">Stake — ${esc(p.who)} at ${fmtAm(p.odds)}</div>
         <div class="units">
           <button class="ubtn" data-placeu="1" data-pc="${c.id}:${i}">1 unit<span>${money(U())}</span></button>
+          <button class="ubtn" data-placeu="1.5" data-pc="${c.id}:${i}">1.5 units<span>${money(1.5*U())}</span></button>
           <button class="ubtn" data-placeu="2" data-pc="${c.id}:${i}">2 units<span>${money(2*U())}</span></button>
-          <button class="ubtn" data-placeu="3" data-pc="${c.id}:${i}">3 units<span>${money(3*U())}</span></button>
           <button class="ubtn" data-placeu="c" data-pc="${c.id}:${i}">✱<span>use box</span></button>
         </div>
         <div style="height:6px"></div>
@@ -2335,8 +2335,8 @@ function slipPanel(name='main'){
           :`<div class="note" style="margin:10px 0 6px">${legs.length} legs at ${fmtAm(am)}${usingManual?' (your price)':''} — 1 unit returns ${money(applyBoost(U()*d,U(),s.boost))}${s.boost?` (${s.boost}% boost applied)`:''}. Every leg has to land.</div>`}
         <div class="units">
           <button class="ubtn" data-slipu="1" data-slipname="${name}">1 unit<span>${money(U())}</span></button>
+          <button class="ubtn" data-slipu="1.5" data-slipname="${name}">1.5 units<span>${money(1.5*U())}</span></button>
           <button class="ubtn" data-slipu="2" data-slipname="${name}">2 units<span>${money(2*U())}</span></button>
-          <button class="ubtn" data-slipu="3" data-slipname="${name}">3 units<span>${money(3*U())}</span></button>
           <button class="ubtn" data-slipu="x" data-slipname="${name}">✱<span>custom</span></button>
         </div>
         <div class="custom" data-slipcustom hidden>
@@ -2478,8 +2478,8 @@ function renderSides(){
           </div>
           <div class="units" style="grid-column:1/-1">
             <button class="ubtn" data-u="1" data-g="${esc(g.id)}">1 unit<span>${money(U())}</span></button>
+            <button class="ubtn" data-u="1.5" data-g="${esc(g.id)}">1.5 units<span>${money(1.5*U())}</span></button>
             <button class="ubtn" data-u="2" data-g="${esc(g.id)}">2 units<span>${money(2*U())}</span></button>
-            <button class="ubtn" data-u="3" data-g="${esc(g.id)}">3 units<span>${money(3*U())}</span></button>
             <button class="ubtn" data-u="x" data-g="${esc(g.id)}">✱<span>custom</span></button>
           </div>
           <button class="btn ghost" data-parlay="${esc(g.id)}" style="grid-column:1/-1;margin-top:6px">+ Parlay</button>
@@ -2633,7 +2633,7 @@ function renderBank(){
         <div><span class="lab">Unit size</span>
           <input id="bankUnit" type="number" step="1" inputmode="decimal" value="${Number(b.unit||14)}"></div>
       </div>
-      <div class="note" style="margin:8px 0 0">Every unit is ${money(U())}. The buttons on the Sides board stake 1, 2 or 3 units; ✱ takes any amount.</div>
+      <div class="note" style="margin:8px 0 0">Every unit is ${money(U())}. The buttons on the Sides board stake 1, 1.5 or 2 units; ✱ takes any amount.</div>
     </div></div>`;
 
   const bq=(bankQuery||'').trim().toLowerCase();
@@ -3978,7 +3978,7 @@ function showTab(name){
   });
   window.scrollTo(0,0);
 }
-['Cards','Sides','Roster','Power','Bank','Ledger'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
+['Cards','Sides','Roster','Bank','Ledger','Power'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openPid)closePlayer();});
 
 load();
