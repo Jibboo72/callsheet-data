@@ -55,8 +55,20 @@ FIRST_WEEK = 5
 # load_injury_discount_team_week's docstring/output) -- a weight of 1.0
 # here means "a typical week's worth of starter-availability gap is worth
 # about half a rating point", which is a small, conservative starting
-# scale. The sweep covers up to a much more aggressive reading too.
-INJURY_WEIGHTS = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]
+# scale.
+#
+# First pass (0.0-5.0) came back with EVERY metric -- RMSE, CLV, ATS-all,
+# ATS-edge>=2, and even the edge>=2 sample size -- improving together,
+# monotonically, all the way out to 5.0, the top of that range. That's
+# unlike steps 1-3, which just bounced around noisily. But 5.0 was the
+# edge of what got tested, with RMSE already flattening while CLV/ATS
+# kept climbing -- so the true peak (or reversal) was still unknown.
+# Extended much further out to find it: if this keeps improving forever,
+# something is off (an unbounded "better" weight isn't a real result,
+# it's a sign the backtest itself has a leak or degenerate case worth
+# checking); if it peaks and comes back down, THAT peak is the real
+# candidate, not whatever the edge of the old range happened to be.
+INJURY_WEIGHTS = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0, 50.0]
 
 
 # ------------------------------------------------------------------ data
