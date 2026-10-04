@@ -166,13 +166,27 @@ def load_ngs(stat_type, cache_dir="."):
 
 def _team_week_agg(ngs, value_col, weight_col):
     """Collapse player-week NGS rows to one attempt/rush-weighted row per
-    team-week -- the grain the opponent-adjustment ridge needs."""
+    team-week -- the grain the opponent-adjustment ridge needs.
+
+    NGS has real NaNs in value_col (e.g. ~1k rows of early-era
+    rush_yards_over_expected_per_att, before NGS backfilled that stat) --
+    a plain weighted average propagates one NaN player into the whole
+    team-week, and from there into the whole ridge solve the moment a
+    weight is non-zero (every team's coefficient goes NaN, not just that
+    team's -- that's what a SVD-did-not-converge crash downstream means).
+    So NaN rows are dropped before averaging, using only the players who
+    actually have a value, same as scrimmage_plays() dropping epa.isna()."""
     def _wavg(x):
-        w = x[weight_col].to_numpy(dtype=float)
-        v = x[value_col].to_numpy(dtype=float)
+        ok = x[value_col].notna()
+        w = x.loc[ok, weight_col].to_numpy(dtype=float)
+        v = x.loc[ok, value_col].to_numpy(dtype=float)
         tot = w.sum()
+        # if NOTHING on this team-week has a real value, report weight 0 too
+        # (not the raw attempt count) -- fit_ngs_phase multiplies by this
+        # weight, so a 0 here correctly drops the row instead of feeding
+        # the ridge a fake "0.0, fully trusted" observation.
         return pd.Series({value_col: (np.average(v, weights=w) if tot > 0 else 0.0),
-                          weight_col: tot})
+                          weight_col: (x[weight_col].sum() if tot > 0 else 0.0)})
     g = (ngs.groupby(["season", "week", "team_abbr"])
             .apply(_wavg)
             .reset_index())
@@ -362,6 +376,17 @@ def fit_ngs_phase(tw, teams, value_col, weight_col, alpha, as_of_season, as_of_w
         return z.copy(), z.copy()
     rw = play_weights(d, as_of_season, as_of_week, cfg)
     w = rw * d[weight_col].to_numpy(dtype=float)
+    # RYOE-per-attempt specifically: NGS didn't start computing it until
+    # 2018 -- 2016-17 is 100% NaN, which _team_week_agg() already turns
+    # into weight 0 per the comment there. If EVERY row in the training
+    # window is one of those (as_of date whose whole prior window predates
+    # real data), w is all zero, which makes the ridge's intercept term
+    # 0/0 -- an unpenalized, dataless row -- and np.linalg.solve raises
+    # LinAlgError: Singular matrix. Bail to "no signal yet" instead,
+    # exactly like the len(d)<20 case just above.
+    if w.sum() <= 0:
+        z = pd.Series(0.0, index=teams)
+        return z.copy(), z.copy()
     # min_rows=20, not fit_phase's play-level default of 200 -- a team-week
     # row here is a whole game's attempt-weighted aggregate, not one play,
     # so 20 of them is already a real sample (the len(d)<20 check above
