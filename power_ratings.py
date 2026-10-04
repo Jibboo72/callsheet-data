@@ -100,6 +100,16 @@ CONFIG = dict(
     w_cpoe_def=0.0,
     w_ryoe_off=0.0,
     w_ryoe_def=0.0,
+
+    # --- step 3: charted pass-pressure rate (PFR, free) ---
+    # Same idea and same fit_ngs_phase() machinery as CPOE/RYOE, one more
+    # team-week signal blended into the pass offense/defense phases. See
+    # load_pfr_pressure_team_week() for why PFR and not FTN. Defaults to
+    # 0.0 -- OFF -- until test_pressure.py's walk-forward backtest says
+    # otherwise.
+    alpha_prss=25.0,
+    w_prss_off=0.0,
+    w_prss_def=0.0,
 )
 
 TEAM_FIX = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA"}
@@ -226,6 +236,83 @@ def load_ngs_rush_team_week(seasons=None, cache_dir="."):
         ngs = ngs[ngs["season"].isin(seasons)]
     tw = _team_week_agg(ngs, "rush_yards_over_expected_per_att", "rush_attempts")
     return _attach_opponent(tw, load_games(cache_dir))
+
+
+def load_pfr_pressure_team_week(pbp, seasons=None, cache_dir="."):
+    """Step 3: opponent-joined, team-week pass-pressure-rate table -- pass
+    pfr_prss= into build_ratings() to turn it on (gated by
+    w_prss_off/w_prss_def).
+
+    SOURCE: PFR's weekly advanced passing stats (free, same nflverse
+    pipeline as everything else here) -- its times_pressured column, a
+    real charted "was the QB pressured on this dropback" outcome. FTN's
+    own charting release was checked first (that was the original plan --
+    "charted pressure rate ... cross-checked with PFR"), but FTN's
+    ftn_charting files only have pass-rush CONTEXT (n_pass_rushers,
+    n_blitzers) with no pressure OUTCOME column at all, so it can't
+    produce a rate. PFR is the one source of the two that actually has
+    one, so it's the only one wired in here.
+
+    Player rows (one per passer-week, PFR's own grain) are summed to
+    team-week counts, then divided by that TEAM's dropback count from pbp
+    -- the same dropback definition scrimmage_plays() uses everywhere
+    else in this file -- rather than trusting an un-published PFR
+    denominator. Negated before returning, so higher = LESS pressure
+    allowed = better offense, matching the "higher is better" polarity
+    every other signal here uses (po_e, po_s, cpoe_off, ...) -- the sign
+    flip for the defense side (allowed -> generated) happens downstream
+    in combine_components(), same as EPA's pass defense always has.
+
+    Starts 2018 -- PFR's advstats release doesn't go back further;
+    seasons before that are skipped here, and any as-of date whose whole
+    training window predates 2018 just gets zero signal (fit_ngs_phase's
+    w.sum()<=0 guard), not a crash -- same handling RYOE already needed
+    for its own pre-2018 gap.
+    """
+    want = seasons if seasons is not None else range(2018, 2027)
+    frames = []
+    for s in want:
+        if s < 2018:
+            continue
+        path = f"{cache_dir}/pfr_pass_{s}.parquet"
+        try:
+            df = pd.read_parquet(path)
+        except Exception:
+            url = ("https://github.com/nflverse/nflverse-data/releases/"
+                   f"download/pfr_advstats/advstats_week_pass_{s}.parquet")
+            try:
+                df = pd.read_parquet(url)
+            except Exception:
+                continue        # season not covered by PFR advstats
+            try:
+                df.to_parquet(path)
+            except Exception:
+                pass
+        frames.append(df)
+
+    empty_cols = ["season", "week", "team_abbr", "pressure_rate", "dropbacks",
+                 "defteam", "home_team", "away_team"]
+    if not frames:
+        return pd.DataFrame(columns=empty_cols)
+
+    p = pd.concat(frames, ignore_index=True)
+    p["team"] = p["team"].replace(TEAM_FIX)
+    pressed = (p.groupby(["season", "week", "team"], as_index=False)["times_pressured"]
+                .sum().rename(columns={"team": "team_abbr"}))
+
+    dp = scrimmage_plays(pbp, CONFIG)
+    dp = dp[dp["is_pass"]]
+    drop = (dp.groupby(["season", "week", "posteam"]).size()
+              .rename("dropbacks").reset_index()
+              .rename(columns={"posteam": "team_abbr"}))
+
+    tw = pressed.merge(drop, on=["season", "week", "team_abbr"], how="inner")
+    tw = tw[tw["dropbacks"] > 0].copy()
+    if len(tw) == 0:
+        return pd.DataFrame(columns=empty_cols)
+    tw["pressure_rate"] = -(tw["times_pressured"] / tw["dropbacks"])
+    return _attach_opponent(tw[["season", "week", "team_abbr", "pressure_rate", "dropbacks"]],
+                            load_games(cache_dir))
 
 
 # --------------------------------------------------------------------------
@@ -463,17 +550,18 @@ def luck_flags(pbp, as_of_season, as_of_week):
 # --------------------------------------------------------------------------
 
 def _fit_components(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
-                    ngs_pass=None, ngs_rush=None):
+                    ngs_pass=None, ngs_rush=None, pfr_prss=None):
     """Everything build_ratings() needs, BEFORE the final blend/combine
     step -- split out so a backtest can fit this ONCE per (season, week)
     and then cheaply try many blend weights against it (the same trick
     test_formula_weights.py uses for rating_off_weight/rating_def_weight).
     Returns a dict of team-indexed Series plus 'teams'.
 
-    ngs_pass / ngs_rush: optional pre-built team-week tables (see
-    load_ngs_pass_team_week() / load_ngs_rush_team_week()). Omit them (the
-    default) and cpoe_off/cpoe_def/ryoe_off/ryoe_def all come back as 0 --
-    build_ratings() is then byte-for-byte what it was before step 2.
+    ngs_pass / ngs_rush / pfr_prss: optional pre-built team-week tables
+    (see load_ngs_pass_team_week() / load_ngs_rush_team_week() /
+    load_pfr_pressure_team_week()). Omit them (the default) and
+    cpoe_off/cpoe_def/ryoe_off/ryoe_def/prss_off/prss_def all come back as
+    0 -- build_ratings() is then byte-for-byte what it was before step 2.
     """
     d = scrimmage_plays(pbp, cfg)
     d = d[(d["season"] < as_of_season) |
@@ -492,7 +580,7 @@ def _fit_components(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
     ro_s, rd_s = fit_phase(dr, teams, "success", cfg["alpha_rush"], dr["_w"].values)
 
     zero = pd.Series(0.0, index=teams)
-    cpoe_off = cpoe_def = ryoe_off = ryoe_def = zero
+    cpoe_off = cpoe_def = ryoe_off = ryoe_def = prss_off = prss_def = zero
     if ngs_pass is not None:
         cpoe_off, cpoe_def = fit_ngs_phase(
             ngs_pass, teams, "completion_percentage_above_expectation",
@@ -501,13 +589,18 @@ def _fit_components(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
         ryoe_off, ryoe_def = fit_ngs_phase(
             ngs_rush, teams, "rush_yards_over_expected_per_att",
             "rush_attempts", cfg["alpha_ryoe"], as_of_season, as_of_week, cfg)
+    if pfr_prss is not None:
+        prss_off, prss_def = fit_ngs_phase(
+            pfr_prss, teams, "pressure_rate",
+            "dropbacks", cfg["alpha_prss"], as_of_season, as_of_week, cfg)
 
     st = special_teams_rating(pbp, teams, as_of_season, as_of_week, cfg) * 8.0
 
     return dict(teams=teams, po_e=po_e, pd_e=pd_e, ro_e=ro_e, rd_e=rd_e,
                 po_s=po_s, pd_s=pd_s, ro_s=ro_s, rd_s=rd_s,
                 cpoe_off=cpoe_off, cpoe_def=cpoe_def,
-                ryoe_off=ryoe_off, ryoe_def=ryoe_def, st=st)
+                ryoe_off=ryoe_off, ryoe_def=ryoe_def,
+                prss_off=prss_off, prss_def=prss_def, st=st)
 
 
 def _scaled(base, extra):
@@ -524,16 +617,27 @@ def combine_components(c, cfg=CONFIG):
     returns. Pulled out so test_cpoe_ryoe.py (and test_formula_weights.py's
     successor, if it's ever extended) can call this directly per weight
     candidate without re-running _fit_components()."""
-    def blend(e, s, extra, w_extra):
+    def blend(e, s, *extras):
+        """extras: any number of (series, weight) pairs -- each one scaled
+        to e's own spread (see _scaled) before being added in, so a 0
+        weight is always a true no-op regardless of how many signals are
+        stacked on."""
         out = cfg["w_epa"] * e + cfg["w_sr"] * _scaled(e, s)
-        if w_extra:
-            out = out + w_extra * _scaled(e, extra)
+        for extra, w_extra in extras:
+            if w_extra:
+                out = out + w_extra * _scaled(e, extra)
         return out
 
-    pass_off = blend(c["po_e"], c["po_s"], c["cpoe_off"], cfg["w_cpoe_off"])
-    rush_off = blend(c["ro_e"], c["ro_s"], c["ryoe_off"], cfg["w_ryoe_off"])
-    pass_def = blend(c["pd_e"], c["pd_s"], c["cpoe_def"], cfg["w_cpoe_def"])
-    rush_def = blend(c["rd_e"], c["rd_s"], c["ryoe_def"], cfg["w_ryoe_def"])
+    pass_off = blend(c["po_e"], c["po_s"],
+                     (c["cpoe_off"], cfg["w_cpoe_off"]),
+                     (c["prss_off"], cfg["w_prss_off"]))
+    rush_off = blend(c["ro_e"], c["ro_s"],
+                     (c["ryoe_off"], cfg["w_ryoe_off"]))
+    pass_def = blend(c["pd_e"], c["pd_s"],
+                     (c["cpoe_def"], cfg["w_cpoe_def"]),
+                     (c["prss_def"], cfg["w_prss_def"]))
+    rush_def = blend(c["rd_e"], c["rd_s"],
+                     (c["ryoe_def"], cfg["w_ryoe_def"]))
 
     off_idx = cfg["off_pass_weight"] * pass_off + cfg["off_rush_weight"] * rush_off
     def_idx = cfg["def_pass_weight"] * pass_def + cfg["def_rush_weight"] * rush_def
@@ -559,17 +663,20 @@ def combine_components(c, cfg=CONFIG):
 
 
 def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
-                  ngs_pass=None, ngs_rush=None):
+                  ngs_pass=None, ngs_rush=None, pfr_prss=None):
     """Ratings using ONLY data strictly before (as_of_season, as_of_week).
 
-    ngs_pass / ngs_rush: optional pre-built team-week tables (see
-    load_ngs_pass_team_week() / load_ngs_rush_team_week() above) that add
-    CPOE and RYOE as a third signal in the offense/defense blend. Omit them
-    (the default) and nothing changes -- CONFIG's w_cpoe_*/w_ryoe_* also
-    default to 0.0, so even passing them in changes nothing until those
-    weights are turned on and backtested (test_cpoe_ryoe.py).
+    ngs_pass / ngs_rush / pfr_prss: optional pre-built team-week tables
+    (see load_ngs_pass_team_week() / load_ngs_rush_team_week() /
+    load_pfr_pressure_team_week() above) that add CPOE, RYOE, and charted
+    pass-pressure rate as extra signals in the offense/defense blend. Omit
+    them (the default) and nothing changes -- CONFIG's
+    w_cpoe_*/w_ryoe_*/w_prss_* all default to 0.0, so even passing them in
+    changes nothing until those weights are turned on and backtested
+    (test_cpoe_ryoe.py, test_pressure.py).
     """
-    c = _fit_components(pbp, as_of_season, as_of_week, cfg, teams, ngs_pass, ngs_rush)
+    c = _fit_components(pbp, as_of_season, as_of_week, cfg, teams,
+                        ngs_pass, ngs_rush, pfr_prss)
     return combine_components(c, cfg)
 
 
