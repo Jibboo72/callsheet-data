@@ -110,9 +110,48 @@ CONFIG = dict(
     alpha_prss=25.0,
     w_prss_off=0.0,
     w_prss_def=0.0,
+
+    # --- step 4: starter-availability (injury) discount ---
+    # A per-GAME point adjustment (via project_spread()'s home_adj/
+    # away_adj), not a persistent team-quality signal, so it does NOT flow
+    # through build_ratings()'s ridge blend like steps 1-3 -- see
+    # load_injury_discount_team_week(). injury_trailing_weeks is how many
+    # of a player's own prior games (this season) their snap share is
+    # averaged over to judge how much losing them matters.
+    # injury_weight (0.0 by default) is what test_injury_discount.py
+    # sweeps.
+    injury_trailing_weeks=6,
+    injury_weight=0.0,
 )
 
 TEAM_FIX = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA"}
+
+# --------------------------------------------------------------------------
+# STEP 4: starter-availability (injury) discount -- see
+# load_injury_discount_team_week() below. Unlike steps 1-3 these are fixed
+# weights, not something test_injury_discount.py sweeps: the backtest
+# sweeps the OVERALL scale (CONFIG["injury_weight"]), because getting the
+# relative ordering between positions roughly right (QB >> OL/WR/CB/EDGE >
+# TE/S/LB > RB/DT > kicker) matters more than its precise number, and a
+# full per-position regression is a bigger project than this step needs
+# before even knowing whether the signal helps at all.
+# --------------------------------------------------------------------------
+
+POSITION_INJURY_WEIGHT = {
+    "QB": 1.00,
+    "T": 0.35, "OT": 0.35, "G": 0.35, "OG": 0.35, "C": 0.35, "OL": 0.35,
+    "WR": 0.30, "CB": 0.30, "DE": 0.30, "EDGE": 0.30, "OLB": 0.30,
+    "TE": 0.20, "S": 0.20, "SS": 0.20, "FS": 0.20,
+    "LB": 0.20, "ILB": 0.20, "MLB": 0.20,
+    "RB": 0.15, "DT": 0.15, "NT": 0.15,
+    "K": 0.05, "P": 0.05, "LS": 0.05,
+}
+DEFAULT_POSITION_INJURY_WEIGHT = 0.10
+
+# How often each report-status tier actually ends up playing, roughly --
+# Out essentially never plays, Doubtful rarely does, Questionable mostly
+# does play (hence the small weight).
+STATUS_INJURY_WEIGHT = {"Out": 1.00, "Doubtful": 0.75, "Questionable": 0.25}
 
 
 # --------------------------------------------------------------------------
@@ -313,6 +352,128 @@ def load_pfr_pressure_team_week(pbp, seasons=None, cache_dir="."):
     tw["pressure_rate"] = -(tw["times_pressured"] / tw["dropbacks"])
     return _attach_opponent(tw[["season", "week", "team_abbr", "pressure_rate", "dropbacks"]],
                             load_games(cache_dir))
+
+
+def load_injury_discount_team_week(seasons=None, cache_dir="."):
+    """Step 4: team-week RAW (unscaled) starter-availability discount,
+    built from free nflverse injury reports + snap counts + the player-ID
+    crosswalk (gsis_id <-> pfr_id). Multiply by CONFIG['injury_weight']
+    (0.0 by default) and ADD to a game's raw rating-diff before scale/HFA
+    calibration -- see test_injury_discount.py. This is a per-GAME
+    adjustment, not a persistent team-quality signal like steps 1-3, so it
+    deliberately does NOT go through build_ratings()'s ridge blend.
+
+    For each team-week, every player listed Questionable/Doubtful/Out on
+    that week's FINAL injury report is weighted by:
+      - POSITION_INJURY_WEIGHT (a QB out matters far more than a punter)
+      - STATUS_INJURY_WEIGHT (Out counts fully, Questionable barely at
+        all -- matches how often each tier actually ends up playing)
+      - that player's own TRAILING snap share: the average of their
+        offense/defense/ST snap % over their most recent games this
+        season, as of the LAST game they actually recorded snaps in
+        before the injury-report week (merge_asof, so a player out for
+        several straight weeks keeps the share from their last healthy
+        stretch rather than silently dropping to 0) -- a Questionable
+        WR2 who plays 90% of snaps matters more than a Questionable WR2
+        who plays 20%.
+    Summed per team-week into one raw discount number (higher = worse for
+    that team that week; week 1 of a season, with no trailing games yet,
+    correctly comes back near 0 -- no data, no signal, same rule every
+    other step here follows). The ABSOLUTE scale is deliberately not
+    calibrated here -- that is what CONFIG['injury_weight'] and
+    test_injury_discount.py's sweep are for.
+
+    Both injuries and snap counts go back to 2015, so unlike RYOE
+    (2018+) and pressure (2018+) there's no pre-coverage gap to guard
+    against here.
+    """
+    want = list(seasons) if seasons is not None else list(range(2015, 2027))
+
+    def _load_series(tag_dir, prefix):
+        frames = []
+        for s in want:
+            path = f"{cache_dir}/{prefix}_{s}.parquet"
+            try:
+                df = pd.read_parquet(path)
+            except Exception:
+                url = ("https://github.com/nflverse/nflverse-data/releases/"
+                       f"download/{tag_dir}/{tag_dir}_{s}.parquet")
+                try:
+                    df = pd.read_parquet(url)
+                except Exception:
+                    continue
+                try:
+                    df.to_parquet(path)
+                except Exception:
+                    pass
+            frames.append(df)
+        return frames
+
+    inj_frames = _load_series("injuries", "injuries")
+    snap_frames = _load_series("snap_counts", "snap_counts")
+    empty_cols = ["season", "week", "team_abbr", "discount"]
+    if not inj_frames or not snap_frames:
+        return pd.DataFrame(columns=empty_cols)
+
+    inj = pd.concat(inj_frames, ignore_index=True)
+    # some seasons' injuries files carry season/week as float64 (NaN rows
+    # present in the source), others int -- merge_asof below requires
+    # identical dtypes on both sides of the join, so force both frames to
+    # the same int64 here rather than trust whatever each file shipped.
+    inj = inj.dropna(subset=["season", "week"])
+    inj["season"] = inj["season"].astype("int64")
+    inj["week"] = inj["week"].astype("int64")
+    inj = inj[inj["report_status"].isin(list(STATUS_INJURY_WEIGHT))].copy()
+    inj["team"] = inj["team"].replace(TEAM_FIX)
+
+    snaps = pd.concat(snap_frames, ignore_index=True)
+    snaps = snaps.dropna(subset=["season", "week"])
+    snaps["season"] = snaps["season"].astype("int64")
+    snaps["week"] = snaps["week"].astype("int64")
+    snaps["team"] = snaps["team"].replace(TEAM_FIX)
+    snaps["snap_pct"] = snaps[["offense_pct", "defense_pct", "st_pct"]].max(axis=1)
+
+    path = f"{cache_dir}/players.parquet"
+    try:
+        players = pd.read_parquet(path)
+    except Exception:
+        players = pd.read_parquet("https://github.com/nflverse/nflverse-data/"
+                                  "releases/download/players/players.parquet")
+        try:
+            players.to_parquet(path)
+        except Exception:
+            pass
+    xwalk = players[["gsis_id", "pfr_id"]].dropna()
+    inj = inj.merge(xwalk, on="gsis_id", how="left")
+    inj = inj.dropna(subset=["pfr_id"])
+    if len(inj) == 0:
+        return pd.DataFrame(columns=empty_cols)
+
+    tw = CONFIG["injury_trailing_weeks"]
+    snaps_sorted = snaps.sort_values(["pfr_player_id", "season", "week"]).copy()
+    snaps_sorted["trail_share"] = (
+        snaps_sorted.groupby(["pfr_player_id", "season"])["snap_pct"]
+        .transform(lambda s: s.rolling(tw, min_periods=1).mean())
+    )
+    trail = (snaps_sorted[["pfr_player_id", "season", "week", "trail_share"]]
+             .rename(columns={"pfr_player_id": "pfr_id"})
+             .sort_values("week"))
+
+    # as-of merge: each injury row gets the trailing share from this
+    # player's most recent PRIOR (or same, if no games missed yet) week
+    # with recorded snaps, within the same season -- not a strict
+    # week-before-week match, since an injured player may have several
+    # consecutive weeks with no snap_counts row at all.
+    merged = pd.merge_asof(inj.sort_values("week"), trail,
+                           on="week", by=["pfr_id", "season"], direction="backward")
+    merged["trail_share"] = merged["trail_share"].fillna(0.0)
+    pos_w = merged["position"].map(POSITION_INJURY_WEIGHT).fillna(DEFAULT_POSITION_INJURY_WEIGHT)
+    stat_w = merged["report_status"].map(STATUS_INJURY_WEIGHT).fillna(0.0)
+    merged["contrib"] = pos_w * stat_w * merged["trail_share"]
+
+    out = (merged.groupby(["season", "week", "team"], as_index=False)["contrib"]
+           .sum().rename(columns={"team": "team_abbr", "contrib": "discount"}))
+    return out
 
 
 # --------------------------------------------------------------------------
