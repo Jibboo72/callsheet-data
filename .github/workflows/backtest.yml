@@ -34,6 +34,14 @@ jobs:
           path: ngs_*.parquet
           key: ngs-v1
 
+      # PFR advanced stats: one file per season (2018+). Doesn't change
+      # season to season either.
+      - name: Cache PFR advanced stats
+        uses: actions/cache@v4
+        with:
+          path: pfr_*.parquet
+          key: pfr-v1
+
       - name: Step 3 — pull opening and closing lines
         run: python3 run_all.py 2015 2021
 
@@ -53,6 +61,13 @@ jobs:
       # test_cpoe_ryoe.py for why and how.
       - name: Step 6 — test CPOE/RYOE
         run: python3 test_cpoe_ryoe.py
+
+      # Step 3 of "tighten the formula": charted pass-pressure rate from
+      # PFR, opponent-adjusted the same way and swept for both the
+      # offense (pass-block) and defense (pass-rush) side. See
+      # test_pressure.py for why PFR instead of FTN, and how.
+      - name: Step 7 — test pressure rate
+        run: python3 test_pressure.py
 
       # Keeps the CSV and any cached parquet available for download
       # from the run summary page, so you can inspect the data itself.
