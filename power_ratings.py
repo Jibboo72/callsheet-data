@@ -118,10 +118,25 @@ CONFIG = dict(
     # load_injury_discount_team_week(). injury_trailing_weeks is how many
     # of a player's own prior games (this season) their snap share is
     # averaged over to judge how much losing them matters.
-    # injury_weight (0.0 by default) is what test_injury_discount.py
-    # sweeps.
+    #
+    # injury_weight: the ONE step of the four "tighten the formula" steps
+    # that actually backtested as a real, out-of-sample improvement --
+    # test_injury_discount.py's walk-forward sweep (2017/2018/2019/2021,
+    # rolling 3-season calibration) came back with RMSE, CLV (does the
+    # edge direction match where the closing line later moves), and ATS
+    # all improving smoothly from weight=0 up through a peak, THEN
+    # reversing past weight~5-7 -- a real signal shape, not the flat noise
+    # steps 1-3 showed and not an unbounded "line goes up forever" result
+    # (which would have meant a leak). RMSE bottoms at weight=3.0 (13.60
+    # vs 13.69 at 0.0); CLV/ATS peak slightly further out at weight=5.0
+    # (63.1% CLV, 51.2% ATS @ edge>=2) but that's a single point out of 13
+    # candidates swept, more exposed to overfitting this one test set.
+    # Set to 3.0 -- the RMSE-optimal, more conservative pick -- as the new
+    # live default. Still worth re-checking against next season's results
+    # as a hypothesis, not a settled number; see test_injury_discount.py's
+    # own docstring/comments for the full sweep and reasoning.
     injury_trailing_weeks=6,
-    injury_weight=0.0,
+    injury_weight=3.0,
 )
 
 TEAM_FIX = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA"}
