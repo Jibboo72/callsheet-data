@@ -91,6 +91,27 @@ jobs:
           python export_matchup.py "$SEASON" "$WEEK"
           mv matchup.json data/matchup.json
 
+      # Full team-by-team power ratings for the Power tab. Same engine as
+      # the matchup step above and the Sides projected spread -- this just
+      # exposes the whole ranked table, which neither of those does.
+      - name: Build power ratings
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
+        run: |
+          mkdir -p data
+          SEASON="${{ steps.season.outputs.season }}"
+          WEEK=$(python - "$SEASON" <<'PY'
+          import sys, pandas as pd
+          s = sys.argv[1]
+          url = ("https://github.com/nflverse/nflverse-data/releases/download/"
+                 f"pbp/play_by_play_{s}.csv")
+          df = pd.read_csv(url, usecols=["season_type", "week"], low_memory=False)
+          print(int(df[df.season_type == "REG"].week.max()) + 1)
+          PY
+          )
+          echo "building power ratings for $SEASON week $WEEK"
+          python export_ratings.py "$SEASON" "$WEEK"
+          mv ratings.json data/ratings-$SEASON.json
+
       # Point-in-time pass-defense ratings, one snapshot per week. This is
       # what lets a 150-yard day against the #2 defense count for more than
       # the same line against the #31. Must land in data/ alongside
