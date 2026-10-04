@@ -42,6 +42,20 @@ jobs:
           path: pfr_*.parquet
           key: pfr-v1
 
+      # Injuries, snap counts (one file per season, 2015+), and the
+      # player-ID crosswalk -- step 4's inputs. None of these change
+      # season to season either, except the current season while it's
+      # in progress, which is fine: a stale cache just means slightly
+      # older injury data, never wrong-shaped data.
+      - name: Cache injuries and snap counts
+        uses: actions/cache@v4
+        with:
+          path: |
+            injuries_*.parquet
+            snap_counts_*.parquet
+            players.parquet
+          key: injuries-snaps-v1
+
       - name: Step 3 — pull opening and closing lines
         run: python3 run_all.py 2015 2021
 
@@ -68,6 +82,13 @@ jobs:
       # test_pressure.py for why PFR instead of FTN, and how.
       - name: Step 7 — test pressure rate
         run: python3 test_pressure.py
+
+      # Step 4 of "tighten the formula": starter-availability discount
+      # from injury reports + snap counts, applied as a per-game
+      # adjustment rather than blended into the ridge like steps 1-3. See
+      # test_injury_discount.py for why it's structured differently.
+      - name: Step 8 — test injury discount
+        run: python3 test_injury_discount.py
 
       # Keeps the CSV and any cached parquet available for download
       # from the run summary page, so you can inspect the data itself.
