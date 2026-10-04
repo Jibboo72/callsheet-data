@@ -59,6 +59,17 @@ CONFIG = dict(
     # --- points conversion ---
     plays_per_game=62.0,
     st_weight=1.0,          # special teams multiplier
+
+    # --- final combination ---
+    # Equal 1:1 weighting by default. Research (Brian Burke's predictivity
+    # work; nfelo's EPA tiers, which use 1.6 offense : 1.0 defense) says
+    # offensive efficiency is a stickier, more predictive signal than
+    # defensive efficiency -- defense is noisier year-over-year and
+    # week-to-week. Don't just adopt that number: see test_formula_weights.py,
+    # which sweeps this honestly against the walk-forward backtest before
+    # touching the default here.
+    rating_off_weight=1.0,
+    rating_def_weight=1.0,
 )
 
 TEAM_FIX = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA"}
@@ -328,7 +339,9 @@ def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None):
         "defense": -def_idx * ppg,
         "special": st * cfg["st_weight"],
     })
-    out["rating"] = out["offense"] + out["defense"] + out["special"]
+    out["rating"] = (cfg["rating_off_weight"] * out["offense"]
+                      + cfg["rating_def_weight"] * out["defense"]
+                      + out["special"])
     out = out.sort_values("rating", ascending=False)
     out.index.name = "team"
     return out
