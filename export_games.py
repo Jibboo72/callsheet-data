@@ -18,6 +18,20 @@ CALIBRATION
   actual margins from COMPLETED seasons only, giving scale and home-field
   constants, exactly as test_vs_open.py does. For an unplayed season the fit
   comes from the prior season, so nothing looks ahead.
+
+INJURY ADJUSTMENT (step 4 of "tighten the formula")
+  Unlike the ratings themselves (one snapshot per build, as of
+  played_through+1), the starter-availability discount is looked up PER
+  GAME at that game's own week -- a missing starter in week 9 says nothing
+  about week 10, so this can't be baked into the one shared ratings
+  snapshot the way CPOE/pressure/etc. are. Each game's projection becomes
+  scale * (rating_diff + injury_weight * (away_discount - home_discount)) + hfa,
+  exactly the formula test_injury_discount.py backtested honestly before
+  injury_weight got a nonzero default in power_ratings.py. See
+  load_injury_discount_team_week()'s docstring there for what the discount
+  itself measures. A missing/unreachable injuries or snap-counts file for
+  this season degrades gracefully to a 0 discount (no adjustment), same as
+  every other optional signal in this codebase.
 """
 import json
 import os
@@ -26,7 +40,8 @@ import sys
 import numpy as np
 import pandas as pd
 
-from power_ratings import load_pbp, load_games, build_ratings, CONFIG
+from power_ratings import (load_pbp, load_games, build_ratings,
+                           load_injury_discount_team_week, CONFIG)
 
 FIRST_FIT_WEEK = 5          # ratings before this are mostly prior
 
@@ -114,14 +129,39 @@ def build(season, cache_dir=None):
     print(f"calibration: scale={scale:.3f} hfa={hfa:+.2f} "
           f"(fit on {fit_season}, n={nfit})", file=sys.stderr)
 
+    # --- starter-availability (injury) discount, per game/week ---------
+    # Free nflverse injury reports + snap counts, same pipeline as
+    # everything else here. Looked up per (season, week, team) rather than
+    # baked into the shared `ratings` snapshot above, since it's a
+    # one-off per-game adjustment (see the module docstring). Falls back
+    # to an empty table (every lookup -> 0.0, i.e. no adjustment) if the
+    # season's injuries/snap-counts files can't be loaded at all.
+    try:
+        discount = load_injury_discount_team_week([season])
+    except Exception as e:
+        print(f"warning: couldn't load injury discount ({e}); "
+              f"proceeding with no injury adjustment", file=sys.stderr)
+        discount = pd.DataFrame(columns=["season", "week", "team_abbr", "discount"])
+    disc_idx = discount.set_index(["season", "week", "team_abbr"])["discount"]
+
+    def _injury_discount(wk, team):
+        try:
+            return float(disc_idx.loc[(season, wk, team)])
+        except KeyError:
+            return 0.0
+
     # --- games -------------------------------------------------------
     games = []
     for _, x in g.sort_values(["week", "gameday"]).iterrows():
         h, a = x.home_team, x.away_team
         proj = None
+        inj_home = inj_away = None
         if h in ratings.index and a in ratings.index:
             diff = float(ratings.loc[h, "rating"] - ratings.loc[a, "rating"])
-            proj = round(scale * diff + hfa, 2)
+            inj_home = _injury_discount(int(x.week), h)
+            inj_away = _injury_discount(int(x.week), a)
+            diff_adj = diff + CONFIG["injury_weight"] * (inj_away - inj_home)
+            proj = round(scale * diff_adj + hfa, 2)
 
         # games.csv spread_line is from the HOME perspective, positive =
         # home favored. Keep that convention throughout.
@@ -139,6 +179,12 @@ def build(season, cache_dir=None):
             "temp": _n(x.temp, 0),
             "div": bool(x.div_game) if not pd.isna(x.div_game) else None,
             "proj": proj,
+            # raw (unweighted) starter-availability discount, higher =
+            # worse for that team that week -- exposed mainly so the UI
+            # CAN show "adjusted for injuries" context if it wants to;
+            # proj above already has CONFIG["injury_weight"] applied.
+            "inj_home": _n(inj_home, 2),
+            "inj_away": _n(inj_away, 2),
         }
         if not pd.isna(x.home_score):
             rec.update({
