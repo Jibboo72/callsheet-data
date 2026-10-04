@@ -38,7 +38,7 @@ header{border-bottom:3px solid var(--ink);padding:calc(env(safe-area-inset-top) 
 .wk-num{font-family:Oswald,sans-serif;font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.06em;min-width:74px;text-align:center}
 
 nav.tabs{display:flex;border:2px solid var(--ink);margin-bottom:16px}
-nav.tabs button{flex:1;background:transparent;border:0;border-right:2px solid var(--ink);font-family:Oswald,sans-serif;font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:9px 4px;cursor:pointer;color:var(--ink)}
+nav.tabs button{flex:1;background:transparent;border:0;border-right:2px solid var(--ink);font-family:Oswald,sans-serif;font-weight:600;font-size:10px;letter-spacing:.07em;text-transform:uppercase;padding:9px 2px;cursor:pointer;color:var(--ink)}
 nav.tabs button:last-child{border-right:0}
 nav.tabs button[aria-selected="true"]{background:var(--ink);color:var(--stock)}
 
@@ -134,12 +134,16 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .totals .v{font-family:Oswald,sans-serif;font-weight:700;font-size:19px;line-height:1.1}
 .totals .over{color:#FF8A8A}
 
-.led{width:100%;border-collapse:collapse;border:2px solid var(--ink);background:var(--stock-2)}
-.led th,.led td{border-bottom:1px solid rgba(22,21,15,.3);padding:8px 9px;text-align:left;font-size:12px}
-.led th{font-family:Oswald,sans-serif;font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-bottom:2px solid var(--ink);cursor:pointer;user-select:none}
-.led th[data-on]{background:var(--ink);color:var(--stock)}
-.led td.n,.led th.n{text-align:right}
-.led td.n{font-family:Oswald,sans-serif;font-weight:700;font-size:15px}
+.led,.pow{width:100%;border-collapse:collapse;border:2px solid var(--ink);background:var(--stock-2)}
+.led th,.led td,.pow th,.pow td{border-bottom:1px solid rgba(22,21,15,.3);padding:8px 9px;text-align:left;font-size:12px}
+.led th,.pow th{font-family:Oswald,sans-serif;font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-bottom:2px solid var(--ink);cursor:pointer;user-select:none}
+.led th[data-on],.pow th[data-on]{background:var(--ink);color:var(--stock)}
+.led td.n,.led th.n,.pow td.n,.pow th.n{text-align:right}
+.led td.n,.pow td.n{font-family:Oswald,sans-serif;font-weight:700;font-size:15px}
+.pow tbody tr{cursor:pointer}
+.pow td.sw{width:14px;padding:8px 0 8px 9px}
+.pow .swatch{display:inline-block;width:10px;height:10px;border:1px solid var(--ink)}
+.pow .detail td{background:rgba(22,21,15,.05);cursor:default;font-size:11px;color:var(--ink-soft);padding:8px 9px}
 .swatch{display:inline-block;width:9px;height:9px;margin-right:7px;border:1px solid var(--ink)}
 .note{font-size:11px;line-height:1.55;color:var(--ink-soft);margin:12px 0}
 .hr{height:2px;background:var(--ink);margin:18px 0}
@@ -207,6 +211,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <button role="tab" id="tabCards" aria-selected="true">Props</button>
   <button role="tab" id="tabSides" aria-selected="false">Sides</button>
   <button role="tab" id="tabRoster" aria-selected="false">Roster</button>
+  <button role="tab" id="tabPower" aria-selected="false">Power</button>
   <button role="tab" id="tabBank" aria-selected="false">Bank</button>
   <button role="tab" id="tabLedger" aria-selected="false">Ledger</button>
 </nav>
@@ -250,6 +255,11 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <input id="impInput" type="file" accept=".json,application/json" hidden>
   <input id="rosterSearch" placeholder="Search the roster" style="margin-bottom:14px">
   <div id="rosterList"></div>
+</section>
+
+<section id="panePower" hidden>
+  <input id="powerSearch" placeholder="Search teams" style="margin-bottom:14px">
+  <div id="powerBoard"></div>
 </section>
 
 <section id="paneLedger" hidden>
@@ -346,7 +356,8 @@ const TEAMS={
   LV:['Raiders','#000000'], LAC:['Chargers','#0080C6'], LAR:['Rams','#003594'], MIA:['Dolphins','#008E97'],
   MIN:['Vikings','#4F2683'], NE:['Patriots','#002244'], NO:['Saints','#A08A58'], NYG:['Giants','#0B2265'],
   NYJ:['Jets','#125740'], PHI:['Eagles','#004C54'], PIT:['Steelers','#101820'], SF:['49ers','#AA0000'],
-  SEA:['Seahawks','#002244'], TB:['Buccaneers','#D50A0A'], TEN:['Titans','#0C2340'], WAS:['Commanders','#5A1414']
+  SEA:['Seahawks','#002244'], TB:['Buccaneers','#D50A0A'], TEN:['Titans','#0C2340'], WAS:['Commanders','#5A1414'],
+  LA:['Rams','#003594']   // nflverse's current code for the Rams; LAR above is kept for older data
 };
 const teamColor=t=>(TEAMS[t]&&TEAMS[t][1])||'#4A4739';
 
@@ -393,7 +404,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds'];
+const REDOWNLOADABLE=['players','games','cfb','odds','ratings'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -939,6 +950,9 @@ let rosterQuery='';
 let sidesQuery='';
 let ledSort={key:null,dir:'desc'};
 let bankQuery='';
+let powerQuery='';
+let powerSort={key:'rank',dir:'asc'};
+let powerExpanded=null;
 /* API quota, read from whatever the last odds pull recorded. The free plan
    is a shared monthly pool across every sport on the account, so this is the
    number that decides whether a college pull is affordable. */
@@ -1007,6 +1021,65 @@ function renderRoster(){
     }).join('')}</div>`;
 }
 
+/* ---------------- power ratings ---------------- */
+/* Same engine behind the Sides projected spread and the Props matchup
+   grades (power_ratings.py) — this just exposes the full ranked team
+   table, which neither of those surfaces does. Offense/defense are kept
+   split out, not just the one overall number, because that's the whole
+   point of grading a team against ITS OPPONENT rather than in a vacuum. */
+function renderPower(){
+  const host=document.getElementById('powerBoard'); if(!host)return;
+  const rts=S.ratings;
+  if(!rts||!Array.isArray(rts.teams)||!rts.teams.length){
+    host.innerHTML=`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No power ratings loaded yet. Import <code>ratings-2026.json</code> from the Roster tab's URL box.</div>`;
+    return;
+  }
+  const q=powerQuery.trim().toLowerCase();
+  const nick=t=>(TEAMS[t]?TEAMS[t][0]:'');
+  let rows=rts.teams.slice();
+  if(q) rows=rows.filter(t=>(t.team+' '+nick(t.team)).toLowerCase().includes(q));
+  const sk=powerSort.key, dir=powerSort.dir;
+  rows.sort((a,b)=>{
+    let va=a[sk], vb=b[sk];
+    if(sk==='team'){ va=a.team; vb=b.team; return dir==='asc'?va.localeCompare(vb):vb.localeCompare(va); }
+    return dir==='asc'?va-vb:vb-va;
+  });
+  const asOf=rts.through_week!=null?`as of week ${rts.through_week}`:'';
+  let html=`<div class="note" style="margin:0 0 10px">Opponent-adjusted power ratings from play-by-play, ${esc(String(rts.season||''))} ${esc(asOf)} — the same engine behind the Sides projection and the Props matchup grades. Offense and defense are rated separately so a team can be judged against the specific unit it's facing; defense is already flipped so higher = better D. Tap a team for the pass/rush split and special teams.</div>
+    <table class="pow">
+      <thead><tr>
+        <th data-sort="rank">#</th><th data-sort="team">Team</th>
+        <th class="n" data-sort="offense">Off</th><th class="n" data-sort="defense">Def</th>
+        <th class="n" data-sort="rating">Rating</th>
+      </tr></thead>
+      <tbody>`;
+  if(!rows.length){
+    html+=`<tr><td colspan="5" class="empty" style="border:0">Nobody matches that.</td></tr>`;
+  } else {
+    rows.forEach(t=>{
+      const open=powerExpanded===t.team;
+      html+=`<tr data-team="${t.team}">
+        <td>${t.rank}</td>
+        <td><span class="swatch" style="background:${teamColor(t.team)};margin-right:6px"></span>${esc(t.team)}${nick(t.team)?` <span style="color:var(--ink-soft);font-weight:400">${esc(nick(t.team))}</span>`:''}</td>
+        <td class="n">${t.offense>0?'+':''}${t.offense.toFixed(1)}</td>
+        <td class="n">${t.defense>0?'+':''}${t.defense.toFixed(1)}</td>
+        <td class="n">${t.rating>0?'+':''}${t.rating.toFixed(1)}</td>
+      </tr>`;
+      if(open){
+        html+=`<tr class="detail"><td colspan="5">
+          Pass off ${t.off_pass>0?'+':''}${t.off_pass.toFixed(1)} · Rush off ${t.off_rush>0?'+':''}${t.off_rush.toFixed(1)} ·
+          Pass def ${t.def_pass>0?'+':''}${t.def_pass.toFixed(1)} · Rush def ${t.def_rush>0?'+':''}${t.def_rush.toFixed(1)} ·
+          Special ${t.special>0?'+':''}${t.special.toFixed(1)}
+        </td></tr>`;
+      }
+    });
+  }
+  html+=`</tbody></table>`;
+  host.innerHTML=html;
+  const th=host.querySelector(`.pow th[data-sort="${sk}"]`);
+  if(th)th.setAttribute('data-on','1');
+}
+
 /* ---------------- import ---------------- */
 function impSay(msg,bad){
   const el=document.getElementById('impStatus');
@@ -1022,6 +1095,11 @@ function mergeImport(raw){
     S.odds=data; save(); renderAll();
     const n=(data.games||[]).length;
     impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
+    return;
+  }
+  if(data&&data.kind==='ratings'){
+    S.ratings=data; save(); renderAll();
+    impSay(`Loaded power ratings for ${data.season}, ${data.n_teams} teams, through week ${data.through_week}.`);
     return;
   }
   if(Array.isArray(data&&data.games)){
@@ -1106,6 +1184,28 @@ document.getElementById('sidesSearch').addEventListener('input',e=>{
 });
 document.getElementById('bankSearch').addEventListener('input',e=>{
   bankQuery=e.target.value; renderBank();
+});
+document.getElementById('powerSearch').addEventListener('input',e=>{
+  powerQuery=e.target.value; renderPower();
+});
+// the table itself is rebuilt wholesale on every render, so sort and
+// row-expand both listen on the static host div and delegate — a
+// listener bound to the <thead> or a <tr> directly would be thrown away
+// the next time host.innerHTML gets replaced
+document.getElementById('powerBoard').addEventListener('click',e=>{
+  const th=e.target.closest('.pow th[data-sort]');
+  if(th){
+    const k=th.dataset.sort;
+    if(powerSort.key===k) powerSort.dir=powerSort.dir==='asc'?'desc':'asc';
+    else powerSort={key:k,dir:(k==='team'||k==='rank')?'asc':'desc'};
+    renderPower();
+    return;
+  }
+  const row=e.target.closest('.pow tbody tr[data-team]');
+  if(row){
+    powerExpanded=(powerExpanded===row.dataset.team)?null:row.dataset.team;
+    renderPower();
+  }
 });
 
 /* Logs compiled under a different team than he plays for now. The player
@@ -3351,7 +3451,7 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderBank();renderLedger();}
+function renderAll(){_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderPower();renderBank();renderLedger();}
 
 /* Every tap inside Props or Sides (BET, grade, fold, add, unit buttons...)
    rebuilds that whole list's innerHTML. That's what was making the page
@@ -3871,14 +3971,14 @@ document.getElementById('backupRestore').addEventListener('click',()=>{
 });
 
 function showTab(name){
-  const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Bank:'paneBank',Ledger:'paneLedger'};
+  const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Power:'panePower',Bank:'paneBank',Ledger:'paneLedger'};
   Object.entries(map).forEach(([k,v])=>{
     document.getElementById(v).hidden=(k!==name);
     document.getElementById('tab'+k).setAttribute('aria-selected',String(k===name));
   });
   window.scrollTo(0,0);
 }
-['Cards','Sides','Roster','Bank','Ledger'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
+['Cards','Sides','Roster','Power','Bank','Ledger'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openPid)closePlayer();});
 
 load();
