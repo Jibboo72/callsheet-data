@@ -4,10 +4,14 @@ name: Weekly odds pull
 # should never fire as a side effect of rebuilding stats.
 on:
   schedule:
-    # Saturday 15:00 UTC (~11am ET) — prices you can still act on before
-    # Sunday. For CLOSING lines instead, change to Sunday 22:00 UTC
-    # (~6pm ET, after the afternoon window has kicked off).
-    - cron: "0 15 * * 6"
+    # Wednesday 7am ET — books have posted the new week's lines and props.
+    # Friday 6pm ET — prices you can still act on before Sunday, after a
+    # week of line movement. Cron is UTC only: these are written for
+    # EDT (UTC-4). When clocks fall back on Nov 1 they run an hour
+    # earlier on the ET clock (6am / 5pm) — change to "0 12 * * 3" and
+    # "0 23 * * 5" if you want 7am / 6pm to hold through winter.
+    - cron: "0 11 * * 3"
+    - cron: "0 22 * * 5"
   workflow_dispatch:
     inputs:
       season:
