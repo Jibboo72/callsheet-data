@@ -2,8 +2,20 @@ name: Build receiver data
 
 on:
   schedule:
-    # Tuesdays 11:00 UTC (~7am ET) — after Monday night games are final.
+    # Tuesday 7am ET — after Monday night games are final: new ratings.
     - cron: "0 11 * * 2"
+    # Thursday 4pm ET — the week's injury reports are in (they start
+    # Wednesday), and it's still before Thursday night kicks off. Refreshes
+    # the injury adjustment on the Sides projections.
+    - cron: "0 20 * * 4"
+    # Sunday 10am ET — final status before the early window. Runs before
+    # any Sunday game is played, so the "next unplayed week" logic below
+    # still lands on the right week.
+    - cron: "0 14 * * 0"
+    # Cron is UTC only, written for EDT (UTC-4). After clocks fall back on
+    # Nov 1 these run an hour earlier on the ET clock (6am / 3pm / 9am);
+    # use "0 12 * * 2", "0 21 * * 4" and "0 15 * * 0" to hold the same ET
+    # times through winter.
   workflow_dispatch:
     inputs:
       season:
