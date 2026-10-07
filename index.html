@@ -240,7 +240,10 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
   <div class="pblock" style="margin-bottom:16px">
     <div class="pbh">Import receiver data</div>
     <div class="pbody">
-      <button class="btn" id="impFile">Import from a file</button>
+      <button class="btn" id="refreshAll">Refresh all data</button>
+      <div class="note" style="margin:6px 0 0">One tap pulls the latest lines, odds, power ratings, roster and receiver logs from your repo. It can only grab what the GitHub workflows have already published — to get newer odds, run <b>Weekly odds pull</b> on GitHub first, then tap this.</div>
+      <div style="height:12px"></div>
+      <button class="btn ghost" id="impFile">Import from a file</button>
       <div style="height:8px"></div>
       <span class="lab">Or pull from a URL</span>
       <input id="impUrl" placeholder="https://raw.githubusercontent.com/..." inputmode="url">
@@ -488,6 +491,14 @@ async function load(){
   renderBackupStatus();
   if(migration){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
+  }
+  // Auto-refresh on open: the same pull as the Roster tab's button, run
+  // quietly, at most once every 30 minutes. It has to wait until here —
+  // saved state is read asynchronously above, and a refresh that landed
+  // before that would be overwritten by it. It only reads what the GitHub
+  // workflows have already published.
+  if(!S.lastRefresh || Date.now()-S.lastRefresh > 30*60*1000){
+    refreshAllData().catch(()=>{});
   }
 }
 let t; function save(){
@@ -1081,8 +1092,11 @@ function renderPower(){
 }
 
 /* ---------------- import ---------------- */
+let impLast={msg:'',bad:false};      // so Refresh-all can read what each import said
 function impSay(msg,bad){
   const el=document.getElementById('impStatus');
+  impLast={msg,bad:!!bad};
+  el.style.whiteSpace='';
   el.textContent=msg;
   el.style.color=bad?'var(--loss)':'var(--ink-soft)';
 }
@@ -1176,6 +1190,48 @@ document.getElementById('impFetch').addEventListener('click',async()=>{
     impSay('Fetch failed — often CORS. The host has to allow browser requests.',true);
   }
 });
+/* One-tap refresh: pull every published data file for the season from the
+   repo's data/ folder and merge each one exactly the way the URL box does.
+   Order matters a little — roster first (teams, positions), receiver logs
+   second (game logs + matchup grades). Each file is independent: a missing
+   or failed one is reported and skipped, the rest still load.
+   It only READS what the GitHub workflows already committed; it cannot
+   start a workflow (that would need a secret token, which has no business
+   in a public page). */
+const DATA_SEASON='2026';
+const DATA_BASE='https://raw.githubusercontent.com/Jibboo72/callsheet-data/main/data/';
+const REFRESH_FILES=[
+  ['Games & lines',  `games-${DATA_SEASON}.json`],
+  ['Odds',           `odds-${DATA_SEASON}.json`],
+  ['Power ratings',  `ratings-${DATA_SEASON}.json`],
+  ['Roster',         `roster-${DATA_SEASON}.json`],
+  ['Receiver logs',  `receivers-${DATA_SEASON}.json`]
+];
+async function refreshAllData(){
+  const btn=document.getElementById('refreshAll'), el=document.getElementById('impStatus');
+  btn.disabled=true; btn.textContent='Refreshing…';
+  const lines=[]; let anyBad=false;
+  for(const [label,file] of REFRESH_FILES){
+    try{
+      const res=await fetch(DATA_BASE+file+'?t='+Date.now(),{cache:'no-store'});
+      if(res.status===404){ lines.push(`– ${label}: not published yet`); continue; }
+      if(!res.ok){ lines.push(`✗ ${label}: server said ${res.status}`); anyBad=true; continue; }
+      mergeImport(await res.text());
+      lines.push(`${impLast.bad?'✗':'✓'} ${label}: ${impLast.msg}`);
+      if(impLast.bad) anyBad=true;
+    }catch(e){
+      lines.push(`✗ ${label}: couldn't fetch (${e.message||'network'})`); anyBad=true;
+    }
+  }
+  const stamp=new Date().toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'});
+  el.style.whiteSpace='pre-line';
+  el.style.color=anyBad?'var(--loss)':'var(--ink-soft)';
+  el.textContent=`Refreshed ${stamp}\n`+lines.join('\n');
+  btn.disabled=false; btn.textContent='Refresh all data';
+  if(!anyBad){ S.lastRefresh=Date.now(); save(); }
+  return !anyBad;
+}
+document.getElementById('refreshAll').addEventListener('click',refreshAllData);
 document.getElementById('rosterSearch').addEventListener('input',e=>{
   rosterQuery=e.target.value; renderRoster();
 });
@@ -1754,7 +1810,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-09-24 23:30 UTC';
+const BUILD_STAMP='2026-10-07 22:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
