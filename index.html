@@ -140,9 +140,13 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .led th[data-on],.pow th[data-on]{background:var(--ink);color:var(--stock)}
 .led td.n,.led th.n,.pow td.n,.pow th.n{text-align:right}
 .led td.n,.pow td.n{font-family:Oswald,sans-serif;font-weight:700;font-size:15px}
+.pow th,.pow td{padding:7px 4px;font-size:11px}
+.pow th{letter-spacing:.04em;line-height:1.15;vertical-align:bottom}
+.pow td.n{font-size:13px}
+.pow td:first-child,.pow th:first-child{padding-left:6px;width:22px}
 .pow tbody tr{cursor:pointer}
 .pow td.sw{width:14px;padding:8px 0 8px 9px}
-.pow .swatch{display:inline-block;width:10px;height:10px;border:1px solid var(--ink)}
+.pow .swatch{display:inline-block;width:8px;height:8px;border:1px solid var(--ink);margin-right:4px}
 .pow .detail td{background:rgba(22,21,15,.05);cursor:default;font-size:11px;color:var(--ink-soft);padding:8px 9px}
 .swatch{display:inline-block;width:9px;height:9px;margin-right:7px;border:1px solid var(--ink)}
 .note{font-size:11px;line-height:1.55;color:var(--ink-soft);margin:12px 0}
@@ -1042,45 +1046,60 @@ function renderPower(){
   const host=document.getElementById('powerBoard'); if(!host)return;
   const rts=S.ratings;
   if(!rts||!Array.isArray(rts.teams)||!rts.teams.length){
-    host.innerHTML=`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No power ratings loaded yet. Import <code>ratings-2026.json</code> from the Roster tab's URL box.</div>`;
+    host.innerHTML=`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No power ratings loaded yet. Tap <b>Refresh all data</b> on the Roster tab.</div>`;
     return;
   }
   const q=powerQuery.trim().toLowerCase();
   const nick=t=>(TEAMS[t]?TEAMS[t][0]:'');
+  const sk=powerSort.key, dir=powerSort.dir;
+
+  // The # column ranks whatever stat the table is sorted on, among all 32
+  // teams (1 = best; every stat here is already higher = better, defense
+  // included). Sorting by team name or by # itself shows the overall rank.
+  // Computed on the full list, so searching doesn't renumber anything, and
+  // flipping the sort direction just reads the same ranks bottom-up.
+  const rankOf={};
+  if(sk==='team'||sk==='rank'){
+    rts.teams.forEach(t=>{ rankOf[t.team]=t.rank; });
+  } else {
+    rts.teams.slice().sort((a,b)=>b[sk]-a[sk]).forEach((t,i)=>{ rankOf[t.team]=i+1; });
+  }
+
   let rows=rts.teams.slice();
   if(q) rows=rows.filter(t=>(t.team+' '+nick(t.team)).toLowerCase().includes(q));
-  const sk=powerSort.key, dir=powerSort.dir;
   rows.sort((a,b)=>{
-    let va=a[sk], vb=b[sk];
-    if(sk==='team'){ va=a.team; vb=b.team; return dir==='asc'?va.localeCompare(vb):vb.localeCompare(va); }
-    return dir==='asc'?va-vb:vb-va;
+    if(sk==='team') return dir==='asc'?a.team.localeCompare(b.team):b.team.localeCompare(a.team);
+    return dir==='asc'?a[sk]-b[sk]:b[sk]-a[sk];
   });
+
+  const fmt=v=>{ const r=Math.round(v*10)/10; return r===0?'0.0':`${r>0?'+':''}${r.toFixed(1)}`; };   // no "-0.0"
+  const COLS=[
+    ['rating','Rating'], ['offense','Off'], ['defense','Def'],
+    ['off_pass','Pass<br>Off'], ['off_rush','Rush<br>Off'],
+    ['def_pass','Pass<br>Def'], ['def_rush','Rush<br>Def']
+  ];
+  const ncol=2+COLS.length;
   const asOf=rts.through_week!=null?`as of week ${rts.through_week}`:'';
-  let html=`<div class="note" style="margin:0 0 10px">Opponent-adjusted power ratings from play-by-play, ${esc(String(rts.season||''))} ${esc(asOf)} — the same engine behind the Sides projection and the Props matchup grades. Offense and defense are rated separately so a team can be judged against the specific unit it's facing; defense is already flipped so higher = better D. Tap a team for the pass/rush split and special teams.</div>
+  let html=`<div class="note" style="margin:0 0 10px">Opponent-adjusted power ratings from play-by-play, ${esc(String(rts.season||''))} ${esc(asOf)} — the same engine behind the Sides projection and the Props matchup grades. Offense and defense are rated separately so a team can be judged against the specific unit it's facing; defense is flipped so higher = better D everywhere. Tap any column to sort — the # changes to rank that stat. Tap a team for its special teams.</div>
     <table class="pow">
       <thead><tr>
         <th data-sort="rank">#</th><th data-sort="team">Team</th>
-        <th class="n" data-sort="offense">Off</th><th class="n" data-sort="defense">Def</th>
-        <th class="n" data-sort="rating">Rating</th>
+        ${COLS.map(([k,l])=>`<th class="n" data-sort="${k}">${l}</th>`).join('')}
       </tr></thead>
       <tbody>`;
   if(!rows.length){
-    html+=`<tr><td colspan="5" class="empty" style="border:0">Nobody matches that.</td></tr>`;
+    html+=`<tr><td colspan="${ncol}" class="empty" style="border:0">Nobody matches that.</td></tr>`;
   } else {
     rows.forEach(t=>{
       const open=powerExpanded===t.team;
       html+=`<tr data-team="${t.team}">
-        <td>${t.rank}</td>
-        <td><span class="swatch" style="background:${teamColor(t.team)};margin-right:6px"></span>${esc(t.team)}${nick(t.team)?` <span style="color:var(--ink-soft);font-weight:400">${esc(nick(t.team))}</span>`:''}</td>
-        <td class="n">${t.offense>0?'+':''}${t.offense.toFixed(1)}</td>
-        <td class="n">${t.defense>0?'+':''}${t.defense.toFixed(1)}</td>
-        <td class="n">${t.rating>0?'+':''}${t.rating.toFixed(1)}</td>
+        <td>${rankOf[t.team]}</td>
+        <td><span class="swatch" style="background:${teamColor(t.team)}"></span>${esc(t.team)}</td>
+        ${COLS.map(([k])=>`<td class="n">${fmt(t[k])}</td>`).join('')}
       </tr>`;
       if(open){
-        html+=`<tr class="detail"><td colspan="5">
-          Pass off ${t.off_pass>0?'+':''}${t.off_pass.toFixed(1)} · Rush off ${t.off_rush>0?'+':''}${t.off_rush.toFixed(1)} ·
-          Pass def ${t.def_pass>0?'+':''}${t.def_pass.toFixed(1)} · Rush def ${t.def_rush>0?'+':''}${t.def_rush.toFixed(1)} ·
-          Special ${t.special>0?'+':''}${t.special.toFixed(1)}
+        html+=`<tr class="detail"><td colspan="${ncol}">
+          ${esc(nick(t.team)||t.team)} · Special teams ${fmt(t.special)}
         </td></tr>`;
       }
     });
@@ -1810,7 +1829,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-07 22:10 UTC';
+const BUILD_STAMP='2026-10-07 22:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
