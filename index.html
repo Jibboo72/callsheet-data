@@ -719,6 +719,11 @@ function screenPanel(cid){
         <button class="sgbtn" data-po="1" aria-selected="${S.screenPricedOnly!==false}">Priced only</button>
         <button class="sgbtn" data-po="0" aria-selected="${S.screenPricedOnly===false}">Everyone</button>
       </div>`:`<div class="note" style="margin:0 0 8px;color:var(--hl-long)">No odds snapshot imported — ranking on probability only. Import <code>odds-2026.json</code> to see prices and EV.</div>`}
+      <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
+        <button class="sgbtn" data-hu="1" aria-selected="${S.screenHideOut!==false}">Hide unavailable</button>
+        <button class="sgbtn" data-hu="0" aria-selected="${S.screenHideOut===false}">Show all</button>
+      </div>
+      ${S.screenHideOut!==false&&list.hidden?`<div class="note" style="margin:0 0 8px">${list.hidden} player${list.hidden===1?'':'s'} hidden: injured, inactive, or barely on the field.</div>`:''}
       <div class="note" style="margin:0 0 8px">${cfg.note}</div>
       ${!list.length?(()=>{
         const anyLogs=Object.values(S.players||{}).some(p=>(p.log||[]).length);
@@ -727,7 +732,7 @@ function screenPanel(cid){
         if(!hasField)return `<div class="flag" style="border-color:var(--hl-long);color:var(--ink);background:rgba(255,138,31,.14)">
           No <strong>${esc(mktById(sc.mkt).label.toLowerCase())}</strong> in your player logs, so nothing can be ranked on it.
           Re-import the receivers file — the newer build includes it.</div>`;
-        if(havePrices&&S.screenPricedOnly!==false)return `<div class="note" style="margin:0">Nobody with a posted price at this line. Your odds snapshot covers ${((S.odds&&S.odds.games)||[]).length} game${(((S.odds&&S.odds.games)||[]).length)===1?'':'s'} — pull fresh odds, or switch to <strong>Everyone</strong> above.</div>`;
+        if(havePrices&&S.screenPricedOnly!==false)return `<div class="note" style="margin:0">Nobody with a posted price at this line. Prices for games already played are ignored, and your odds snapshot${S.odds&&S.odds.pulled?' (pulled '+esc(String(S.odds.pulled).slice(0,10))+')':''} may be stale — tap Refresh all data on the Roster tab after the next odds pull, or switch to <strong>Everyone</strong> above.</div>`;
         return '';
       })():''}
       ${list.length?list.map(x=>`<div class="hist">
@@ -747,6 +752,7 @@ function screenPanel(cid){
               }
               return havePrices?`<br><span style="color:var(--ink-soft)">no price posted</span>`:'';
             })()}
+            ${(x.av&&x.av.tags.length)||x.snap!=null?`<br><span style="color:${x.av&&x.av.tags.length?'var(--hl-long)':'var(--ink-soft)'}">${[].concat(x.av?x.av.tags:[],x.snap!=null?[Math.round(x.snap*100)+'% of snaps']:[]).map(esc).join(' · ')}</span>`:''}
             ${x.mu?`<br><span style="color:${rankColor(x.mu.d_rank)}">vs ${esc(x.mu.opp)} · pass D #${x.mu.d_rank}</span>`:''}
             ${x.prior?`<br><span style="color:var(--hl-long)">all ${x.prior.n} with ${esc(x.prior.from)}</span>`:''}
           </span></div>`).join('')
@@ -1157,8 +1163,22 @@ function mergeImport(raw){
     const oldTeam=p.team;
     // incoming stats always win; anything you typed yourself is preserved
     if(Array.isArray(inc.log)&&inc.log.length){
-      p.log=inc.log;
-      p.logTeam=inc.team||'';        // the team these games were played for
+      // A new season's file used to REPLACE the whole log, so once a player
+      // had 2026 games he had 3-4 games of history and the screener (which
+      // needs 6) dropped him — leaving only players the 2026 file never
+      // listed, i.e. stale logs. Keep the older season alongside instead,
+      // whatever order the files arrive in.
+      const sNew=Number(data.season)||null, sOld=p.logSeason==null?null:Number(p.logSeason);
+      if(sNew==null||sOld==null||sNew===sOld){
+        p.log=inc.log; p.logSeason=sNew;
+        p.logTeam=inc.team||'';      // the team these games were played for
+      } else if(sNew>sOld){
+        p.prev=p.log; p.prevSeason=sOld;
+        p.log=inc.log; p.logSeason=sNew;
+        p.logTeam=inc.team||'';
+      } else {                       // an older season arriving after a newer one
+        p.prev=inc.log; p.prevSeason=sNew;
+      }
     }
     else if(existed&&p.log&&p.log.length) kept++;
     p.gsis=gsis;
@@ -1166,6 +1186,10 @@ function mergeImport(raw){
     // roster refresh moved him: remember where the logs came from, so the
     // history stays visible but never gets read as current-team volume
     if(existed&&oldTeam&&inc.team&&oldTeam!==inc.team&&p.log&&p.log.length&&!p.logTeam) p.logTeam=oldTeam;
+    // availability only ships in the roster file; other files leave it alone
+    if(data.kind==='roster') ['st','is','ib','pr','snap','miss'].forEach(f=>{
+      if(inc[f]!=null) p[f]=inc[f]; else delete p[f];
+    });
     if(inc.mu) p.mu=inc.mu; else delete p.mu;
     if(inc.adj) p.adj=inc.adj; else delete p.adj;
     if(existed&&oldTeam&&inc.team&&oldTeam!==inc.team) moved.push(`${p.name} ${oldTeam}→${inc.team}`);
@@ -1224,7 +1248,8 @@ const REFRESH_FILES=[
   ['Odds',           `odds-${DATA_SEASON}.json`],
   ['Power ratings',  `ratings-${DATA_SEASON}.json`],
   ['Roster',         `roster-${DATA_SEASON}.json`],
-  ['Receiver logs',  `receivers-${DATA_SEASON}.json`]
+  ['Receiver logs',  `receivers-${DATA_SEASON}.json`],
+  ['Last season\'s logs', `receivers-${+DATA_SEASON-1}.json`]
 ];
 async function refreshAllData(){
   const btn=document.getElementById('refreshAll'), el=document.getElementById('impStatus');
@@ -1491,7 +1516,12 @@ function oddsIndex(){
   myBooks();
   const idx={};
   const games=(S.odds&&S.odds.games)||[];
+  const now=Date.now();
   games.forEach(g=>{
+    // Once a game has kicked off its snapshot price is history, not a bet.
+    // Without this a snapshot taken last Saturday kept "pricing" players in
+    // games already played, so the screener looked the same all week.
+    const t0=Date.parse(g.start||''); if(!isNaN(t0)&&t0<now)return;
     (g.props||[]).forEach(pr=>{
       const mk=OMKT[pr.market]; if(!mk)return;
       if(pr.line==null||pr.side==null)return;          // skip yes/no markets
@@ -1662,10 +1692,13 @@ function evTag(prob,odds){
    Ranks players against each card's profile using the logs already loaded.
    Deliberately ignores price: this answers "who is most likely to hit",
    not "who is worth the number". You compare to the odds yourself. */
+// below ~a third of snaps he's not a TD bet
+const MIN_TD_SNAP=0.35;
 const SCREEN={
   td:{
     label:'anytime TD',
     ok:st=>st.recpg>=2,
+    gateAlways:true, minSnap:MIN_TD_SNAP,
     rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
     useDef:true,
     note:'Fitted the same walk-forward way as the other markets — base rate 19.9%, shrunk toward it until a player earns enough games to move off it.'
@@ -1678,6 +1711,7 @@ const SCREEN={
     // catches a game, so the gate here is volume-of-any-kind, not a
     // receptions floor tuned for wideouts.
     ok:st=>st.recpg>=1,
+    gateAlways:true, minSnap:MIN_TD_SNAP,
     rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
     useDef:true,
     note:'Same touchdown model as the main Anytime TD card, narrowed to tight ends. Same 19.9% base rate and shrinkage — nothing TE-specific in the model itself, just the player pool.'
@@ -1706,18 +1740,38 @@ const SCREEN={
     note:'Unders on the longest catch. Sorted by how often it stayed under, tough defenses first.'
   }
 };
+/* This season's games plus last season's, oldest first. The screener's
+   gates and the raw hit rate it shows read this; modelProb still reads only
+   p.log (current season, the one that carries the xtd signal). */
+const gameLog=p=>(p.prev||[]).concat(p.log||[]);
 function seasonStats(p){
-  const L=(p.log||[]).filter(g=>g.tgt!=null);
+  // last 12 games: current form, not a two-season average
+  const L=gameLog(p).filter(g=>g.tgt!=null).slice(-12);
   if(L.length<6)return null;
   const t=L.reduce((a,g)=>a+g.tgt,0), r=L.reduce((a,g)=>a+g.rec,0), y=L.reduce((a,g)=>a+g.yds,0);
   if(!t||!r)return null;
   return {n:L.length, recpg:r/L.length, cr:r/t, ypr:y/r, tgtpg:t/L.length};
 }
 function hitRate(p,f,th,side){
-  const L=(p.log||[]).filter(g=>g[f]!=null);
+  const L=gameLog(p).filter(g=>g[f]!=null);
   if(!L.length)return null;
   const h=L.filter(g=>meets(g[f],side,th)).length;
   return {h,n:L.length,rate:h/L.length};
+}
+/* Can he play this week, and is he a real part of the offense? Built from
+   the roster file's availability fields (see export_roster.py). Missing
+   data means UNKNOWN — never hidden on a guess. hide = take off the list;
+   tags = shown on the row. */
+function availability(p){
+  const tags=[]; let hide=false;
+  const hardSt={IR:'on IR',INA:'inactive',PS:'practice squad',CUT:'released',RET:'retired',NONE:'not on a roster'};
+  if(p.st&&hardSt[p.st]){ hide=true; tags.push(hardSt[p.st]); }
+  if(p.is==='Out'||p.is==='Doubtful'){ hide=true; tags.push(p.is.toLowerCase()+(p.ib?' · '+p.ib.toLowerCase():'')); }
+  else if(p.is==='Questionable'){ tags.push('questionable'+(p.ib?' · '+p.ib.toLowerCase():'')); }
+  else if(p.pr){ tags.push((p.pr==='DNP'?'did not practice':'limited in practice')+(p.ib?' · '+p.ib.toLowerCase():'')); }
+  if(p.miss>=3){ hide=true; tags.push(`missed last ${p.miss} games`); }
+  else if(p.miss>=1){ tags.push(`missed last ${p.miss===1?'game':p.miss+' games'}`); }
+  return {hide,tags};
 }
 function screenCfg(cid){
   S.screenCfg=S.screenCfg||{};
@@ -1731,6 +1785,8 @@ function screen(cid){
   const cfg=SCREEN[cid]; if(!cfg)return null;
   const sc=screenCfg(cid);
   let out=[];
+  const hideOut=S.screenHideOut!==false;
+  let nHidden=0;
   const havePrices=!!(S.odds&&S.odds.games&&S.odds.games.length);
   const pricedOnly=havePrices&&S.screenPricedOnly!==false;
   Object.keys(S.players||{}).forEach(pid=>{
@@ -1739,6 +1795,13 @@ function screen(cid){
     // non-TE regardless of pricing or profile, unlike the stat-based gate
     // below which priced-only mode is allowed to override
     if(cfg.pos && p.pos!==cfg.pos)return;
+    // can't play / isn't really in the offense: off the list, but counted so
+    // the card can say how many were hidden
+    const av=availability(p);
+    if(hideOut){
+      if(av.hide){ if(seasonStats(p))nHidden++; return; }
+      if(cfg.minSnap&&p.snap!=null&&p.snap<cfg.minSnap){ if(seasonStats(p))nHidden++; return; }
+    }
     const st=seasonStats(p);
     if(!st)return;
     // The profile filter (catch rate, depth, volume) is the right gate when
@@ -1747,13 +1810,16 @@ function screen(cid){
     // wrong profile for Slot Floor yet still has a posted receptions line.
     // So in priced-only mode a posted price IS the filter.
     const hasPrice=havePrices&&(postedAt(pid,sc.mkt,sc.line,sc.side)||bestValue(pid,sc.mkt,null,sc.side==='under'?'under':'over',sc.line));
-    if(pricedOnly ? !hasPrice : !cfg.ok(st))return;
+    // a posted price is the filter for the catch-count cards, but TD pricing
+    // exists for every depth receiver and the model can't price a role it
+    // never sees — so the usage gate still applies there (gateAlways)
+    if(pricedOnly ? (!hasPrice || (cfg.gateAlways&&!cfg.ok(st))) : !cfg.ok(st))return;
     const hr=cfg.rate(p); if(!hr||hr.n<6)return;
     const m=MU(pid);
     const mp=modelProb(pid,sc.mkt,sc.line,sc.side);
     if(!mp)return;
     const hr2=hitRate(p,sc.mkt,sc.line,sc.side);
-    out.push({pid,name:p.name,team:p.team,st,hr:hr2||hr,mp:mp.prob,mu:m,prior:priorTeam(pid)});
+    out.push({pid,name:p.name,team:p.team,st,hr:hr2||hr,mp:mp.prob,mu:m,prior:priorTeam(pid),av,snap:p.snap});
   });
   // attach posted prices first — sorting by value after trimming to 12 meant
   // priced players never made the cut
@@ -1780,7 +1846,9 @@ function screen(cid){
       return b.mp-a.mp;
     });
   }
-  return out.slice(0,12);
+  const top=out.slice(0,12);
+  top.hidden=nHidden;
+  return top;
 }
 
 /* Injury Flyer can't be ranked. Tested on 166 mid-season absences: the
@@ -1829,7 +1897,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-07 22:45 UTC';
+const BUILD_STAMP='2026-10-09 13:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3549,6 +3617,8 @@ document.getElementById('main').addEventListener('click',e=>{
   if(op){ openPlayer(op.dataset.open); return; }
   const po=e.target.closest('[data-po]');
   if(po){ S.screenPricedOnly = po.dataset.po==='1'; save(); renderCards(); return; }
+  const hu=e.target.closest('[data-hu]');
+  if(hu){ S.screenHideOut = hu.dataset.hu==='1'; save(); renderCards(); return; }
   const sv=e.target.closest('[data-sv]');
   if(sv){ S.screenValue = sv.dataset.sv==='1'; save(); renderCards(); return; }
   const gg=e.target.closest('[data-groupgame]');
