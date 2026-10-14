@@ -1,9 +1,14 @@
 name: Weather backtest
 
-# One-off (run it by hand): grades the WEATHER UNDER flag against closing
-# totals using Open-Meteo's historical weather -- NFL 2016-2025 and college
-# 2021-2025 (FBS and FCS). Writes data/weather-backtest.json.
-# Takes ~10-20 minutes; it fetches a season of hourly weather per stadium.
+# Run by hand. Grades the WEATHER UNDER flag against closing totals using
+# Open-Meteo historical weather: NFL 2016-2025, college 2021-2025.
+#
+# Resumable: Open-Meteo's free tier limits how much history one run can
+# pull, so each run fetches for ~40 minutes, saves what it has to
+# data/weather-hist.json, grades it, and commits. Run it again and it picks
+# up where it stopped. data/weather-backtest.json shows "coverage" -- rerun
+# until it reaches 100 (usually 2-3 runs; if a run stops on the rate limit,
+# wait an hour before the next).
 on:
   workflow_dispatch:
 
@@ -13,7 +18,7 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,17 +26,20 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install --quiet pandas pyarrow requests
-      - name: Run weather backtest
+      - name: Run weather backtest (saves progress)
+        env:
+          WX_BUDGET_MIN: "40"
         run: |
           mkdir -p data
           python weather.py backtest data/weather-backtest.json
-      - name: Commit
+      - name: Commit progress and results
+        if: always()
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add data/weather-backtest.json
+          git add data/weather-hist.json data/weather-backtest.json 2>/dev/null || true
           if git diff --staged --quiet; then echo "No change."; else
-            git commit -m "Weather backtest $(date -u +%Y-%m-%d)"
+            git commit -m "Weather backtest progress $(date -u +%Y-%m-%d\ %H:%M)"
             git pull --rebase --quiet || true
             git push
           fi
