@@ -1,0 +1,73 @@
+name: College odds pull
+
+# College game lines from SportsGameOdds -- spread, total, moneyline and
+# team totals for FBS and whatever FCS games SGO carries -- then a rebuild
+# of the college ratings files so the Board shows them.
+#
+# Separate from the weekly NFL odds pull and the data build on purpose: it
+# spends SGO quota (~1 object per game, ~55-120 games a pull), so it should
+# only fire when college lines are worth having.
+on:
+  schedule:
+    # Friday 6pm ET -- most FCS lines are up by now; FBS has settled.
+    - cron: "0 22 * * 5"
+    # Saturday 8:15am ET -- last look before the noon kickoffs. Runs before
+    # the 9am data build so the two never push at the same moment.
+    - cron: "15 12 * * 6"
+    # Cron is UTC, written for EDT (UTC-4). After clocks fall back on Nov 1
+    # these land an hour earlier on the ET clock (5pm / 7:15am); use
+    # "0 23 * * 5" and "15 13 * * 6" to hold the same ET times in winter.
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season"
+        required: false
+        default: "2026"
+
+permissions:
+  contents: write
+
+jobs:
+  odds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install --quiet pandas pyarrow requests
+
+      - name: Pull college lines (SportsGameOdds)
+        env:
+          SGO_KEY: ${{ secrets.SGO_KEY }}
+        run: |
+          if [ -z "$SGO_KEY" ]; then
+            echo "SGO_KEY secret not set — add it under Settings > Secrets"
+            exit 1
+          fi
+          mkdir -p data
+          SEASON="${{ github.event.inputs.season || '2026' }}"
+          python pull_cfb_odds.py "$SEASON" "data/cfb-odds-$SEASON.json"
+
+      # Rebuild both college files so the new lines land on the Board.
+      # The run log lists any SGO game it couldn't match to the schedule.
+      - name: Rebuild college ratings with the new lines
+        env:
+          CFBD_KEY: ${{ secrets.CFBD_KEY }}
+        run: |
+          SEASON="${{ github.event.inputs.season || '2026' }}"
+          python export_cfb_ratings.py "$SEASON" "data/cfb-ratings-$SEASON.json"
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add data/cfb-odds-*.json data/cfb-ratings-*.json data/fcs-ratings-*.json
+          if git diff --staged --quiet; then
+            echo "No change."
+          else
+            git commit -m "College lines $(date -u +%Y-%m-%d\ %H:%M)"
+            git pull --rebase --quiet || true
+            git push
+          fi
