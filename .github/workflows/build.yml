@@ -12,6 +12,10 @@ on:
     # any Sunday game is played, so the "next unplayed week" logic below
     # still lands on the right week.
     - cron: "0 14 * * 0"
+    # Saturday 9am ET — college lines. Books post most FCS numbers late in
+    # the week, so a Thursday pull often has FBS lines but not FCS. This
+    # catches them before the noon kickoffs.
+    - cron: "0 13 * * 6"
     # Cron is UTC only, written for EDT (UTC-4). After clocks fall back on
     # Nov 1 these run an hour earlier on the ET clock (6am / 3pm / 9am);
     # use "0 12 * * 2", "0 21 * * 4" and "0 15 * * 0" to hold the same ET
