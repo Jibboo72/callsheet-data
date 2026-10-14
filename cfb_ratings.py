@@ -65,6 +65,12 @@ CONFIG = dict(
     sd_margin=15.8,         # game-margin SD for win % (backtest residual sd)
 )
 
+# The FCS model: same engine over every Division I game (FBS and FCS), so
+# FCS teams are rated off their whole schedule, not just their FBS games.
+# Knobs tuned separately by backtest_fcs.py against FCS-vs-FCS closing lines.
+# Tuned on 2022-2024 FCS-vs-FCS games; held-out 2025: MAE 12.15 vs line 11.86.
+FCS_CONFIG = dict(CONFIG, scope="di", alpha=1.0, alpha_fcs=2.0, hfa=2.0)
+
 
 # --------------------------------------------------------------------------
 # data
@@ -83,11 +89,30 @@ def _read(url, name):
     return df
 
 
-def load_schedule(season):
-    """All games touching FBS, with a sortable week index (postseason = 16+)."""
+EXTRA_GAMES = {}   # season -> DataFrame of games from another source (CFBD), merged in
+
+
+def load_schedule(season, scope="fbs"):
+    """Games with a sortable week index (postseason = 16+).
+
+    scope="fbs": every game with at least one FBS team (the FBS model).
+    scope="di":  every game between two Division I teams, FBS or FCS (the
+                 FCS model). Games against Division II/III teams are dropped.
+    """
     df = _read(SCHED_URL.format(season=season), f"cfb_schedules_{season}.parquet")
+    if season in EXTRA_GAMES and len(EXTRA_GAMES[season]):
+        x = EXTRA_GAMES[season]
+        df = pd.concat([df, x[~x.game_id.isin(df.game_id)]], ignore_index=True)
+        # a CFBD row has the score even when the free file hasn't caught up
+        sc = x.set_index("game_id")[["home_points", "away_points"]]
+        miss = df.home_points.isna() & df.game_id.isin(sc.index)
+        df.loc[miss, ["home_points", "away_points"]] = sc.loc[df.loc[miss, "game_id"]].values
     df = df[df.season_type.isin(["regular", "postseason"])].copy()
-    df = df[(df.home_division == "fbs") | (df.away_division == "fbs")]
+    if scope == "di":
+        di = {"fbs", "fcs"}
+        df = df[df.home_division.isin(di) & df.away_division.isin(di)]
+    else:
+        df = df[(df.home_division == "fbs") | (df.away_division == "fbs")]
     df["wk"] = np.where(df.season_type == "postseason", 16 + df.week, df.week).astype(int)
     df["neutral"] = df.neutral_site.fillna(False).astype(bool)
     df["conf_game"] = df.conference_game.fillna(False).astype(bool)
@@ -112,7 +137,7 @@ def load_lines(season=None):
     sp = out["spread"]
     if not len(sp):
         return pd.DataFrame(columns=["game_id", "line_spread", "open_spread", "line_total"])
-    sched = pd.concat([load_schedule(int(s))[["game_id", "home_team"]]
+    sched = pd.concat([load_schedule(int(s), "di")[["game_id", "home_team"]]
                        for s in sorted(sp.season.unique())])
     sp = sp.merge(sched, on="game_id")
     home = sp.abbr == sp.home_team
@@ -197,7 +222,7 @@ def fit(games, cfg=None, prior=None, as_of_wk=None):
     for t, i in idx.items():
         a = cfg["alpha_fcs"] if is_fcs[i] else cfg["alpha"]
         pen[i] = pen[n + i] = a
-        if prior and t in prior and not is_fcs[i]:
+        if prior and t in prior:
             po, pd_ = prior[t]
             b0[i] = cfg["carryover"] * po
             b0[n + i] = cfg["carryover"] * pd_
@@ -212,6 +237,10 @@ def fit(games, cfg=None, prior=None, as_of_wk=None):
     rhs = X.T @ (w * y) + pen * b0
     beta = np.linalg.solve(A, rhs)
 
+    # what carries into next season's prior: FBS teams their rating, FCS
+    # teams their distance from the FCS group (the group level is refit)
+    pri_o = beta[:n].copy()
+    pri_d = beta[n:2 * n].copy()
     off = beta[:n] + np.where(is_fcs, beta[2 * n + 1], 0.0)
     dfn = beta[n:2 * n] + np.where(is_fcs, beta[2 * n + 2], 0.0)
     # center on the FBS average so 0 = average FBS team; the intercept
@@ -219,8 +248,11 @@ def fit(games, cfg=None, prior=None, as_of_wk=None):
     fbs = ~is_fcs
     oc, dc = off[fbs].mean(), dfn[fbs].mean()
     off, dfn = off - oc, dfn - dc
+    pri_o = np.where(is_fcs, pri_o, off)
+    pri_d = np.where(is_fcs, pri_d, dfn)
     tdf = pd.DataFrame({"team": teams, "div": [div[t] for t in teams],
-                        "off": off, "def": dfn, "net": off - dfn})
+                        "off": off, "def": dfn, "net": off - dfn,
+                        "pri_o": pri_o, "pri_d": pri_d})
     return {"teams": tdf, "avg": float(beta[2 * n] + oc + dc), "cfg": cfg,
             "as_of_wk": int(now), "n_games": int(len(g))}
 
@@ -231,11 +263,12 @@ def to_prior(model, older=None, cfg=None):
     with carry2 gives a two-year program level, which steadies Weeks 1-3."""
     cfg = {**CONFIG, **(cfg or model.get("cfg", {}))}
     t = model["teams"]
-    t = t[t["div"] == "fbs"]
+    if cfg.get("scope", "fbs") != "di":
+        t = t[t["div"] == "fbs"]
     w2 = cfg.get("carry2", 0.0)
     out = {}
     for _, r in t.iterrows():
-        o, d = r.off, r["def"]
+        o, d = r.pri_o, r.pri_d
         if older and w2 and r.team in older:
             # both are raw ratings; carryover is applied later, in fit()
             po, pd_ = older[r.team]
@@ -258,9 +291,11 @@ def project(model, home, away, neutral=False):
 
 def season_prior(season, cfg=None, first=2018):
     """Walk the chain of seasons from `first` to season-1, final ratings each."""
+    cfg = {**CONFIG, **(cfg or {})}
+    scope = cfg.get("scope", "fbs")
     prior = None
     for s in range(first, season):
-        prior = to_prior(fit(load_schedule(s), cfg, prior), prior, cfg)
+        prior = to_prior(fit(load_schedule(s, scope), cfg, prior), prior, cfg)
     return prior
 
 

@@ -415,7 +415,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr'];
+const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -1146,7 +1146,9 @@ function renderPower(){
    used; otherwise type the line on the Board and it's saved on this
    device (S.cfbLines) — the edge works the same either way. */
 let cfbView='rank', cfbConf='', cfbTeam=null, cfbWeek=null, cfbSort={key:'net',dir:'desc'};
-const CFB=()=>S.cfbr;
+/* College has two divisions, each its own file: FBS (S.cfbr) and FCS (S.fcsr) */
+const CFBSRC=()=>S.cfbSrc==='fcs'?'fcs':'fbs';
+const CFB=()=>CFBSRC()==='fcs'?S.fcsr:S.cfbr;
 const cfbT=name=>{ const d=CFB(); if(!d)return null; d._ix=d._ix||Object.fromEntries(d.teams.map(t=>[t.team,t])); return d._ix[name]||null; };
 const cfbAb=name=>{ const t=cfbT(name); return (t&&t.abbr)||String(name).slice(0,4).toUpperCase(); };
 const sgn1=v=>{ const r=Math.round(v*10)/10; return r===0?'0.0':`${r>0?'+':''}${r.toFixed(1)}`; };
@@ -1201,17 +1203,25 @@ function spark(vals,w,h){
 }
 
 function renderCfbPower(host){
-  const d=CFB();
+  const src=CFBSRC(), d=CFB();
+  const divTabs=`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+    <button class="sgbtn" data-cfbsrc="fbs" aria-selected="${src==='fbs'}">FBS</button>
+    <button class="sgbtn" data-cfbsrc="fcs" aria-selected="${src==='fcs'}">FCS</button>
+  </div>`;
   if(!d||!Array.isArray(d.teams)||!d.teams.length){
-    host.innerHTML=`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No college ratings loaded yet. Tap <b>Refresh all data</b> on the Roster tab — it pulls <code>cfb-ratings-${DATA_SEASON}.json</code>.</div>`;
+    host.innerHTML=divTabs+`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No ${src.toUpperCase()} ratings loaded yet. Tap <b>Refresh all data</b> on the Roster tab — it pulls <code>${src==='fcs'?'fcs':'cfb'}-ratings-${DATA_SEASON}.json</code>.</div>`;
     return;
   }
   if(cfbWeek==null)cfbWeek=d.next_week;
-  const views=[['rank','Rankings'],['board','Board'],['upset','Upsets'],['outlook','Outlook']];
-  let html=`<div class="seg" style="grid-template-columns:repeat(4,1fr);margin-bottom:10px">
+  // FCS has no Outlook: its 24-team playoff is a committee pick with a dozen
+  // auto-bids — too loose to simulate honestly
+  const views=[['rank','Rankings'],['board','Board'],['upset','Upsets']].concat(src==='fbs'?[['outlook','Outlook']]:[]);
+  if(src==='fcs'&&cfbView==='outlook')cfbView='rank';
+  let html=divTabs+`<div class="seg" style="grid-template-columns:repeat(${views.length},1fr);margin-bottom:10px">
     ${views.map(([k,l])=>`<button class="sgbtn" data-cfbview="${k}" aria-selected="${cfbView===k}">${l}</button>`).join('')}
   </div>`;
-  html+=`<div class="note" style="margin:0 0 10px">${esc(String(d.season))} · ratings through week ${d.through_week} · ${d.teams.length} FBS teams · updated ${esc(String(d.generated||'').slice(5,10).replace('-','/'))}</div>`;
+  html+=`<div class="note" style="margin:0 0 10px">${esc(String(d.season))} · ratings through week ${d.through_week} · ${d.teams.length} ${src.toUpperCase()} teams · updated ${esc(String(d.generated||'').slice(5,10).replace('-','/'))}</div>`;
+  if(src==='fcs'&&d.full_fcs===false) html+=`<div class="flag" style="margin:0 0 12px">FCS-vs-FCS games are missing from this file, so these ratings only see FCS teams' games against FBS. The build fills them in from CollegeFootballData once the <code>CFBD_KEY</code> secret is set and the workflow has run.</div>`;
   if(cfbView==='team'&&cfbTeam) html+=cfbTeamPage(d,cfbTeam);
   else if(cfbView==='board') html+=cfbBoard(d,false);
   else if(cfbView==='upset') html+=cfbBoard(d,true);
@@ -1236,7 +1246,8 @@ function cfbRankings(d){
   const val=t=>k==='rec'?(t.w-t.l):t[k];
   rows=rows.slice().sort((a,b)=>k==='team'?dir*a.team.localeCompare(b.team):dir*(val(a)-val(b)));
   const COLS=[['net','Net'],['off','Off'],['deff','Def'],['sos','SOS']];
-  let html=cfbConfSelect(d,'All FBS')+`<div class="note" style="margin:0 0 10px">Points better than an average FBS team on a neutral field, opponent-adjusted. Net = Off + Def; Def is flipped so higher is better. Rating gap + ${d.model.hfa} for home field = projected spread. SOS = average Net of opponents played. Tap a team for its page.</div>
+  const fcs=CFBSRC()==='fcs';
+  let html=cfbConfSelect(d,fcs?'All FCS':'All FBS')+`<div class="note" style="margin:0 0 10px">Points better than an average ${fcs?'FCS':'FBS'} team on a neutral field, opponent-adjusted${fcs?' across every Division I game they play':''}. Net = Off + Def; Def is flipped so higher is better. Rating gap + ${d.model.hfa} for home field = projected spread. SOS = average Net of opponents played.${fcs&&d.fbs_avg!=null?` On this scale an average FBS team is ${sgn1(d.fbs_avg)}.`:''} Tap a team for its page.</div>
   <table class="pow"><thead><tr>
     <th data-cfbsort="net">#</th><th data-cfbsort="team">Team</th><th class="n" data-cfbsort="rec">Rec</th>
     ${COLS.map(([c,l])=>`<th class="n" data-cfbsort="${c}" ${c===k?'data-on="1"':''}>${l}</th>`).join('')}
@@ -1282,10 +1293,10 @@ function cfbBoard(d,upsetsOnly){
     </div>`+cfbConfSelect(d,'All conferences');
   html+=`<div class="note" style="margin:0 0 10px">${upsetsOnly
     ?`Line underdogs the model projects to win outright. ${withLine?'':'No lines yet for this week — type them on the Board tab.'}`
-    :`Ranked by EDGE: the points between the model's spread and the line. ${d.lines_source?`Lines: ${esc(d.lines_source)}; `:''}${withLine<rows.length?`${rows.length-withLine} game${rows.length-withLine===1?'':'s'} without a line — type the home team's number to get an edge.`:''}`}</div>`;
+    :`Ranked by EDGE: the points between the model's spread and the line. ${d.lines_source?`Lines: ${esc(d.lines_source)}. `:''}${withLine<rows.length?`${rows.length-withLine} game${rows.length-withLine===1?'':'s'} without a line — type the home team's number to get an edge.`:''}`}</div>`;
   if(tr&&bt) html+=`<div class="flag" style="margin:0 0 12px;border-color:var(--ink-soft);color:var(--ink-soft);background:transparent">Backtest, honestly: ${bt.label} the model missed by ${bt.mae_model} pts a game vs the closing line's ${bt.mae_line}. Edges of 7+ went ${tr.ats[4].w}-${tr.ats[4].n-tr.ats[4].w} (${(tr.ats[4].pct*100).toFixed(0)}%) in ${tr.label} and ${bt.ats[4].w}-${bt.ats[4].n-bt.ats[4].w} in ${bt.label.split(' ')[0]}. A big edge usually means the model is missing something the market knows — injuries, QB changes. Read it as a flag to look closer, not a bet.</div>`;
   if(!list.length){
-    html+=`<div class="pblock"><div class="pbody"><div class="empty">${upsetsOnly?'No upset picks this week.':'No FBS games this week.'}</div></div></div>`;
+    html+=`<div class="pblock"><div class="pbody"><div class="empty">${upsetsOnly?'No upset picks this week.':'No games this week.'}</div></div></div>`;
     return html;
   }
   list.forEach(({g,e})=>{
@@ -1372,9 +1383,9 @@ function cfbTeamPage(d,name){
     <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-top:6px">
       <div class="stat"><div class="n">${t.w}-${t.l}</div><div class="l">Now · conf ${t.cw}-${t.cl}</div></div>
       <div class="stat"><div class="n">${t.exp_w.toFixed(1)}-${t.exp_l.toFixed(1)}</div><div class="l">Expected</div></div>
-      <div class="stat"><div class="n">${pct1(t.cfp)}</div><div class="l">CFP</div></div>
+      ${t.cfp==null?`<div class="stat"><div class="n">${t.fbsw||0}-${t.fbsl||0}</div><div class="l">vs FBS</div></div>`:`<div class="stat"><div class="n">${pct1(t.cfp)}</div><div class="l">CFP</div></div>`}
     </div>
-    <div class="note" style="margin:10px 0 0">Schedule so far #${t.sos_rank} toughest (${sgn1(t.sos)}) · remaining opponents average ${sgn1(t.rsos)}${t.conf!=='FBS Independents'?` · title game ${pct1(t.reach)}, wins it ${pct1(t.win)}`:''}</div>
+    <div class="note" style="margin:10px 0 0">Schedule so far #${t.sos_rank} toughest (${sgn1(t.sos)})${t.reach!=null?` · remaining opponents average ${sgn1(t.rsos)}`:''}${(t.reach!=null&&t.conf!=='FBS Independents')?` · title game ${pct1(t.reach)}, wins it ${pct1(t.win)}`:''}</div>
     ${t.trend&&t.trend.length>1?`<div class="lab" style="margin:12px 0 2px">Net rating after each week</div><div style="color:${esc(t.color||'var(--ink)')}">${spark(t.trend)}</div>
       <div class="note" style="margin:0">Week 1 → now: ${sgn1(t.trend[0])} → ${sgn1(t.trend[t.trend.length-1])}</div>`:''}
   </div></div>
@@ -1388,7 +1399,7 @@ function cfbTeamPage(d,name){
       const me=home?g.hs:g.as_, them=home?g.as_:g.hs;
       mid=`<b>${me>them?'W':'L'} ${me}-${them}</b><div style="font-size:10px;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace">model had ${cfbSpr(g,g.pem)}${g.ats?` · side ${g.ats}`:''}</div>`;
       right='FINAL';
-    } else if(g.fcs){
+    } else if(g.fcs&&CFBSRC()==='fbs'){
       mid='FCS opponent'; right=pct1(myWp);
     } else {
       const myLine=home?g.pem:-g.pem;
@@ -1404,6 +1415,8 @@ function cfbTeamPage(d,name){
 }
 
 function onCfbPowerClick(e){
+  const sb=e.target.closest('[data-cfbsrc]');
+  if(sb){ S.cfbSrc=sb.dataset.cfbsrc; save(); cfbWeek=null; cfbConf=''; cfbTeam=null; if(cfbView==='team')cfbView='rank'; renderPower(); return true; }
   const v=e.target.closest('[data-cfbview]');
   if(v){ cfbView=v.dataset.cfbview; cfbTeam=null; renderPower(); return true; }
   if(e.target.closest('[data-cfbback]')){ cfbView=S._cfbBack||'rank'; cfbTeam=null; renderPower(); window.scrollTo(0,0); return true; }
@@ -1438,6 +1451,12 @@ function mergeImport(raw){
     S.odds=data; save(); renderAll();
     const n=(data.games||[]).length;
     impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
+    return;
+  }
+  if(data&&data.kind==='fcs_ratings'){
+    S.fcsr=data; save(); renderAll();
+    const nl=(data.games||[]).filter(g=>g.line!=null).length;
+    impSay(`Loaded FCS ratings for ${data.season}: ${data.teams.length} teams through week ${data.through_week}${nl?`, ${nl} games with lines`:''}${data.full_fcs===false?' — FCS-vs-FCS games missing (CFBD key)':''}.`);
     return;
   }
   if(data&&data.kind==='cfb_ratings'){
@@ -1564,6 +1583,7 @@ const REFRESH_FILES=[
   ['Power ratings',  `ratings-${DATA_SEASON}.json`],
   ['College schedule', `cfb-${DATA_SEASON}.json`],
   ['College ratings',  `cfb-ratings-${DATA_SEASON}.json`],
+  ['FCS ratings',      `fcs-ratings-${DATA_SEASON}.json`],
   ['Last season\'s logs', `receivers-${+DATA_SEASON-1}.json`],
   ['Receiver logs',  `receivers-${DATA_SEASON}.json`],
   ['Roster',         `roster-${DATA_SEASON}.json`]
@@ -2250,7 +2270,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-14 13:30 UTC';
+const BUILD_STAMP='2026-10-14 14:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —

@@ -75,8 +75,51 @@ def team_info(season):
     return out
 
 
+_LINES_CACHE = {}
+
+
+def cfbd_games(season):
+    """This season's FCS games from CollegeFootballData (needs CFBD_KEY), in
+    the same column layout as the free cfbfastR schedule file. The free file
+    only carries games with an FBS team in them; this fills in FCS-vs-FCS."""
+    key = os.environ.get("CFBD_KEY", "").strip()
+    if not key:
+        return pd.DataFrame()
+    import requests
+    rows = []
+    for st in ("regular", "postseason"):
+        try:
+            r = requests.get("https://api.collegefootballdata.com/games",
+                             params={"year": season, "seasonType": st, "classification": "fcs"},
+                             headers={"Authorization": f"Bearer {key}"}, timeout=60)
+            r.raise_for_status()
+        except Exception as e:
+            print(f"CFBD games ({st}) failed: {e}", file=sys.stderr)
+            continue
+        for g in r.json():
+            rows.append(dict(
+                game_id=int(g["id"]), season=int(g.get("season") or season),
+                week=int(g.get("week") or 0), season_type=g.get("seasonType") or st,
+                start_date=g.get("startDate"), neutral_site=bool(g.get("neutralSite")),
+                conference_game=bool(g.get("conferenceGame")),
+                home_team=g.get("homeTeam"), away_team=g.get("awayTeam"),
+                home_division=g.get("homeClassification"), away_division=g.get("awayClassification"),
+                home_conference=g.get("homeConference"), away_conference=g.get("awayConference"),
+                home_points=g.get("homePoints"), away_points=g.get("awayPoints"),
+                notes=g.get("notes")))
+    df = pd.DataFrame(rows)
+    if len(df):
+        for c in ("home_points", "away_points"):
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        print(f"CFBD: {len(df)} FCS games, {df.home_points.notna().sum()} with scores", file=sys.stderr)
+    return df
+
+
 def cfbd_lines(season):
-    """Current-season consensus lines from CollegeFootballData (needs CFBD_KEY)."""
+    """Current-season consensus lines from CollegeFootballData (needs CFBD_KEY).
+    Covers FBS and FCS games alike -- the response carries every division."""
+    if season in _LINES_CACHE:
+        return _LINES_CACHE[season]
     key = os.environ.get("CFBD_KEY", "").strip()
     if not key:
         return pd.DataFrame()
@@ -103,7 +146,23 @@ def cfbd_lines(season):
                              open_spread=float(np.median(op)) if op else np.nan,
                              line_total=float(np.median(ot)) if ot else np.nan,
                              book=pick[0].get("provider", "")))
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows).drop_duplicates("game_id") if rows else pd.DataFrame()
+    print(f"CFBD: {len(out)} games with lines", file=sys.stderr)
+    _LINES_CACHE[season] = out
+    return out
+
+
+def get_lines(season):
+    lines = cfbd_lines(season)
+    if len(lines):
+        return lines, "CollegeFootballData (DraftKings where posted)"
+    try:
+        lines = cr.load_lines(season)
+        if len(lines):
+            return lines, "cfbfastR closing consensus"
+    except Exception:
+        pass
+    return pd.DataFrame(), ""
 
 
 # --------------------------------------------------------------------------
@@ -114,15 +173,7 @@ def build(season):
     prior = cr.season_prior(season, cfg)
     info = team_info(season)
 
-    lines = cfbd_lines(season)
-    line_src = "CollegeFootballData (DraftKings where posted)" if len(lines) else ""
-    if not len(lines):
-        try:
-            lines = cr.load_lines(season)
-            if len(lines):
-                line_src = "cfbfastR closing consensus"
-        except Exception:
-            lines = pd.DataFrame()
+    lines, line_src = get_lines(season)
     lmap = {int(r.game_id): r for _, r in lines.iterrows()} if len(lines) else {}
 
     played_wks = sorted(sched[sched.played].wk.unique())
@@ -379,6 +430,144 @@ def simulate(sched, cur, fbs, conf_of, div_of, rec, cfg, n=N_SIMS, seed=7):
     return out
 
 
+# --------------------------------------------------------------------------
+# FCS -- its own file, its own tab
+# --------------------------------------------------------------------------
+
+def _game_rec(r, m, lmap, fbs_side=False):
+    h, a = r.home_team, r.away_team
+    p = cr.project(m, h, a, bool(r.neutral))
+    g = dict(id=str(int(r.game_id)), wk=int(r.wk), week=int(r.week),
+             post=r.season_type == "postseason",
+             date=_et(r.start_date)[0], kick=_et(r.start_date)[1],
+             home=h, away=a, neutral=bool(r.neutral), conf_game=bool(r.conf_game),
+             hconf=r.home_conference if isinstance(r.home_conference, str) else "",
+             aconf=r.away_conference if isinstance(r.away_conference, str) else "",
+             hdiv=r.home_division, adiv=r.away_division,
+             pem=round(-p["margin"], 1), pem_total=round(p["total"], 1),
+             home_wp=round(p["home_wp"], 3))
+    if isinstance(r.notes, str) and r.notes:
+        g["notes"] = r.notes
+    L = lmap.get(int(r.game_id))
+    if L is not None and not pd.isna(L.line_spread):
+        g["line"] = round(float(L.line_spread), 1)
+        if not pd.isna(L.get("line_total", np.nan)):
+            g["line_total"] = round(float(L.line_total), 1)
+        g["edge"] = round(abs(g["pem"] - g["line"]), 1)
+        g["pick"] = "home" if g["pem"] < g["line"] else ("away" if g["pem"] > g["line"] else "")
+    if r.played:
+        hs, as_ = int(r.home_points), int(r.away_points)
+        g.update(hs=hs, as_=as_)
+        if "line" in g and g.get("pick"):
+            c = (hs - as_) + g["line"]
+            g["ats"] = "P" if c == 0 else ("W" if (g["pick"] == "home") == (c > 0) else "L")
+    return g
+
+
+def build_fcs(season):
+    """Ratings for every FCS team, rated off ALL its Division I games, plus a
+    weekly board of FCS games. Ratings are shown relative to the average FCS
+    team (0 = average FCS team) -- spreads are the same either way. No season
+    sims here: the 24-team FCS playoff is picked by committee with auto-bids
+    from a dozen conferences, too loose to simulate honestly."""
+    cfg = dict(cr.FCS_CONFIG)
+    extra = cfbd_games(season)
+    if len(extra):
+        cr.EXTRA_GAMES[season] = extra
+    sched = cr.load_schedule(season, "di")
+    prior = cr.season_prior(season, cfg)
+    info = team_info(season)
+    lines, line_src = get_lines(season)
+    lmap = {int(r.game_id): r for _, r in lines.iterrows()} if len(lines) else {}
+
+    played_wks = sorted(sched[sched.played].wk.unique())
+    through = int(max(played_wks)) if played_wks else 0
+    next_wk = int(sched[~sched.played].wk.min()) if (~sched.played).any() else through + 1
+    fits = {wk: cr.fit(sched, cfg, prior, as_of_wk=wk) for wk in played_wks}
+    cur = cr.fit(sched, cfg, prior)
+    T = cur["teams"].set_index("team")
+    F = T[T["div"] == "fcs"].copy()
+    # re-center on the average FCS team
+    oc, dc = F["off"].mean(), F["def"].mean()
+    fcs_shift = float((F["net"]).mean())
+
+    games, rec = [], {t: dict(w=0, l=0, cw=0, cl=0, opp=[], fbsw=0, fbsl=0) for t in F.index}
+    for _, r in sched.iterrows():
+        if r.home_division != "fcs" and r.away_division != "fcs":
+            continue
+        m = fits[r.wk] if r.played else cur
+        g = _game_rec(r, m, lmap)
+        games.append(g)
+        if "hs" in g:
+            for me, op, mine, theirs, odiv in ((g["home"], g["away"], g["hs"], g["as_"], g["adiv"]),
+                                               (g["away"], g["home"], g["as_"], g["hs"], g["hdiv"])):
+                if me not in rec:
+                    continue
+                won = mine > theirs
+                rec[me]["w" if won else "l"] += 1
+                if g["conf_game"]:
+                    rec[me]["cw" if won else "cl"] += 1
+                if odiv == "fbs":
+                    rec[me]["fbsw" if won else "fbsl"] += 1
+                rec[me]["opp"].append(op)
+
+    trend = {t: [] for t in F.index}
+    for wk in played_wks[1:] + [through + 1]:
+        mt = (fits.get(wk) or cur)["teams"].set_index("team")
+        sh = float(mt[mt["div"] == "fcs"]["net"].mean())
+        for t in F.index:
+            trend[t].append(round(float(mt.loc[t, "net"]) - sh, 1))
+
+    F = F.sort_values("net", ascending=False)
+    F["rank"] = np.arange(1, len(F) + 1)
+    F["off_rank"] = F["off"].rank(ascending=False, method="min").astype(int)
+    F["def_rank"] = F["def"].rank(ascending=True, method="min").astype(int)
+    conf_of = {}
+    for _, r in sched.iterrows():
+        for side in ("home", "away"):
+            if r[f"{side}_division"] == "fcs" and isinstance(r[f"{side}_conference"], str):
+                conf_of[r[f"{side}_team"]] = r[f"{side}_conference"]
+    teams = []
+    for t, r in F.iterrows():
+        opp = rec[t]["opp"]
+        sos = float(np.mean([T.loc[o, "net"] - fcs_shift for o in opp if o in T.index])) if opp else 0.0
+        rem = [g for g in games if "hs" not in g and t in (g["home"], g["away"]) and not g["post"]]
+        exp_w = rec[t]["w"] + sum((g["home_wp"] if g["home"] == t else 1 - g["home_wp"]) for g in rem)
+        i = info.get(t, {})
+        teams.append(dict(
+            team=t, abbr=i.get("abbr", ""), color=i.get("color", ""), logo=i.get("logo", ""),
+            mascot=i.get("mascot", ""), conf=conf_of.get(t, ""), cdiv="",
+            rank=int(r["rank"]), off=round(float(r.off - oc), 1), deff=round(float(-(r["def"] - dc)), 1),
+            net=round(float(r.net - fcs_shift), 1), off_rank=int(r.off_rank), def_rank=int(r.def_rank),
+            w=rec[t]["w"], l=rec[t]["l"], cw=rec[t]["cw"], cl=rec[t]["cl"],
+            fbsw=rec[t]["fbsw"], fbsl=rec[t]["fbsl"],
+            sos=round(sos, 1), rsos=0.0, trend=trend[t],
+            exp_w=round(exp_w, 1), exp_l=round(rec[t]["w"] + rec[t]["l"] + len(rem) - exp_w, 1),
+            reach=None, win=None, cfp=None))
+    for c in set(conf_of.values()):
+        ms = sorted([x for x in teams if x["conf"] == c], key=lambda x: -x["net"])
+        for k, x in enumerate(ms):
+            x["conf_rank"] = k + 1
+    for x in teams:
+        x["sos_rank"] = 1 + sum(1 for o in teams if o["sos"] > x["sos"])
+
+    # what an FBS team looks like on this scale, for reference on team pages
+    fbs_avg = round(float(T[T["div"] == "fbs"]["net"].mean() - fcs_shift), 1)
+    n_fcs2 = sum(1 for g in games if g["hdiv"] == "fcs" and g["adiv"] == "fcs")
+    bt = {}
+    try:
+        with open(os.path.join(os.path.dirname(__file__) or ".", "data", "fcs-backtest.json")) as f:
+            bt = json.load(f)
+    except Exception:
+        pass
+    return dict(kind="fcs_ratings", season=int(season), through_week=through, next_week=next_wk,
+                generated=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+                lines_source=line_src, full_fcs=bool(len(extra)) or n_fcs2 > 0,
+                fbs_avg=fbs_avg,
+                model=dict(hfa=cfg["hfa"], sd=cfg["sd_margin"], avg=round(cur["avg"], 1)),
+                teams=teams, games=games, backtest=bt)
+
+
 if __name__ == "__main__":
     season = sys.argv[1] if len(sys.argv) > 1 else "2026"
     out = sys.argv[2] if len(sys.argv) > 2 else f"cfb-ratings-{season}.json"
@@ -390,3 +579,18 @@ if __name__ == "__main__":
     print(f"wrote {out}: {len(data['teams'])} teams through week {data['through_week']}, "
           f"{len(data['games'])} games ({ng} with lines), "
           f"{os.path.getsize(out) / 1024:.0f} KB", file=sys.stderr)
+
+    # FCS file next to it: data/cfb-ratings-2026.json -> data/fcs-ratings-2026.json
+    out2 = sys.argv[3] if len(sys.argv) > 3 else os.path.join(
+        os.path.dirname(out) or ".", f"fcs-ratings-{season}.json")
+    try:
+        fdata = build_fcs(int(season))
+        with open(out2, "w") as f:
+            json.dump(fdata, f, separators=(",", ":"))
+        n2 = sum(1 for g in fdata["games"] if "line" in g)
+        print(f"wrote {out2}: {len(fdata['teams'])} FCS teams, {len(fdata['games'])} games "
+              f"({n2} with lines), {os.path.getsize(out2) / 1024:.0f} KB", file=sys.stderr)
+        if not fdata["full_fcs"]:
+            print("  note: no FCS-vs-FCS games found -- is CFBD_KEY set?", file=sys.stderr)
+    except Exception as e:
+        print(f"FCS build failed: {type(e).__name__}: {e}", file=sys.stderr)
