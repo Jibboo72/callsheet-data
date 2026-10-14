@@ -31,6 +31,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
 
+from sgo_lines import parse_game_lines
+
 BASE = "https://api.sportsgameodds.com/v2"
 # Reception and longest-reception markets are the thin ones we care about;
 # receiving yards is included because it's the liquid market next door.
@@ -198,7 +200,10 @@ def pull(season, key, days=8, league="NFL"):
                 "fair": o.get("fairOdds"),
                 "books": books or None,
             })
-        if props:
+        # Game lines ride along for free (billing is per event): spread,
+        # total, moneyline and both team totals. See sgo_lines.py.
+        lines = parse_game_lines(ev)
+        if props or lines:
             out.append({
                 "id": ev.get("eventID"),
                 "wk": (ev.get("info") or {}).get("week"),
@@ -206,6 +211,7 @@ def pull(season, key, days=8, league="NFL"):
                 "away": team_name(ev, "away"),
                 "start": (ev.get("status") or {}).get("startsAt"),
                 "props": props,
+                "lines": lines,
             })
     return out, len(events)
 

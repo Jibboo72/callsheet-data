@@ -152,6 +152,116 @@ def cfbd_lines(season):
     return out
 
 
+def _norm(x):
+    x = str(x or "").lower().replace("&", " and ")
+    for ch in "().'’,":
+        x = x.replace(ch, "")
+    x = x.replace("-", " ").replace("state", "st").replace("saint ", "st ")
+    return " ".join(x.split())
+
+
+def _alias_map(season):
+    """Every way a school might be written -> the schedule's name for it.
+    FBS first so a shared abbreviation resolves to the FBS team."""
+    try:
+        t = cr._read(TEAM_INFO_URL.format(season=season), f"cfb_team_info_{season}.parquet")
+    except Exception:
+        return {}
+    t = pd.concat([t[t.classification == "fbs"], t[t.classification != "fbs"]])
+    out = {}
+    for _, r in t.iterrows():
+        school = r.school
+        cands = [school, r.abbreviation, r.alt_name1, r.alt_name2, r.alt_name3]
+        if isinstance(r.mascot, str):
+            cands.append(f"{school} {r.mascot}")
+        for c in cands:
+            if isinstance(c, str) and c.strip():
+                out.setdefault(_norm(c), school)
+    return out
+
+
+def sgo_lines(season, sched):
+    """Upcoming-game lines from the SportsGameOdds college pull
+    (data/cfb-odds-SEASON.json, written by pull_cfb_odds.py), matched to the
+    schedule by team names + date. Returns a DataFrame shaped like
+    load_lines()'s, plus team totals."""
+    path = os.path.join(os.path.dirname(__file__) or ".", "data", f"cfb-odds-{season}.json")
+    if not os.path.exists(path):
+        return pd.DataFrame(), None
+    try:
+        doc = json.load(open(path))
+    except Exception as e:
+        print(f"SGO college odds unreadable: {e}", file=sys.stderr)
+        return pd.DataFrame(), None
+    alias = _alias_map(season)
+
+    def resolve(nm):
+        for k in ("long", "medium", "location", "short", "abbr", "teamID"):
+            v = nm.get(k)
+            if v and _norm(v) in alias:
+                return alias[_norm(v)]
+        # "Alabama Crimson Tide" with a mascot we don't know: try dropping words
+        v = _norm(nm.get("long") or nm.get("medium") or "")
+        parts = v.split()
+        for cut in range(len(parts) - 1, 0, -1):
+            if " ".join(parts[:cut]) in alias:
+                return alias[" ".join(parts[:cut])]
+        return None
+
+    up = sched[~sched.played].copy()
+    up["d"] = pd.to_datetime(up.start_date, utc=True, errors="coerce")
+    by_pair = {}
+    for _, r in up.iterrows():
+        by_pair.setdefault(frozenset((r.home_team, r.away_team)), []).append(r)
+    rows, missed = [], []
+    for ev in doc.get("games", []):
+        h, a = resolve(ev.get("home") or {}), resolve(ev.get("away") or {})
+        cand = by_pair.get(frozenset((h, a))) if h and a else None
+        if not cand:
+            missed.append(f"{(ev.get('away') or {}).get('long') or (ev.get('away') or {}).get('medium')} @ "
+                          f"{(ev.get('home') or {}).get('long') or (ev.get('home') or {}).get('medium')}"
+                          f" -> {a} @ {h}")
+            continue
+        when = pd.to_datetime(ev.get("start"), utc=True, errors="coerce")
+        r = min(cand, key=lambda x: abs((x.d - when).total_seconds()) if pd.notna(when) and pd.notna(x.d) else 0)
+        flip = r.home_team != h                      # SGO has home/away the other way
+        L = ev.get("lines") or {}
+        sp = (L.get("spread") or {}).get("home")
+        tt = L.get("team_total") or {}
+        th, ta = (tt.get("away"), tt.get("home")) if flip else (tt.get("home"), tt.get("away"))
+        rows.append(dict(game_id=int(r.game_id),
+                         line_spread=(-sp if flip else sp) if sp is not None else np.nan,
+                         open_spread=np.nan,
+                         line_total=(L.get("total") or {}).get("line", np.nan),
+                         tt_home=(th or {}).get("line"), tt_away=(ta or {}).get("line"),
+                         book=(L.get("spread") or L.get("total") or {}).get("book", "")))
+    if missed:
+        print(f"SGO: {len(missed)} college games not matched to the schedule:", file=sys.stderr)
+        for m in missed[:40]:
+            print("   ", m, file=sys.stderr)
+    print(f"SGO: matched {len(rows)} upcoming college games", file=sys.stderr)
+    df = pd.DataFrame(rows)
+    return df, doc.get("pulled")
+
+
+def _merge_sgo(lines, season, sched):
+    """game_id -> line row. Finished games: CollegeFootballData (the record
+    of the closing number). Upcoming games: SportsGameOdds when it has the
+    game -- it's the live board and carries team totals -- else CFBD."""
+    lmap = {int(r.game_id): r for _, r in lines.iterrows()} if len(lines) else {}
+    sg, _ = sgo_lines(season, sched)
+    for _, r in (sg.iterrows() if len(sg) else []):
+        if pd.isna(r.line_spread) and pd.isna(r.line_total):
+            continue
+        old = lmap.get(int(r.game_id))
+        if old is not None and pd.isna(r.line_spread):
+            r = r.copy(); r["line_spread"] = old.line_spread
+        r = r.copy()
+        r["sgo"] = True
+        lmap[int(r.game_id)] = r
+    return lmap
+
+
 def get_lines(season):
     lines = cfbd_lines(season)
     if len(lines):
@@ -174,7 +284,9 @@ def build(season):
     info = team_info(season)
 
     lines, line_src = get_lines(season)
-    lmap = {int(r.game_id): r for _, r in lines.iterrows()} if len(lines) else {}
+    lmap = _merge_sgo(lines, season, sched)
+    if any(bool(v.get("sgo", False)) for v in lmap.values()):
+        line_src = (line_src + "; " if line_src else "") + "upcoming games: SportsGameOdds"
 
     played_wks = sorted(sched[sched.played].wk.unique())
     through = int(max(played_wks)) if played_wks else 0
@@ -221,6 +333,10 @@ def build(season):
             g["line"] = round(float(L.line_spread), 1)
             if not pd.isna(L.get("line_total", np.nan)):
                 g["line_total"] = round(float(L.line_total), 1)
+            for k in ("tt_home", "tt_away"):           # team totals (SGO only)
+                v = L.get(k, None)
+                if v is not None and not pd.isna(v):
+                    g[k] = round(float(v), 1)
             g["edge"] = round(abs(g["pem"] - g["line"]), 1)
             # side the model takes against the number
             g["pick"] = "home" if g["pem"] < g["line"] else ("away" if g["pem"] > g["line"] else "")
@@ -453,6 +569,10 @@ def _game_rec(r, m, lmap, fbs_side=False):
         g["line"] = round(float(L.line_spread), 1)
         if not pd.isna(L.get("line_total", np.nan)):
             g["line_total"] = round(float(L.line_total), 1)
+        for k in ("tt_home", "tt_away"):           # team totals (SGO only)
+            v = L.get(k, None)
+            if v is not None and not pd.isna(v):
+                g[k] = round(float(v), 1)
         g["edge"] = round(abs(g["pem"] - g["line"]), 1)
         g["pick"] = "home" if g["pem"] < g["line"] else ("away" if g["pem"] > g["line"] else "")
     if r.played:
@@ -478,7 +598,9 @@ def build_fcs(season):
     prior = cr.season_prior(season, cfg)
     info = team_info(season)
     lines, line_src = get_lines(season)
-    lmap = {int(r.game_id): r for _, r in lines.iterrows()} if len(lines) else {}
+    lmap = _merge_sgo(lines, season, sched)
+    if any(bool(v.get("sgo", False)) for v in lmap.values()):
+        line_src = (line_src + "; " if line_src else "") + "upcoming games: SportsGameOdds"
 
     played_wks = sorted(sched[sched.played].wk.unique())
     through = int(max(played_wks)) if played_wks else 0
