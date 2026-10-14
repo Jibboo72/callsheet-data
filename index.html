@@ -875,6 +875,10 @@ function renderCards(){
           <input class="full" data-f="game" placeholder="Game (optional — e.g. NE @ SEA)" style="grid-column:1/-1">
           <div class="full" data-preview="${c.id}" style="grid-column:1/-1"></div>
           <button class="btn" data-add="${c.id}" style="grid-column:1/-1">Add to card</button>
+          ${cd.picks.length?`<div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button class="btn ghost" data-clrdone="${c.id}"${cd.picks.some(p=>p.grade||p.betId||p.rrBatch)?'':' disabled'}>Clear finished (${cd.picks.filter(p=>p.grade||p.betId||p.rrBatch).length})</button>
+            <button class="btn ghost" data-clrall="${c.id}">Clear whole card</button>
+          </div>`:''}
         </div>`}
         ${c.id==='gparlay'?slipPanel('gparlay'):`<div class="slip">
           <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:8px">
@@ -1897,7 +1901,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-09 13:00 UTC';
+const BUILD_STAMP='2026-10-13 00:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2107,7 +2111,9 @@ function closeWeek(wk){
   let moved=0;
   Object.entries(from).forEach(([cid,cd])=>{
     const keep=[], carry=[];
-    (cd.picks||[]).forEach(p=>{ (p.betId?keep:carry).push(p); });
+    // anything placed OR already graded is finished business and stays in the old
+    // week; only picks you never touched carry forward
+    (cd.picks||[]).forEach(p=>{ ((p.betId||p.grade||p.rrBatch)?keep:carry).push(p); });
     if(carry.length){
       const d=catById(cid)?catById(cid).def:{mode:'single',size:2,stake:1};
       S.cards[to][cid]=S.cards[to][cid]||{picks:[],mode:cd.mode||d.mode,size:cd.size||d.size,stake:cd.stake||d.stake};
@@ -3794,6 +3800,18 @@ document.getElementById('main').addEventListener('click',e=>{
     ['line','odds','book','game'].forEach(f=>g(f).value='');
     save();renderCards();renderRoster();return;
   }
+  const cdn=e.target.closest('[data-clrdone]');
+  if(cdn){
+    const cid=cdn.dataset.clrdone, cd=card(cid);
+    const n=cd.picks.filter(p=>p.grade||p.betId||p.rrBatch).length;
+    if(!n||!confirm(`Remove ${n} graded or placed pick${n===1?'':'s'} from this card? Bets stay in your bankroll and the Ledger record is unchanged.`))return;
+    cd.picks=cd.picks.filter(p=>!(p.grade||p.betId||p.rrBatch));
+    save();renderCards();renderRoster();return;}
+  const cal=e.target.closest('[data-clrall]');
+  if(cal){
+    const cid=cal.dataset.clrall, cd=card(cid);
+    if(!confirm(`Remove all ${cd.picks.length} pick${cd.picks.length===1?'':'s'} from this card? Bets already placed stay in your bankroll.`))return;
+    cd.picks=[];save();renderCards();renderRoster();return;}
   const del=e.target.closest('[data-del]');
   if(del){
     const[cid,i]=del.dataset.del.split(':');
