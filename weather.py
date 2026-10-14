@@ -291,29 +291,104 @@ def _over_budget():
     return False
 
 
-def _get_hist(url, params):
-    """Archive request; on a rate limit wait once, then stop for this run."""
-    for k in range(2):
-        try:
-            r = requests.get(url, params=params, headers=UA, timeout=60)
-            if r.status_code == 429:
-                if k == 0:
-                    print("open-meteo 429 -- waiting 65s once", file=sys.stderr)
-                    time.sleep(65)
-                    continue
-                _STOP["why"] = "Open-Meteo rate limit (resumes next run)"
-                return None
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            print(f"archive request failed: {e}", file=sys.stderr)
-            time.sleep(3)
-    return None
+# Historical weather comes from the Iowa Environmental Mesonet's archive of
+# airport (ASOS) observations -- measured, hourly, free, no key. (Open-Meteo's
+# historical server timed out on every request from GitHub's runners.) Each
+# stadium uses the nearest airport station within 40 km. US games only;
+# international NFL games are skipped in the backtest.
+IEM_ASOS = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
+IEM_NET = "https://mesonet.agron.iastate.edu/geojson/network/{st}_ASOS.geojson"
+STATES = ("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO "
+          "MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC").split()
+_FAILS = {"n": 0}
 
 
-def _archive_for(games, coords_of, store):
-    """Fill store[game_id] = weather for each game, one request per venue per
-    season, skipping games already in the store. Returns venue-seasons done."""
+def _http(url, params, timeout=45):
+    """GET with fail-fast: 4 straight failures stops the run cleanly."""
+    try:
+        r = requests.get(url, params=params, headers=UA, timeout=timeout)
+        if r.status_code == 429:
+            print("rate limited -- waiting 65s", file=sys.stderr)
+            time.sleep(65)
+            r = requests.get(url, params=params, headers=UA, timeout=timeout)
+        r.raise_for_status()
+        _FAILS["n"] = 0
+        return r
+    except Exception as e:
+        _FAILS["n"] += 1
+        print(f"request failed ({_FAILS['n']} in a row): {str(e)[:160]}", file=sys.stderr)
+        if _FAILS["n"] >= 4:
+            _STOP["why"] = f"weather source unreachable: {str(e)[:120]}"
+        time.sleep(3)
+        return None
+
+
+def _stations(store):
+    """All US ASOS stations (id, lat, lon), cached in the progress file."""
+    if store.get("_stations"):
+        return store["_stations"]
+    out = []
+    for st in STATES:
+        r = _http(IEM_NET.format(st=st), None, timeout=30)
+        if r is None:
+            if _STOP["why"]:
+                break
+            continue
+        for f in r.json().get("features", []):
+            c = (f.get("geometry") or {}).get("coordinates") or []
+            sid = (f.get("properties") or {}).get("sid") or f.get("id")
+            if sid and len(c) == 2:
+                out.append([sid, c[1], c[0]])
+    print(f"ASOS stations: {len(out)}", file=sys.stderr)
+    if len(out) > 500:
+        store["_stations"] = out
+    return out
+
+
+def _nearest(stations, lat, lon, max_km=40.0):
+    best, bd = None, 1e9
+    for sid, la, lo in stations:
+        d = 6371 * 2 * math.asin(math.sqrt(
+            math.sin(math.radians(la - lat) / 2) ** 2 +
+            math.cos(math.radians(lat)) * math.cos(math.radians(la)) *
+            math.sin(math.radians(lo - lon) / 2) ** 2))
+        if d < bd:
+            best, bd = sid, d
+    return best if bd <= max_km else None
+
+
+def _asos_frame(sid, start, end):
+    """Hourly observations for one station -> frame shaped like Open-Meteo's
+    (wind_speed_10m mph, precipitation in, snowfall flag, temperature_2m F)."""
+    s, e = pd.Timestamp(start), pd.Timestamp(end)
+    params = [("station", sid), ("data", "sknt"), ("data", "p01i"), ("data", "tmpf"),
+              ("data", "wxcodes"), ("year1", s.year), ("month1", s.month), ("day1", s.day),
+              ("year2", e.year), ("month2", e.month), ("day2", e.day), ("tz", "Etc/UTC"),
+              ("format", "onlycomma"), ("latlon", "no"), ("missing", "M"), ("trace", "0.0001"),
+              ("direct", "no"), ("report_type", "3")]
+    r = _http(IEM_ASOS, params, timeout=60)
+    if r is None:
+        return None
+    from io import StringIO
+    try:
+        f = pd.read_csv(StringIO(r.text), na_values=["M"])
+    except Exception:
+        return None
+    if not len(f) or "valid" not in f:
+        return pd.DataFrame()
+    f["time"] = pd.to_datetime(f.valid, utc=True, errors="coerce")
+    f = f.dropna(subset=["time"]).set_index("time")
+    out = pd.DataFrame(index=f.index)
+    out["wind_speed_10m"] = pd.to_numeric(f.sknt, errors="coerce") * 1.15078
+    out["precipitation"] = pd.to_numeric(f.p01i, errors="coerce").fillna(0.0)
+    out["temperature_2m"] = pd.to_numeric(f.tmpf, errors="coerce")
+    out["snowfall"] = f.wxcodes.astype(str).str.contains("SN").astype(float)
+    return out
+
+
+def _archive_for(games, coords_of, store, stations):
+    """Fill store[game_id] = weather, one request per stadium per season,
+    skipping games already in the store."""
     done = 0
     todo = games[~games.game_id.astype(str).isin(store)]
     for (key, _), gg in todo.groupby(["venue", "season"]):
@@ -324,29 +399,28 @@ def _archive_for(games, coords_of, store):
             for gid in gg.game_id.astype(str):
                 store[gid] = None               # indoor: nothing to fetch
             continue
+        sid = _nearest(stations, v[0], v[1])
+        if not sid:
+            for gid in gg.game_id.astype(str):
+                store[gid] = None               # no airport nearby (or abroad)
+            continue
         start = gg.kick.min().strftime("%Y-%m-%d")
         end = (gg.kick.max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-        d = _get_hist(ARCHIVE, dict(latitude=f"{v[0]:.4f}", longitude=f"{v[1]:.4f}",
-                                    start_date=start, end_date=end,
-                                    hourly="temperature_2m,precipitation,snowfall,wind_speed_10m",
-                                    **UNITS))
-        if d is None:
+        fr = _asos_frame(sid, start, end)
+        if fr is None:
             if _STOP["why"]:
                 break
             continue
-        h = d.get("hourly") or {}
-        fr = pd.DataFrame(h)
-        if len(fr):
-            fr["time"] = pd.to_datetime(fr.time, utc=True)
-            fr = fr.set_index("time")
         for _, r in gg.iterrows():
             store[str(r.game_id)] = window(fr if len(fr) else None, r.kick)
         done += 1
-        time.sleep(0.4)
+        time.sleep(0.3)
     return done
 
 
 def _grade(df, label):
+    if not len(df) or "res" not in df:
+        return {"label": label + " (no weather data yet)"}
     d = df[df.res != 0]
     out = {"label": label}
     for name, m in (("all outdoor", d.res == d.res),
@@ -367,6 +441,8 @@ def _grade(df, label):
 
 def _flagged(df, store):
     df = df[df.game_id.astype(str).map(lambda g: store.get(g) is not None)].copy()
+    if not len(df):
+        return df
     wx = df.game_id.astype(str).map(store)
     df["f_wind"] = wx.map(lambda w: "wind" in flags(w))
     df["f_wet"] = wx.map(lambda w: any(f in ("rain", "snow") for f in flags(w)))
@@ -380,6 +456,9 @@ def backtest():
         store = {}
     store.setdefault("nfl", {})
     store.setdefault("cfb", {})
+    stations = _stations(store)
+    if not stations:
+        _STOP["why"] = _STOP["why"] or "could not load the airport station list"
 
     # NFL 2016-2025 first (smallest, and the angle we're re-checking)
     g = pd.read_csv(NFL_GAMES, low_memory=False)
@@ -388,7 +467,7 @@ def backtest():
     g["kick"] = g.apply(nfl_kickoff, axis=1)
     g["venue"] = g.stadium_id
     g = g[g.venue.map(lambda k: bool(NFL_VENUES.get(k)) and NFL_VENUES[k][2])]
-    _archive_for(g, NFL_VENUES.get, store["nfl"])
+    _archive_for(g, NFL_VENUES.get, store["nfl"], stations)
 
     # College 2021-2025, newest season first, FBS-involved before FCS-only
     import cfb_ratings as cr
@@ -405,9 +484,9 @@ def backtest():
         sc = sc[sc.line_total.notna()]
         frames.append((s, sc, cfb_venues(s)))
     for s, sc, ven in frames:
-        _archive_for(sc[sc.home_division == "fbs"], ven.get, store["cfb"])
+        _archive_for(sc[sc.home_division == "fbs"], ven.get, store["cfb"], stations)
     for s, sc, ven in frames:
-        _archive_for(sc[sc.home_division != "fbs"], ven.get, store["cfb"])
+        _archive_for(sc[sc.home_division != "fbs"], ven.get, store["cfb"], stations)
 
     os.makedirs(os.path.dirname(HIST) or ".", exist_ok=True)
     with open(HIST, "w") as f:
