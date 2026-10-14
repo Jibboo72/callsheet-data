@@ -415,7 +415,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr'];
+const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -1317,6 +1317,7 @@ function cfbBoard(d,upsetsOnly){
         </div>
         ${e&&e.pickTeam?`<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)}</b> · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}</div>`
           :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}</div>`}
+        ${(()=>{const w=g.hs==null?wxFor('cfb',g.id):null; const t=wxLine(w); return t?`<div class="note" style="margin:4px 0 0">${esc(t)}${w&&w.flags&&w.flags.length?` · <b>${esc(wxTag(w))}</b>`:''}</div>`:'';})()}
         ${(g.tt_home!=null||g.tt_away!=null)?`<div class="note" style="margin:4px 0 0">Team totals: ${esc(cfbAb(g.away))} ${g.tt_away??'—'} · ${esc(cfbAb(g.home))} ${g.tt_home??'—'}</div>`:''}
         ${played?`<div class="note" style="margin:4px 0 0">Final ${esc(cfbAb(g.away))} ${g.as_} – ${esc(cfbAb(g.home))} ${g.hs}${g.ats?` · model side ${g.ats==='W'?'covered':(g.ats==='L'?'lost':'pushed')}`:''}${(!g.ats&&e&&e.pick)?` · model side ${cfbCover(g,e)}`:''}</div>`:''}
         ${g.line==null&&!upsetsOnly?`<div style="display:grid;grid-template-columns:1fr 90px;gap:6px;margin-top:8px;align-items:center">
@@ -1454,6 +1455,12 @@ function mergeImport(raw){
     impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
     return;
   }
+  if(data&&data.kind==='weather'){
+    S.wx=data; save(); renderAll();
+    const nf=Object.values(data.nfl||{}).filter(x=>x.flags&&x.flags.length).length;
+    impSay(`Weather forecast ${String(data.generated||'').slice(5,16).replace('T',' ')} UTC: ${nf} NFL game${nf===1?'':'s'} flagged for the weather under.`);
+    return;
+  }
   if(data&&data.kind==='fcs_ratings'){
     S.fcsr=data; save(); renderAll();
     const nl=(data.games||[]).filter(g=>g.line!=null).length;
@@ -1585,6 +1592,7 @@ const REFRESH_FILES=[
   ['College schedule', `cfb-${DATA_SEASON}.json`],
   ['College ratings',  `cfb-ratings-${DATA_SEASON}.json`],
   ['FCS ratings',      `fcs-ratings-${DATA_SEASON}.json`],
+  ['Weather',          `weather-${DATA_SEASON}.json`],
   ['Last season\'s logs', `receivers-${+DATA_SEASON-1}.json`],
   ['Receiver logs',  `receivers-${DATA_SEASON}.json`],
   ['Roster',         `roster-${DATA_SEASON}.json`]
@@ -2271,7 +2279,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-14 15:00 UTC';
+const BUILD_STAMP='2026-10-14 15:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2893,6 +2901,36 @@ function addGameForm(){
     </div></div>`;
 }
 
+/* ---------------- weather (weather-YYYY.json, built by weather.py) ----------------
+   Forecast over each outdoor game's window. NFL outdoor games with rain/snow
+   or 15+ mph wind went under the closing total 190-135 (58.5%) in
+   2016-2025 — books shade totals for weather, just not enough. College is
+   shown for information until its own backtest is in. */
+function wxFor(lg,id){ const w=S.wx&&S.wx[lg]; return w?w[String(id)]||null:null; }
+function wxLine(w){
+  if(!w)return '';
+  if(w.indoor)return 'Indoors — weather not a factor';
+  if(w.neutral||w.unknown)return '';
+  const bits=[`${Math.round(w.wind)} mph wind${w.gust!=null&&w.gust>=w.wind+8?` (gusts ${Math.round(w.gust)})`:''}`];
+  if((w.snow||0)>0)bits.push(`snow ${w.snow}"`);
+  else if((w.precip||0)>=0.01||(w.pop||0)>=30)bits.push(`${w.pop!=null?w.pop+'% ':''}rain${w.precip>=0.01?` (${w.precip}")`:''}`);
+  if(w.temp!=null)bits.push(`${Math.round(w.temp)}°F`);
+  return 'Forecast: '+bits.join(' · ');
+}
+const wxTag=w=>w&&w.flags&&w.flags.length?w.flags.map(f=>f==='wind'?'WIND':(f==='snow'?'SNOW':'RAIN')).join(' + '):'';
+function weatherUndersBlock(games){
+  if(!S.wx||!S.wx.nfl)return '';
+  const fl=games.filter(g=>!('margin' in g)).map(g=>({g,w:wxFor('nfl',g.id)})).filter(x=>x.w&&x.w.flags&&x.w.flags.length);
+  const gen=String(S.wx.generated||'').slice(5,16).replace('T',' ');
+  let h=`<div class="pblock"><div class="pbh" style="background:var(--hl-fade);color:var(--ink)">Weather unders · ${fl.length} game${fl.length===1?'':'s'}</div><div class="pbody">
+    <div class="note" style="margin:0 0 ${fl.length?8:0}px">Outdoor games forecast for rain/snow or 15+ mph wind. Since 2016 these went <b>190-135 to the under (58.5%)</b>, landing 2.3 pts under the closing total. Forecasts change — the flag refreshes with each data build (last ${esc(gen)} UTC).${fl.length?'':' Nothing flagged this week.'}</div>`;
+  fl.forEach(({g,w})=>{
+    h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(g.away)} @ ${esc(g.home)}</b> · ${esc(wxTag(w))}<br><span style="color:var(--ink-soft);font-size:11px">${esc(wxLine(w))}</span></span>
+      <span class="v" style="white-space:nowrap;margin-left:8px">${g.total!=null?'U '+g.total.toFixed(1):'—'}</span></div>`;
+  });
+  return h+`</div></div>`;
+}
+
 function renderSides(){
   const host=document.getElementById('sidesBoard');
   const cfb=LG()==='cfb';
@@ -2947,6 +2985,7 @@ function renderSides(){
     host.innerHTML=html; return;
   }
 
+  if(!cfb && !q) html+=weatherUndersBlock(games);
   let markedFinal=false;
   games.forEach(g=>{
     const played0=('margin' in g);
@@ -2964,7 +3003,9 @@ function renderSides(){
     const fav=hasLine?(g.spread>0?g.home:g.away):null;
     const line=hasLine?`${esc(fav)} -${Math.abs(g.spread).toFixed(1)}`:'no line';
     const played='margin' in g;
-    const wx=[g.roof&&g.roof!=='outdoors'?g.roof:null, g.wind?g.wind+' mph':null].filter(Boolean).join(' · ');
+    const fw=played?null:wxFor(cfb?'cfb':'nfl',g.id);
+    const wx=(fw&&!fw.unknown&&!fw.neutral)?wxLine(fw):[g.roof&&g.roof!=='outdoors'?g.roof:null, g.wind?g.wind+' mph':null].filter(Boolean).join(' · ');
+    const wxFlag=(!cfb&&fw)?wxTag(fw):'';
     const wkTag = q?`Wk ${g.wk} · `:'';
     const meta = cfb
       ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':''].filter(Boolean).join(' · ')
@@ -2994,7 +3035,7 @@ function renderSides(){
       <div class="pbody" style="padding:9px 10px">
         ${statBlock}
         ${played?`<div class="note" style="margin:8px 0 0">Final ${esc(g.away)} ${g.as} – ${esc(g.home)} ${g.hs} · total ${g.pts} ${g.total!=null?(g.pts>g.total?'(over)':'(under)'):''}</div>`:''}
-        ${wx?`<div class="note" style="margin:6px 0 0">${esc(wx)}</div>`:''}
+        ${wx?`<div class="note" style="margin:6px 0 0">${wxFlag?`<span class="pill" style="background:var(--hl-fade);color:var(--ink);margin-right:6px">WEATHER UNDER · ${esc(wxFlag)}</span>`:''}${esc(wx)}</div>`:''}
         <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
           <input data-gs="pick" data-g="${esc(g.id)}" placeholder="${cfb?`Bet — e.g. ${esc(g.home)} -7 or over 52.5`:`Bet — e.g. ${esc(g.home)} -3.5`}" style="grid-column:1/-1">
           <input data-gs="odds" data-g="${esc(g.id)}" placeholder="-110" inputmode="text" style="grid-column:1/-1">
