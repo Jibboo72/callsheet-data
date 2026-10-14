@@ -738,7 +738,7 @@ function screenPanel(cid){
       ${list.length?list.map(x=>`<div class="hist">
           <span class="pill" style="background:${x.mp>=.7?'var(--win)':(x.mp<=.4?'var(--loss)':'var(--ink-soft)')}">${Math.round(x.mp*100)}%</span>
           <span class="t"><strong>${esc(x.name)}</strong> ${esc(x.team||'')}<br>
-            <span style="color:var(--ink-soft)">raw ${x.hr.h}/${x.hr.n} · ${x.st.recpg.toFixed(1)} rec/g · ${Math.round(x.st.cr*100)}% catch · ${x.st.ypr.toFixed(1)} ypc</span>
+            <span style="color:var(--ink-soft)">raw ${x.hr.h}/${x.hr.n}${x.hr.cur?' this season':' incl. last yr'} · ${x.st.recpg.toFixed(1)} rec/g · ${Math.round(x.st.cr*100)}% catch · ${x.st.ypr.toFixed(1)} ypc</span>
             ${(()=>{
               if(x.posted){
                 const e=edgeOf(x.mp,x.posted.odds);
@@ -1186,7 +1186,12 @@ function mergeImport(raw){
     }
     else if(existed&&p.log&&p.log.length) kept++;
     p.gsis=gsis;
-    ['team','pos','ht','wt','college','exp'].forEach(f=>{ if(inc[f]) p[f]=inc[f]; });
+    // An older season's file (last year's logs) describes where he WAS. It
+    // must never overwrite the team/bio the current roster gave him — that
+    // is what put players back on last year's team after a refresh.
+    const olderFile=Array.isArray(inc.log)&&inc.log.length&&data.kind!=='roster'
+      &&Number(data.season)&&Number(data.season)<Number(DATA_SEASON);
+    ['team','pos','ht','wt','college','exp'].forEach(f=>{ if(inc[f]&&(!olderFile||!p[f])) p[f]=inc[f]; });
     // roster refresh moved him: remember where the logs came from, so the
     // history stays visible but never gets read as current-team volume
     if(existed&&oldTeam&&inc.team&&oldTeam!==inc.team&&p.log&&p.log.length&&!p.logTeam) p.logTeam=oldTeam;
@@ -1251,9 +1256,9 @@ const REFRESH_FILES=[
   ['Games & lines',  `games-${DATA_SEASON}.json`],
   ['Odds',           `odds-${DATA_SEASON}.json`],
   ['Power ratings',  `ratings-${DATA_SEASON}.json`],
-  ['Roster',         `roster-${DATA_SEASON}.json`],
+  ['Last season\'s logs', `receivers-${+DATA_SEASON-1}.json`],
   ['Receiver logs',  `receivers-${DATA_SEASON}.json`],
-  ['Last season\'s logs', `receivers-${+DATA_SEASON-1}.json`]
+  ['Roster',         `roster-${DATA_SEASON}.json`]
 ];
 async function refreshAllData(){
   const btn=document.getElementById('refreshAll'), el=document.getElementById('impStatus');
@@ -1747,20 +1752,36 @@ const SCREEN={
 /* This season's games plus last season's, oldest first. The screener's
    gates and the raw hit rate it shows read this; modelProb still reads only
    p.log (current season, the one that carries the xtd signal). */
-const gameLog=p=>(p.prev||[]).concat(p.log||[]);
+// p.log is whichever season's file arrived last for that player — for anyone
+// the 2026 file doesn't list (under 20 targets) it is still LAST year's games.
+// logSeason says which, so this season's games and last season's are told
+// apart here rather than assumed.
+const isCurLog=p=>p.logSeason==null||Number(p.logSeason)===Number(DATA_SEASON);
+const curLog=p=>isCurLog(p)?(p.log||[]):[];
+const gameLog=p=>isCurLog(p)?(p.prev||[]).concat(p.log||[]):(p.log||[]).concat(p.prev||[]).filter(Boolean);
+/* Which games the screener reads. THIS season only, once he has 4+ games with
+   targets — by week 5 that is real form, and last year's role (often another
+   team, another QB) shouldn't be diluting it. Before that, pad with the last 8
+   games across both seasons so early-season lists aren't empty. */
+const MIN_CUR_GAMES=4;
+function formWindow(p){
+  const cur=curLog(p).filter(g=>g.tgt!=null);
+  if(cur.length>=MIN_CUR_GAMES)return {L:cur,cur:true};
+  return {L:gameLog(p).filter(g=>g.tgt!=null).slice(-8),cur:false};
+}
 function seasonStats(p){
-  // last 12 games: current form, not a two-season average
-  const L=gameLog(p).filter(g=>g.tgt!=null).slice(-12);
-  if(L.length<6)return null;
+  const w=formWindow(p), L=w.L;
+  if(L.length<MIN_CUR_GAMES)return null;
   const t=L.reduce((a,g)=>a+g.tgt,0), r=L.reduce((a,g)=>a+g.rec,0), y=L.reduce((a,g)=>a+g.yds,0);
   if(!t||!r)return null;
-  return {n:L.length, recpg:r/L.length, cr:r/t, ypr:y/r, tgtpg:t/L.length};
+  return {n:L.length, cur:w.cur, recpg:r/L.length, cr:r/t, ypr:y/r, tgtpg:t/L.length};
 }
 function hitRate(p,f,th,side){
-  const L=gameLog(p).filter(g=>g[f]!=null);
+  const w=formWindow(p);
+  const L=w.L.filter(g=>g[f]!=null);
   if(!L.length)return null;
   const h=L.filter(g=>meets(g[f],side,th)).length;
-  return {h,n:L.length,rate:h/L.length};
+  return {h,n:L.length,rate:h/L.length,cur:w.cur};
 }
 /* Can he play this week, and is he a real part of the offense? Built from
    the roster file's availability fields (see export_roster.py). Missing
@@ -1806,6 +1827,9 @@ function screen(cid){
       if(av.hide){ if(seasonStats(p))nHidden++; return; }
       if(cfg.minSnap&&p.snap!=null&&p.snap<cfg.minSnap){ if(seasonStats(p))nHidden++; return; }
     }
+    // no games this season = not part of this year's offense, whatever he did
+    // last year (many of these changed teams or have been out all year)
+    if(!curLog(p).some(g=>g.tgt!=null))return;
     const st=seasonStats(p);
     if(!st)return;
     // The profile filter (catch rate, depth, volume) is the right gate when
@@ -1818,7 +1842,7 @@ function screen(cid){
     // exists for every depth receiver and the model can't price a role it
     // never sees — so the usage gate still applies there (gateAlways)
     if(pricedOnly ? (!hasPrice || (cfg.gateAlways&&!cfg.ok(st))) : !cfg.ok(st))return;
-    const hr=cfg.rate(p); if(!hr||hr.n<6)return;
+    const hr=cfg.rate(p); if(!hr||hr.n<MIN_CUR_GAMES)return;
     const m=MU(pid);
     const mp=modelProb(pid,sc.mkt,sc.line,sc.side);
     if(!mp)return;
@@ -1901,7 +1925,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-13 00:45 UTC';
+const BUILD_STAMP='2026-10-13 01:20 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
