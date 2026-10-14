@@ -1,7 +1,7 @@
 name: Weather backtest
 
 # Run by hand. Grades the WEATHER UNDER flag against closing totals using
-# Open-Meteo historical weather: NFL 2016-2025, college 2021-2025.
+# measured hourly airport weather (Iowa Environmental Mesonet): NFL 2016-2025, college 2021-2025.
 #
 # Resumable: Open-Meteo's free tier limits how much history one run can
 # pull, so each run fetches for ~40 minutes, saves what it has to
@@ -37,7 +37,9 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add data/weather-hist.json data/weather-backtest.json 2>/dev/null || true
+          # added one at a time: a missing file must not block saving the other
+          git add data/weather-hist.json 2>/dev/null || true
+          git add data/weather-backtest.json 2>/dev/null || true
           if git diff --staged --quiet; then echo "No change."; else
             git commit -m "Weather backtest progress $(date -u +%Y-%m-%d\ %H:%M)"
             git pull --rebase --quiet || true
