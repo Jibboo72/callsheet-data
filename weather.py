@@ -267,31 +267,83 @@ def forecast(season, days=8):
 
 
 # --------------------------------------------------------------------------
-# backtest
+# backtest -- resumable
 # --------------------------------------------------------------------------
+# Open-Meteo's free tier counts a big historical request as several calls,
+# and a full NFL + college backtest is ~1,400 venue-seasons. So the backtest
+# keeps every game's weather it has fetched in data/weather-hist.json,
+# stops cleanly when its time budget is up (or the API says slow down),
+# grades whatever it has, and the next run picks up where it stopped.
+# The report says how complete it is; rerun until it says 100%.
 
-def _archive_for(games, coords_of):
-    """games: DataFrame with game_id, kick (UTC), venue key. Fetch archive
-    weather per venue over its own date span, return game_id -> wx."""
-    res = {}
-    # one request per venue per season: Open-Meteo weighs requests by how
-    # much data they return, so a decade in one call costs more than ten
-    # one-season calls and risks the free daily cap
-    for (key, _), gg in games.groupby(["venue", "season"]):
+HIST = "data/weather-hist.json"
+BUDGET_MIN = float(os.environ.get("WX_BUDGET_MIN", "40"))
+_T0 = time.time()
+_STOP = {"why": None}
+
+
+def _over_budget():
+    if _STOP["why"]:
+        return True
+    if (time.time() - _T0) / 60 > BUDGET_MIN:
+        _STOP["why"] = f"time budget ({BUDGET_MIN:.0f} min) used"
+        return True
+    return False
+
+
+def _get_hist(url, params):
+    """Archive request; on a rate limit wait once, then stop for this run."""
+    for k in range(2):
+        try:
+            r = requests.get(url, params=params, headers=UA, timeout=60)
+            if r.status_code == 429:
+                if k == 0:
+                    print("open-meteo 429 -- waiting 65s once", file=sys.stderr)
+                    time.sleep(65)
+                    continue
+                _STOP["why"] = "Open-Meteo rate limit (resumes next run)"
+                return None
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            print(f"archive request failed: {e}", file=sys.stderr)
+            time.sleep(3)
+    return None
+
+
+def _archive_for(games, coords_of, store):
+    """Fill store[game_id] = weather for each game, one request per venue per
+    season, skipping games already in the store. Returns venue-seasons done."""
+    done = 0
+    todo = games[~games.game_id.astype(str).isin(store)]
+    for (key, _), gg in todo.groupby(["venue", "season"]):
+        if _over_budget():
+            break
         v = coords_of(key)
         if not v or not v[2]:
+            for gid in gg.game_id.astype(str):
+                store[gid] = None               # indoor: nothing to fetch
             continue
         start = gg.kick.min().strftime("%Y-%m-%d")
         end = (gg.kick.max() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-        fr = hourly_frames([(v[0], v[1])], ARCHIVE,
-                           dict(start_date=start, end_date=end,
-                                hourly="temperature_2m,precipitation,snowfall,wind_speed_10m"))[0]
-        time.sleep(0.6)
+        d = _get_hist(ARCHIVE, dict(latitude=f"{v[0]:.4f}", longitude=f"{v[1]:.4f}",
+                                    start_date=start, end_date=end,
+                                    hourly="temperature_2m,precipitation,snowfall,wind_speed_10m",
+                                    **UNITS))
+        if d is None:
+            if _STOP["why"]:
+                break
+            continue
+        h = d.get("hourly") or {}
+        fr = pd.DataFrame(h)
+        if len(fr):
+            fr["time"] = pd.to_datetime(fr.time, utc=True)
+            fr = fr.set_index("time")
         for _, r in gg.iterrows():
-            wx = window(fr, r.kick)
-            if wx:
-                res[r.game_id] = wx
-    return res
+            store[str(r.game_id)] = window(fr if len(fr) else None, r.kick)
+        done += 1
+        time.sleep(0.4)
+    return done
 
 
 def _grade(df, label):
@@ -313,56 +365,75 @@ def _grade(df, label):
     return out
 
 
-def backtest():
-    report = {"kind": "weather_backtest",
-              "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
-              "thresholds": dict(wind_mph=WIND_MPH, precip_in=PRECIP_IN)}
+def _flagged(df, store):
+    df = df[df.game_id.astype(str).map(lambda g: store.get(g) is not None)].copy()
+    wx = df.game_id.astype(str).map(store)
+    df["f_wind"] = wx.map(lambda w: "wind" in flags(w))
+    df["f_wet"] = wx.map(lambda w: any(f in ("rain", "snow") for f in flags(w)))
+    return df
 
-    # NFL 2016-2025: re-check the angle with Open-Meteo instead of the
-    # stadium reading, since the live flag will use Open-Meteo
+
+def backtest():
+    try:
+        store = json.load(open(HIST))
+    except Exception:
+        store = {}
+    store.setdefault("nfl", {})
+    store.setdefault("cfb", {})
+
+    # NFL 2016-2025 first (smallest, and the angle we're re-checking)
     g = pd.read_csv(NFL_GAMES, low_memory=False)
     g = g[(g.game_type == "REG") & g.season.between(2016, 2025) & g.total.notna()
           & g.total_line.notna()].copy()
     g["kick"] = g.apply(nfl_kickoff, axis=1)
     g["venue"] = g.stadium_id
     g = g[g.venue.map(lambda k: bool(NFL_VENUES.get(k)) and NFL_VENUES[k][2])]
-    missing = sorted(set(pd.read_csv(NFL_GAMES, low_memory=False).query(
-        "season>=2016").stadium_id.dropna()) - set(NFL_VENUES))
-    if missing:
-        print(f"NFL venues without coordinates (skipped): {missing}", file=sys.stderr)
-    wx = _archive_for(g, NFL_VENUES.get)
-    g = g[g.game_id.isin(wx)].copy()
-    g["res"] = g.total - g.total_line
-    g["f_wind"] = g.game_id.map(lambda x: "wind" in flags(wx[x]))
-    g["f_wet"] = g.game_id.map(lambda x: any(f in ("rain", "snow") for f in flags(wx[x])))
-    report["nfl"] = _grade(g, f"NFL 2016-2025, {len(g)} outdoor games")
-    print("NFL:", json.dumps(report["nfl"])[:600], file=sys.stderr)
+    _archive_for(g, NFL_VENUES.get, store["nfl"])
 
-    # College 2021-2025 (closing totals from the free cfbfastR file)
+    # College 2021-2025, newest season first, FBS-involved before FCS-only
     import cfb_ratings as cr
     lines = cr.load_lines()
-    rows = []
-    for s in range(2021, 2026):
+    frames = []
+    for s in range(2025, 2020, -1):
         sc = cr.load_schedule(s, "di")
         sc = sc[sc.played & ~sc.neutral].copy()
         sc["kick"] = pd.to_datetime(sc.start_date, utc=True, errors="coerce")
         sc["venue"] = sc.home_team
         sc["fbs2"] = (sc.home_division == "fbs") & (sc.away_division == "fbs")
         sc["fcs2"] = (sc.home_division == "fcs") & (sc.away_division == "fcs")
-        ven = cfb_venues(s)
         sc = sc.merge(lines[["game_id", "line_total"]], on="game_id", how="inner")
         sc = sc[sc.line_total.notna()]
-        w = _archive_for(sc, ven.get)
-        sc = sc[sc.game_id.isin(w)].copy()
-        sc["res"] = sc.home_points + sc.away_points - sc.line_total
-        sc["f_wind"] = sc.game_id.map(lambda x: "wind" in flags(w[x]))
-        sc["f_wet"] = sc.game_id.map(lambda x: any(f in ("rain", "snow") for f in flags(w[x])))
-        rows.append(sc)
-        print(f"college {s}: {len(sc)} games with weather", file=sys.stderr)
-    c = pd.concat(rows)
-    report["cfb_fbs"] = _grade(c[c.fbs2], f"FBS 2021-2025, {int(c.fbs2.sum())} games")
-    report["cfb_fcs"] = _grade(c[c.fcs2], f"FCS 2022-2025, {int(c.fcs2.sum())} games")
-    report["cfb_all"] = _grade(c, f"all college 2021-2025, {len(c)} games")
+        frames.append((s, sc, cfb_venues(s)))
+    for s, sc, ven in frames:
+        _archive_for(sc[sc.home_division == "fbs"], ven.get, store["cfb"])
+    for s, sc, ven in frames:
+        _archive_for(sc[sc.home_division != "fbs"], ven.get, store["cfb"])
+
+    os.makedirs(os.path.dirname(HIST) or ".", exist_ok=True)
+    with open(HIST, "w") as f:
+        json.dump(store, f, separators=(",", ":"))
+
+    # grade whatever is in hand
+    report = {"kind": "weather_backtest",
+              "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+              "thresholds": dict(wind_mph=WIND_MPH, precip_in=PRECIP_IN),
+              "stopped": _STOP["why"]}
+    g["res"] = g.total - g.total_line
+    gn = _flagged(g, store["nfl"])
+    report["nfl"] = _grade(gn, f"NFL 2016-2025, {len(gn)} outdoor games")
+    c = pd.concat([sc for _, sc, _ in frames])
+    c["res"] = c.home_points + c.away_points - c.line_total
+    cc = _flagged(c, store["cfb"])
+    report["cfb_fbs"] = _grade(cc[cc.fbs2], f"FBS 2021-2025, {int(cc.fbs2.sum())} games")
+    report["cfb_fcs"] = _grade(cc[cc.fcs2], f"FCS 2022-2025, {int(cc.fcs2.sum())} games")
+    report["cfb_all"] = _grade(cc, f"all college 2021-2025, {len(cc)} games")
+    nfl_have = g.game_id.astype(str).isin(store["nfl"]).sum()
+    cfb_have = c.game_id.astype(str).isin(store["cfb"]).sum()
+    report["coverage"] = dict(nfl=f"{nfl_have}/{len(g)}", cfb=f"{cfb_have}/{len(c)}",
+                              pct=round(100 * (nfl_have + cfb_have) / max(1, len(g) + len(c)), 1))
+    print(f"coverage: NFL {nfl_have}/{len(g)}, college {cfb_have}/{len(c)} "
+          f"({report['coverage']['pct']}%)" + (f" -- stopped: {_STOP['why']}" if _STOP["why"] else ""),
+          file=sys.stderr)
     return report
 
 
