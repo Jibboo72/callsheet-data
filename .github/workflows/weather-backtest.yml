@@ -1,0 +1,37 @@
+name: Weather backtest
+
+# One-off (run it by hand): grades the WEATHER UNDER flag against closing
+# totals using Open-Meteo's historical weather -- NFL 2016-2025 and college
+# 2021-2025 (FBS and FCS). Writes data/weather-backtest.json.
+# Takes ~10-20 minutes; it fetches a season of hourly weather per stadium.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install --quiet pandas pyarrow requests
+      - name: Run weather backtest
+        run: |
+          mkdir -p data
+          python weather.py backtest data/weather-backtest.json
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add data/weather-backtest.json
+          if git diff --staged --quiet; then echo "No change."; else
+            git commit -m "Weather backtest $(date -u +%Y-%m-%d)"
+            git pull --rebase --quiet || true
+            git push
+          fi

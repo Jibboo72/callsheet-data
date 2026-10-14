@@ -192,6 +192,19 @@ jobs:
           python export_cfb_ratings.py "${{ steps.season.outputs.season }}" \
             "data/cfb-ratings-${{ steps.season.outputs.season }}.json"
 
+      # Game-time forecast for every outdoor NFL and college game in the
+      # next 8 days, and the WEATHER UNDER flags (rain/snow or 15+ mph
+      # wind). Open-Meteo, free, no key. See weather.py.
+      - name: Weather forecast
+        if: steps.season.outputs.run == 'yes'
+        continue-on-error: true
+        env:
+          CFBD_KEY: ${{ secrets.CFBD_KEY }}
+        run: |
+          pip install --quiet requests
+          python weather.py forecast "${{ steps.season.outputs.season }}" \
+            "data/weather-${{ steps.season.outputs.season }}.json"
+
       - name: Commit if the numbers changed
         if: steps.season.outputs.run == 'yes'
         run: |
