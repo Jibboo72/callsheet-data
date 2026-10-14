@@ -171,6 +171,23 @@ jobs:
           python export_cfb.py "${{ steps.season.outputs.season }}" \
             "data/cfb-${{ steps.season.outputs.season }}.json"
 
+      # College power ratings, weekly board and season sims for the Power
+      # tab's College section. Scores come free from cfbfastR; current-season
+      # LINES need a free CollegeFootballData key saved as the CFBD_KEY
+      # secret -- without it this still builds, and the app uses lines you
+      # type on the College Board. Needs cfb-backtest.json (committed) for
+      # the honest-backtest note; rerun backtest_cfb.py to refresh it.
+      - name: Build college ratings
+        if: steps.season.outputs.run == 'yes'
+        continue-on-error: true
+        env:
+          CFBD_KEY: ${{ secrets.CFBD_KEY }}
+        run: |
+          pip install --quiet requests
+          mkdir -p data
+          python export_cfb_ratings.py "${{ steps.season.outputs.season }}" \
+            "data/cfb-ratings-${{ steps.season.outputs.season }}.json"
+
       - name: Commit if the numbers changed
         if: steps.season.outputs.run == 'yes'
         run: |
