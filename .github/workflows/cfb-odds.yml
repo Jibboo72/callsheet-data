@@ -59,11 +59,19 @@ jobs:
           SEASON="${{ github.event.inputs.season || '2026' }}"
           python export_cfb_ratings.py "$SEASON" "data/cfb-ratings-$SEASON.json"
 
+      - name: Weather forecast
+        continue-on-error: true
+        env:
+          CFBD_KEY: ${{ secrets.CFBD_KEY }}
+        run: |
+          SEASON="${{ github.event.inputs.season || '2026' }}"
+          python weather.py forecast "$SEASON" "data/weather-$SEASON.json"
+
       - name: Commit
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add data/cfb-odds-*.json data/cfb-ratings-*.json data/fcs-ratings-*.json
+          git add data/cfb-odds-*.json data/cfb-ratings-*.json data/fcs-ratings-*.json data/weather-*.json
           if git diff --staged --quiet; then
             echo "No change."
           else
