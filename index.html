@@ -1952,7 +1952,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-15 21:10 UTC';
+const BUILD_STAMP='2026-10-15 21:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2911,7 +2911,9 @@ function renderBank(){
       return `<div class="row">
         <div class="pick" data-ebopen="${esc(x.id)}">
           ${match?`<div class="who">${x.paper?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(match)}</div>`:''}
-          <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${(!match&&x.paper)?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${esc(x.desc)}</div>
+          <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${(!match&&x.paper)?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${(x.kind==='parlay'&&Array.isArray(x.legs)&&x.legs.length)
+            ? x.legs.map(l=>`<div style="font-weight:400">• ${esc(legName(l))}${l.odds!=null&&l.odds!==''?' <strong>'+fmtAm(l.odds)+'</strong>':''}</div>`).join('')
+            : esc(x.desc)}</div>
           ${outcome}
           <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''}${x.odds!=null?' · '+fmtAm(x.odds):''} · ${unitStr(st)}</div>
         </div>
@@ -2927,6 +2929,14 @@ function renderBank(){
     </div>`;
 }
 
+/* A parlay leg picked off a prop card stores the player in l.match and only
+   the bet wording ("3+ receptions") in l.desc — so a logged parlay read as a
+   string of anonymous bets. Put the name back in front, once. */
+function legName(l){
+  const d=String(l.desc||''), m=String(l.match||'');
+  if(l.kind==='prop'&&m&&!d.toLowerCase().includes(m.toLowerCase()))return m+' '+d;
+  return d;
+}
 /* Bets placed before the Side/Total/ML selector existed have no market
    recorded. Guess from the wording rather than dropping them — a bet
    containing over/under is a total, everything else a side. */
@@ -3752,7 +3762,7 @@ document.getElementById('main').addEventListener('click',e=>{
     if(!stake||stake<=0){toast('Needs a stake');return;}
     if(!confirmIfClosed(S.week))return;
     addBet({
-      desc:legs.map(l=>l.desc).join(' + '),
+      desc:legs.map(legName).join(' + '),
       odds:toAm(d), stake, kind:'parlay', league:slipLeague(nm),
       legs:legs.slice(), wk:S.week, boost:Number(slip(nm).boost)||0,
       match:`${legs.length}-leg parlay`
