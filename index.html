@@ -501,7 +501,7 @@ async function load(){
   // saved state is read asynchronously above, and a refresh that landed
   // before that would be overwritten by it. It only reads what the GitHub
   // workflows have already published.
-  if(!S.lastRefresh || Date.now()-S.lastRefresh > 30*60*1000){
+  if(!S.lastRefresh || !S.odds || Date.now()-S.lastRefresh > 30*60*1000){
     refreshAllData().catch(()=>{});
   }
 }
@@ -510,8 +510,20 @@ let t; function save(){
   t=setTimeout(async()=>{
     const core={}, ref={};
     Object.keys(S).forEach(k=>{ if(REDOWNLOADABLE.includes(k)) ref[k]=S[k]; else core[k]=S[k]; });
-    const coreOk=await store.set(KEY,core);
-    const refOk=await store.set(REFKEY,ref);
+    let coreOk=await store.set(KEY,core);
+    if(!coreOk){
+      // Bets and picks are the irreplaceable part. If they won't fit, throw
+      // away what can be re-downloaded (and the retired v2 copy) and retry.
+      try{ localStorage.removeItem(REFKEY); localStorage.removeItem(OLD); }catch(e){}
+      coreOk=await store.set(KEY,core);
+      if(coreOk) S.lastRefresh=0;       // reference data was dropped — re-pull on next open
+    }
+    let refOk=await store.set(REFKEY,ref);
+    if(!refOk&&ref.odds){               // odds are the biggest and the easiest to re-pull
+      const r2=Object.assign({},ref); delete r2.odds;
+      refOk=await store.set(REFKEY,r2);
+      if(refOk) S.lastRefresh=0;
+    }
     // core failing means bets/picks/settings themselves aren't saving —
     // this is exactly the failure mode that caused silent data loss
     // before, so it can never again pass without the user knowing
@@ -1135,7 +1147,7 @@ function mergeImport(raw){
   catch(e){ impSay("That file isn't valid JSON.",true); return; }
   const src=data&&data.players;
   if(data&&data.kind==='odds'){
-    S.odds=data; save(); renderAll();
+    S.odds=slimOdds(data); save(); renderAll();
     const n=(data.games||[]).length;
     impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
     return;
@@ -1509,6 +1521,20 @@ const myBooks=()=>{
 };
 const bookName=id=>BOOKS[id]||id;
 
+/* The raw odds pull is ~1.4 MB — every prop, every book, ids the app never
+   reads — and phone browsers only allow a few MB for the whole site. That is
+   what filled storage and stopped bets and picks from saving. Keep only what
+   the app prices from: markets it knows, over/under, and the books it uses. */
+function slimOdds(d){
+  const mine=myBooks(), keepBook=id=>id===SHARP||mine.includes(id);
+  return {season:d.season,kind:'odds',pulled:d.pulled,events_pulled:d.events_pulled,leagues:d.leagues,usage:d.usage,
+    games:(d.games||[]).map(g=>({id:g.id,wk:g.wk,home:g.home,away:g.away,start:g.start,league:g.league,
+      props:(g.props||[]).filter(pr=>OMKT[pr.market]&&pr.line!=null&&(pr.side==='over'||pr.side==='under')).map(pr=>{
+        const books={};
+        Object.entries(pr.books||{}).forEach(([id,b])=>{ if(b&&keepBook(id)) books[id]={odds:b.odds,line:b.line}; });
+        return {market:pr.market,player:pr.player,side:pr.side,line:pr.line,odds:pr.odds,books:Object.keys(books).length?books:null};
+      })}))};
+}
 const OMKT={receiving_receptions:'rec', receiving_yards:'yds',
             receiving_longestReception:'lng', receiving_targets:'tgt',
             touchdowns:'td', anytime_touchdown:'td',
@@ -1926,7 +1952,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-15 20:50 UTC';
+const BUILD_STAMP='2026-10-15 21:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
