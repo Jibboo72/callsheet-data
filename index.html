@@ -207,6 +207,7 @@ select[data-cfbconf]{width:100%}
       <div class="sheet-sub">Five markets · Five slips</div>
     </div>
     <div class="wk">
+      <button id="tabSettings" aria-label="Settings" aria-selected="false" style="margin-right:8px;font-size:17px">&#9881;</button>
       <button id="wkDown" aria-label="Previous week">−</button>
       <div class="wk-num" id="wkNum">Week 1</div>
       <button id="wkUp" aria-label="Next week">+</button>
@@ -235,9 +236,6 @@ select[data-cfbconf]{width:100%}
 
 <section id="paneBank" hidden>
   <div id="closeWeek"></div>
-  <div id="moveBets"></div>
-  <div id="bulkAdd"></div>
-  <div id="csvImport"></div>
   <div id="bankSummary"></div>
   <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
@@ -249,20 +247,9 @@ select[data-cfbconf]{width:100%}
     <div class="pbody">
       <button class="btn" id="refreshAll">Refresh all data</button>
       <div class="note" style="margin:6px 0 0">One tap pulls the latest lines, odds, power ratings, roster and receiver logs from your repo. It can only grab what the GitHub workflows have already published — to get newer odds, run <b>Weekly odds pull</b> on GitHub first, then tap this.</div>
-      <div style="height:12px"></div>
-      <button class="btn ghost" id="impFile">Import from a file</button>
-      <div style="height:8px"></div>
-      <span class="lab">Or pull from a URL</span>
-      <input id="impUrl" placeholder="https://raw.githubusercontent.com/..." inputmode="url">
-      <div style="height:6px"></div>
-      <button class="btn ghost" id="impFetch">Fetch and import</button>
       <div id="impStatus" class="note" style="margin-bottom:0"></div>
-      ${''}
-      <div id="quota"></div>
-      <div id="bookPick"></div>
     </div>
   </div>
-  <input id="impInput" type="file" accept=".json,application/json" hidden>
   <input id="rosterSearch" placeholder="Search the roster" style="margin-bottom:14px">
   <div id="rosterList"></div>
 </section>
@@ -271,6 +258,66 @@ select[data-cfbconf]{width:100%}
   <div id="powerLg"></div>
   <input id="powerSearch" placeholder="Search teams" style="margin-bottom:14px">
   <div id="powerBoard"></div>
+</section>
+
+<section id="paneSettings" hidden>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <h2 style="margin:0;font-family:Oswald,sans-serif;text-transform:uppercase;letter-spacing:.06em;font-size:20px">Settings</h2>
+    <button class="btn ghost" id="settingsBack" style="width:auto;padding:6px 14px">Done</button>
+  </div>
+  <div class="pblock" style="margin-bottom:16px"><div class="pbh">Budget</div><div class="pbody">
+    <span class="lab">Weekly budget across all five slips</span><input id="setBudget" type="number" step="1" min="1" inputmode="decimal">
+  </div></div>
+  <div id="moveBets"></div>
+  <div id="csvImport"></div>
+  <div class="pblock" style="margin-bottom:16px"><div class="pbh">Import data by hand</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Normally you never need this — <b>Refresh all data</b> on the Roster tab pulls everything. These are for a one-off file or URL.</div>
+    <button class="btn ghost" id="impFile">Import from a file</button>
+    <div style="height:8px"></div>
+    <span class="lab">Or pull from a URL</span>
+    <input id="impUrl" placeholder="https://raw.githubusercontent.com/..." inputmode="url">
+    <div style="height:6px"></div>
+    <button class="btn ghost" id="impFetch">Fetch and import</button>
+    <div id="impStatus2" class="note" style="margin:8px 0 0"></div>
+    <input id="impInput" type="file" accept=".json,application/json" hidden>
+  </div></div>
+  <div class="pblock" style="margin-bottom:16px"><div class="pbh">Odds &amp; books</div><div class="pbody">
+    <div id="quota"></div>
+    <div id="bookPick"></div>
+  </div></div>
+  <div class="pblock"><div class="pbh">Backup — save a copy now</div><div class="pbody">
+    <div class="note" id="backupStatus" style="margin:0 0 8px;font-weight:600"></div>
+    <div class="note" style="margin:0 0 8px">Bets, picks and settings live on this device only — deleting the icon or clearing Safari wipes them. Players, games and odds aren't backed up because they re-import from the URLs in seconds. Nothing here is saved until you tap a button below.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <button class="btn" id="backupOut">Copy to clipboard</button>
+      <button class="btn ghost" id="backupFile">Save as file</button>
+    </div>
+    <div style="height:8px"></div>
+    <div class="hr" style="margin:14px 0"></div>
+    <span class="lab">Restore</span>
+    <button class="btn" id="backupFilePick">Restore from a saved file</button>
+    <input type="file" id="backupFileInput" accept=".json,application/json" hidden>
+    <div style="height:8px"></div>
+    <textarea id="backupIn" placeholder="…or paste backup text here" style="min-height:60px"></textarea>
+    <div style="height:6px"></div>
+    <button class="btn ghost" id="backupRestore">Restore from paste</button>
+    <div id="backupMsg" class="note" style="margin:8px 0 0"></div>
+  </div></div>
+  <div class="hr"></div>
+  <div class="hr"></div>
+  <div class="pblock"><div class="pbh">Share with friends</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">A read-only link — everything you've picked and bet, no way for anyone to change anything. Save the file below, upload it to your repo as <code>data/shared.json</code>, and send friends this link: <br><strong style="word-break:break-all">https://jibboo72.github.io/callsheet-data/share.html</strong><br>Whatever's in that file is what they see. Publish again whenever you want them to see something newer — nothing updates on its own.</div>
+    <button class="btn" id="shareOut">Save share file</button>
+    <div id="shareMsg" class="note" style="margin:8px 0 0"></div>
+  </div></div>
+  <div class="hr"></div>
+  <button class="btn ghost" id="sampleBtn">Load 2025 test data</button>
+  <p class="note">Seeds two real 2025 receiving logs — a slot receiver and a deep threat — plus three example picks. The prices shown are illustrative, not real closing lines. Tap again to remove everything it added.</p>
+  <div class="hr"></div>
+  <button class="btn ghost" id="clearWeek">Clear this week's cards</button>
+  <div style="height:10px"></div>
+  <button class="btn ghost" id="clearAll">Reset the season ledger</button>
+  <div class="hr"></div>
 </section>
 
 <section id="paneLedger" hidden>
@@ -295,40 +342,8 @@ select[data-cfbconf]{width:100%}
   </div>
   <div id="calBlock"></div>
   <p class="note">Every graded leg lands here. After six or seven weeks you'll see which market is carrying the sheet and which one only looked clever.</p>
-  <div class="hr"></div>
-  <div><span class="lab">Weekly budget across all five slips</span><input id="setBudget" type="number" step="1" min="1" inputmode="decimal"></div>
-  <div class="hr"></div>
-  <button class="btn ghost" id="sampleBtn">Load 2025 test data</button>
-  <p class="note">Seeds two real 2025 receiving logs — a slot receiver and a deep threat — plus three example picks. The prices shown are illustrative, not real closing lines. Tap again to remove everything it added.</p>
-  <div class="hr"></div>
-  <button class="btn ghost" id="clearWeek">Clear this week's cards</button>
-  <div style="height:10px"></div>
-  <button class="btn ghost" id="clearAll">Reset the season ledger</button>
-  <div class="hr"></div>
-  <div class="pblock"><div class="pbh">Backup — save a copy now</div><div class="pbody">
-    <div class="note" id="backupStatus" style="margin:0 0 8px;font-weight:600"></div>
-    <div class="note" style="margin:0 0 8px">Bets, picks and settings live on this device only — deleting the icon or clearing Safari wipes them. Players, games and odds aren't backed up because they re-import from the URLs in seconds. Nothing here is saved until you tap a button below.</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-      <button class="btn" id="backupOut">Copy to clipboard</button>
-      <button class="btn ghost" id="backupFile">Save as file</button>
-    </div>
-    <div style="height:8px"></div>
-    <div class="hr" style="margin:14px 0"></div>
-    <span class="lab">Restore</span>
-    <button class="btn" id="backupFilePick">Restore from a saved file</button>
-    <input type="file" id="backupFileInput" accept=".json,application/json" hidden>
-    <div style="height:8px"></div>
-    <textarea id="backupIn" placeholder="…or paste backup text here" style="min-height:60px"></textarea>
-    <div style="height:6px"></div>
-    <button class="btn ghost" id="backupRestore">Restore from paste</button>
-    <div id="backupMsg" class="note" style="margin:8px 0 0"></div>
-  </div></div>
-  <div class="hr"></div>
-  <div class="pblock"><div class="pbh">Share with friends</div><div class="pbody">
-    <div class="note" style="margin:0 0 8px">A read-only link — everything you've picked and bet, no way for anyone to change anything. Save the file below, upload it to your repo as <code>data/shared.json</code>, and send friends this link: <br><strong style="word-break:break-all">https://jibboo72.github.io/callsheet-data/share.html</strong><br>Whatever's in that file is what they see. Publish again whenever you want them to see something newer — nothing updates on its own.</div>
-    <button class="btn" id="shareOut">Save share file</button>
-    <div id="shareMsg" class="note" style="margin:8px 0 0"></div>
-  </div></div>
+</section>
+
 </section>
 
 <div id="buildInfo" style="text-align:center;padding:18px 0 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.08em;color:var(--ink-soft);opacity:.6"></div>
@@ -543,13 +558,13 @@ function warnSaveFailed(critical){
   banner.className='flag';
   banner.style.cssText='position:fixed;left:12px;right:12px;bottom:220px;z-index:81;background:var(--stock);border-color:var(--loss)';
   banner.innerHTML=critical
-    ? `<strong>Your bets and picks just failed to save — storage is full.</strong> Nothing new is being kept until this clears. Go to the Roster tab and clear the odds import (it's the largest thing in here), then back up immediately from the Ledger tab.
+    ? `<strong>Your bets and picks just failed to save — storage is full.</strong> Nothing new is being kept until this clears. Tap the gear (top right) and save a backup file immediately. The app is also clearing out re-downloadable data to make room.
        <div style="height:8px"></div><button class="btn" id="saveWarnGo">Take me there</button>`
     : `<strong>Roster or odds data didn't save this time — storage is full.</strong> Your bets and picks are fine; just re-import if something looks stale.
        <div style="height:8px"></div><button class="btn ghost" id="saveWarnDismiss">Dismiss</button>`;
   document.body.appendChild(banner);
   const go=document.getElementById('saveWarnGo');
-  if(go)go.addEventListener('click',()=>{ banner.remove(); _saveWarnShown=false; showTab('Roster'); });
+  if(go)go.addEventListener('click',()=>{ banner.remove(); _saveWarnShown=false; showTab('Settings'); });
   const dis=document.getElementById('saveWarnDismiss');
   if(dis)dis.addEventListener('click',()=>{ banner.remove(); _saveWarnShown=false; });
 }
@@ -1450,11 +1465,13 @@ function onCfbPowerClick(e){
 /* ---------------- import ---------------- */
 let impLast={msg:'',bad:false};      // so Refresh-all can read what each import said
 function impSay(msg,bad){
-  const el=document.getElementById('impStatus');
   impLast={msg,bad:!!bad};
-  el.style.whiteSpace='';
-  el.textContent=msg;
-  el.style.color=bad?'var(--loss)':'var(--ink-soft)';
+  ['impStatus','impStatus2'].forEach(id=>{
+    const el=document.getElementById(id); if(!el)return;
+    el.style.whiteSpace='';
+    el.textContent=msg;
+    el.style.color=bad?'var(--loss)':'var(--ink-soft)';
+  });
 }
 function mergeImport(raw){
   let data;
@@ -2306,7 +2323,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-16 04:30 UTC';
+const BUILD_STAMP='2026-10-16 05:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2364,14 +2381,14 @@ function checkBackupReminder(){
   const banner=document.createElement('div');
   banner.className='flag';
   banner.style.cssText='position:fixed;left:12px;right:12px;bottom:150px;z-index:79;background:var(--stock);border-color:var(--hl-long)';
-  banner.innerHTML=`<strong>${days!=null?`It's been ${days} day${days===1?'':'s'} since your last backup.`:'You have bets logged but no backup on file yet.'}</strong> Everything here lives only on this device — Ledger tab → Backup, save a file, takes a few seconds.
+  banner.innerHTML=`<strong>${days!=null?`It's been ${days} day${days===1?'':'s'} since your last backup.`:'You have bets logged but no backup on file yet.'}</strong> Everything here lives only on this device — Gear (top right) → Backup, save a file, takes a few seconds.
     <div style="height:8px"></div>
     <button class="btn" id="backupRemindBtn">Take me there</button>
     <button class="btn ghost" id="backupDismissBtn" style="margin-top:6px">Remind me later</button>`;
   document.body.appendChild(banner);
   document.getElementById('backupRemindBtn').addEventListener('click',()=>{
     banner.remove();
-    showTab('Ledger');
+    showTab('Settings');
     setTimeout(()=>document.getElementById('backupFile')?.scrollIntoView({block:'center'}),150);
   });
   document.getElementById('backupDismissBtn').addEventListener('click',()=>banner.remove());
@@ -2983,7 +3000,7 @@ function renderSides(){
   const all=GM();
   if(!all.length){
     host.innerHTML=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
-      <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Import <code>${cfb?'cfb':'games'}-2026.json</code> on the Roster tab — same URL box, it detects which kind of file it is.</div></div></div>`;
+      <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Tap <b>Refresh all data</b> on the Roster tab to load <code>${cfb?'cfb':'games'}-2026.json</code>.</div></div></div>`;
     return;
   }
   const wk=Number(S.week);
@@ -3000,8 +3017,17 @@ function renderSides(){
     ? all.filter(g=>[g.away,g.home,nick(g.away),nick(g.home),g.aconf,g.hconf]
         .filter(Boolean).join(' ').toLowerCase().includes(q))
     : all.filter(g=>dateInWeek(g.date,wk));
+  // searching: games still to come first (soonest first), then games already
+  // played at the bottom, most recent first — not oldest-first from September
+  const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  const isPast=g=>('margin' in g)||String(g.date||'')<todayIso;
   const games=base.slice().sort((a,b)=>{
-    if(q){ const d=String(a.date||'').localeCompare(String(b.date||'')); if(d)return d; }
+    if(q){
+      const pa=isPast(a)?1:0, pb=isPast(b)?1:0;
+      if(pa!==pb)return pa-pb;
+      const d=String(a.date||'').localeCompare(String(b.date||''));
+      if(d)return pa?-d:d;
+    }
     const fa=('margin' in a)?1:0, fb=('margin' in b)?1:0;
     if(fa!==fb)return fa-fb;
     return String(a.date||'').localeCompare(String(b.date||''))
@@ -3122,22 +3148,6 @@ function renderBank(){
       </div>
       <div class="note" style="margin:8px 0">${n} bet${n===1?'':'s'} currently in week ${from}.</div>
       <button class="btn" id="moveBetsBtn" ${n?'':'disabled'}>Move ${n||''} bet${n===1?'':'s'} from week ${from} to week ${to}</button>
-    </div></div>`;
-  }
-
-  // bulk-add utility — paste multiple bets at once, one per line
-  const baHost=document.getElementById('bulkAdd');
-  if(baHost){
-    const raw=S.bulkAddText||'';
-    const parsed=parseBulkBets(raw);
-    const ok=parsed.filter(p=>!p.error).length;
-    const bad=parsed.filter(p=>p.error);
-    baHost.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Add multiple bets at once</div><div class="pbody">
-      <div class="note" style="margin:0 0 8px">One bet per line: <code>description | odds | stake | result | date</code>. Result is W, L, P, or leave blank for open. Date is optional (YYYY-MM-DD) — used to file it under the right week; without one, it uses whatever week you're currently on.<br>Example: <code>SEA -3.5 | -110 | 14 | W | 2026-09-19</code></div>
-      <textarea id="bulkAddBox" placeholder="Paste bets here, one per line" style="min-height:110px">${esc(raw)}</textarea>
-      <div class="note" style="margin:8px 0">${parsed.length?`${ok} bet${ok===1?'':'s'} ready${bad.length?`, ${bad.length} line${bad.length===1?'':'s'} couldn't be read`:''}.`:'Nothing pasted yet.'}</div>
-      ${bad.length?`<div class="flag" style="margin-bottom:8px">${bad.map(p=>`Line ${p.line}: "${esc(p.raw)}" — ${esc(p.error)}`).join('<br>')}</div>`:''}
-      <button class="btn" id="bulkAddBtn" ${ok?'':'disabled'}>Add ${ok||''} bet${ok===1?'':'s'}</button>
     </div></div>`;
   }
 
@@ -3994,27 +4004,6 @@ document.getElementById('moveBets').addEventListener('click',e=>{
   renderAll();
   toast(`Moved ${moved} bet${moved===1?'':'s'} to week ${to}`);
 });
-document.getElementById('bulkAdd').addEventListener('input',e=>{
-  const box=e.target.closest('#bulkAddBox'); if(!box)return;
-  S.bulkAddText=box.value;
-  save();
-  const pos=box.selectionStart;
-  renderBank();
-  const again=document.getElementById('bulkAddBox');
-  if(again){again.focus();try{again.setSelectionRange(pos,pos);}catch(err){}}
-});
-document.getElementById('bulkAdd').addEventListener('click',e=>{
-  const btn=e.target.closest('#bulkAddBtn'); if(!btn)return;
-  const parsed=parseBulkBets(S.bulkAddText||'').filter(p=>!p.error);
-  if(!parsed.length)return;
-  if(!confirm(`Add ${parsed.length} bet${parsed.length===1?'':'s'}? Each one is checked for its own week from the date you gave it.`))return;
-  parsed.forEach(p=>{
-    addBet({desc:p.desc,odds:p.odds,stake:p.stake,result:p.result,kind:'side',market:'side',wk:p.wk});
-  });
-  S.bulkAddText='';
-  save();renderBank();renderLedger();
-  toast(`Added ${parsed.length} bet${parsed.length===1?'':'s'}`);
-});
 document.getElementById('csvImport').addEventListener('change',e=>{
   const inp=e.target.closest('#csvFileInput'); if(!inp||!inp.files[0])return;
   const reader=new FileReader();
@@ -4604,15 +4593,22 @@ document.getElementById('backupRestore').addEventListener('click',()=>{
   toast('Restored');
 });
 
+let lastMainTab='Cards';
 function showTab(name){
-  const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Power:'panePower',Bank:'paneBank',Ledger:'paneLedger'};
+  const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Power:'panePower',Bank:'paneBank',Ledger:'paneLedger',Settings:'paneSettings'};
+  if(name!=='Settings') lastMainTab=name;
   Object.entries(map).forEach(([k,v])=>{
     document.getElementById(v).hidden=(k!==name);
-    document.getElementById('tab'+k).setAttribute('aria-selected',String(k===name));
+    const t=document.getElementById('tab'+k); if(t)t.setAttribute('aria-selected',String(k===name));
   });
   window.scrollTo(0,0);
 }
 ['Cards','Sides','Roster','Bank','Ledger','Power'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
+// the gear toggles Settings; Done goes back to wherever you were
+document.getElementById('tabSettings').addEventListener('click',()=>{
+  if(document.getElementById('paneSettings').hidden) showTab('Settings'); else showTab(lastMainTab);
+});
+document.getElementById('settingsBack').addEventListener('click',()=>showTab(lastMainTab));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openPid)closePlayer();});
 
 load();
