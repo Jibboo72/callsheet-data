@@ -1292,6 +1292,36 @@ function cfbRankings(d){
   return html+`</tbody></table>`;
 }
 
+/* Points block for a college matchup: the model's total and each team's
+   projected points (total and margin split evenly: home = (T - spread)/2,
+   with pem as the home spread, negative = home favored), set beside the
+   book's total and team totals. A gap under 1 point is inside what a home-field
+   convention (books use 2.5-3, the model fits its own) and rounding explain,
+   so it's greyed out; 3+ is called out. If the book has no team total, the one
+   implied by its spread and total stands in, marked ~. */
+function cfbPoints(g){
+  if(g.pem_total==null||g.pem==null)return '';
+  const mh=(g.pem_total-g.pem)/2, ma=(g.pem_total+g.pem)/2;
+  let bh=g.tt_home, ba=g.tt_away, implied=false;
+  if((bh==null||ba==null)&&g.line!=null&&g.line_total!=null){
+    bh=(g.line_total-g.line)/2; ba=(g.line_total+g.line)/2; implied=true;   // line: home spread, negative = home favored
+  }
+  const gap=(m,b)=>{
+    if(b==null)return '<span style="color:var(--ink-soft)">—</span>';
+    const x=m-b, a=Math.abs(x);
+    const col=a<1?'var(--ink-soft)':(a>=3?'var(--hl-long)':'var(--ink)');
+    return `<span style="color:${col};font-weight:${a>=3?700:(a<1?400:600)}">${x>0?'+':''}${x.toFixed(1)}</span>`;
+  };
+  const f=v=>v==null?'—':(implied?'~':'')+Number(v).toFixed(1);
+  const row=(lab,m,b,bold)=>`<div style="${bold?'font-weight:700':''}">${lab}</div><div style="text-align:right">${m.toFixed(1)}</div><div style="text-align:right">${b==null?'—':(typeof b==='string'?b:Number(b).toFixed(1))}</div><div style="text-align:right">${gap(m,typeof b==='string'?null:b)}</div>`;
+  const bookTotal=g.line_total!=null?g.line_total:null;
+  return `<div style="margin:8px 0 0;font-size:12px;line-height:1.7;display:grid;grid-template-columns:1fr 54px 54px 48px;column-gap:6px;font-family:'IBM Plex Mono',monospace">
+    <div class="lab" style="margin:0">Points</div><div class="lab" style="margin:0;text-align:right">Model</div><div class="lab" style="margin:0;text-align:right">Book${implied?' ~':''}</div><div class="lab" style="margin:0;text-align:right">Gap</div>
+    ${row('Total',g.pem_total,bookTotal,true)}
+    ${row(esc(cfbAb(g.away)),ma,ba==null?null:(implied?ba:ba),false)}
+    ${row(esc(cfbAb(g.home)),mh,bh==null?null:bh,false)}
+  </div>${implied?'<div class="note" style="margin:2px 0 0;font-size:10px">~ team totals implied by the book\'s spread and total (no posted team total yet)</div>':''}`;
+}
 function cfbBoard(d,upsetsOnly){
   const wk=cfbWeek;
   const maxWk=Math.max(...d.games.map(g=>g.wk));
@@ -1345,7 +1375,7 @@ function cfbBoard(d,upsetsOnly){
         ${e&&e.pickTeam?`<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)}</b> · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}</div>`
           :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}</div>`}
         ${(()=>{const w=g.hs==null?wxFor('cfb',g.id):null; const t=wxLine(w); return t?`<div class="note" style="margin:4px 0 0">${esc(t)}${w&&w.flags&&w.flags.length?` · <b>${esc(wxTag(w))}</b>`:''}</div>`:'';})()}
-        ${(g.tt_home!=null||g.tt_away!=null)?`<div class="note" style="margin:4px 0 0">Team totals: ${esc(cfbAb(g.away))} ${g.tt_away??'—'} · ${esc(cfbAb(g.home))} ${g.tt_home??'—'}</div>`:''}
+        ${cfbPoints(g)}
         ${played?`<div class="note" style="margin:4px 0 0">Final ${esc(cfbAb(g.away))} ${g.as_} – ${esc(cfbAb(g.home))} ${g.hs}${g.ats?` · model side ${g.ats==='W'?'covered':(g.ats==='L'?'lost':'pushed')}`:''}${(!g.ats&&e&&e.pick)?` · model side ${cfbCover(g,e)}`:''}</div>`:''}
         ${g.line==null&&!upsetsOnly?`<div style="display:grid;grid-template-columns:1fr 90px;gap:6px;margin-top:8px;align-items:center">
           <span class="lab" style="margin:0">${esc(g.home)} line (− = favored)</span>
@@ -2323,7 +2353,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-16 05:40 UTC';
+const BUILD_STAMP='2026-10-16 18:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
