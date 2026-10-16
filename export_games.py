@@ -67,6 +67,7 @@ def fit_scale_hfa(season):
 
     maxwk = int(pbp[pbp.season_type == "REG"].week.max())
     raw, act = [], []
+    tx, ty = [], []      # team-points rows: [offense, opposing defense, home]
     for w in range(FIRST_FIT_WEEK, maxwk + 1):
         r = build_ratings(pbp, season, w, CONFIG)
         for _, x in g[g.week == w].iterrows():
@@ -75,10 +76,18 @@ def fit_scale_hfa(season):
             raw.append(float(r.loc[x.home_team, "rating"] -
                              r.loc[x.away_team, "rating"]))
             act.append(float(x.home_score - x.away_score))
+            h, a = x.home_team, x.away_team
+            tx.append([float(r.loc[h, "offense"]), float(r.loc[a, "defense"]), 1.0])
+            ty.append(float(x.home_score))
+            tx.append([float(r.loc[a, "offense"]), float(r.loc[h, "defense"]), 0.0])
+            ty.append(float(x.away_score))
     if len(raw) < 50:
         return None
     b = np.polyfit(np.array(raw), np.array(act), 1)
-    return float(b[0]), float(b[1]), len(raw)
+    # points a team scores = const + a*its offense + b*opposing defense + c*home
+    X = np.c_[np.ones(len(tx)), np.array(tx)]
+    pts_coef = np.linalg.lstsq(X, np.array(ty), rcond=None)[0]
+    return float(b[0]), float(b[1]), len(raw), [float(v) for v in pts_coef]
 
 
 def build(season, cache_dir=None):
@@ -123,9 +132,9 @@ def build(season, cache_dir=None):
     fit_season = season - 1
     fit = fit_scale_hfa(fit_season)
     if fit:
-        scale, hfa, nfit = fit
+        scale, hfa, nfit, pts_coef = fit
     else:
-        scale, hfa, nfit = 1.0, 1.6, 0
+        scale, hfa, nfit, pts_coef = 1.0, 1.6, 0, None
     print(f"calibration: scale={scale:.3f} hfa={hfa:+.2f} "
           f"(fit on {fit_season}, n={nfit})", file=sys.stderr)
 
@@ -150,18 +159,42 @@ def build(season, cache_dir=None):
         except KeyError:
             return 0.0
 
+    # --- walk-forward ratings for games already played ----------------
+    # A played game must be projected from ratings built BEFORE it, not from
+    # today's ratings (which already contain its result) — otherwise every
+    # past projection looks psychic and the Scorecard flatters the model.
+    wk_ratings = {}
+    if pbp is not None and played_through:
+        for w in range(1, played_through + 1):
+            try:
+                wk_ratings[w] = build_ratings(pbp, season, w, CONFIG)
+            except Exception as e:
+                print(f"warning: week {w} pre-game ratings failed ({e}); "
+                      f"using current ratings for it", file=sys.stderr)
+
     # --- games -------------------------------------------------------
     games = []
     for _, x in g.sort_values(["week", "gameday"]).iterrows():
         h, a = x.home_team, x.away_team
         proj = None
+        ptot = None
         inj_home = inj_away = None
-        if h in ratings.index and a in ratings.index:
-            diff = float(ratings.loc[h, "rating"] - ratings.loc[a, "rating"])
+        R = wk_ratings.get(int(x.week), ratings)
+        if h in R.index and a in R.index:
+            diff = float(R.loc[h, "rating"] - R.loc[a, "rating"])
             inj_home = _injury_discount(int(x.week), h)
             inj_away = _injury_discount(int(x.week), a)
             diff_adj = diff + CONFIG["injury_weight"] * (inj_away - inj_home)
             proj = round(scale * diff_adj + hfa, 2)
+            if pts_coef:
+                # the model's own game total: both teams' projected points,
+                # from offense vs the other side's defense (fit on the prior
+                # season, walk-forward). Team points are then this total split
+                # by the margin above: home = (total + proj)/2.
+                c0, co, cd, ch = pts_coef
+                hp = c0 + co * float(R.loc[h, "offense"]) + cd * float(R.loc[a, "defense"]) + ch
+                ap = c0 + co * float(R.loc[a, "offense"]) + cd * float(R.loc[h, "defense"])
+                ptot = round(hp + ap, 1)
 
         # games.csv spread_line is from the HOME perspective, positive =
         # home favored. Keep that convention throughout.
@@ -179,6 +212,7 @@ def build(season, cache_dir=None):
             "temp": _n(x.temp, 0),
             "div": bool(x.div_game) if not pd.isna(x.div_game) else None,
             "proj": proj,
+            "ptot": ptot,
             # raw (unweighted) starter-availability discount, higher =
             # worse for that team that week -- exposed mainly so the UI
             # CAN show "adjusted for injuries" context if it wants to;
@@ -198,7 +232,8 @@ def build(season, cache_dir=None):
         "season": season,
         "through_week": played_through,
         "calibration": {"scale": round(scale, 4), "hfa": round(hfa, 3),
-                        "fit_season": int(fit_season), "n": nfit},
+                        "fit_season": int(fit_season), "n": nfit,
+                        "pts_coef": [round(v, 4) for v in pts_coef] if pts_coef else None},
         "teams": teams,
         "games": games,
     }
