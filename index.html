@@ -1083,6 +1083,126 @@ function renderRoster(){
    table, which neither of those surfaces does. Offense/defense are kept
    split out, not just the one overall number, because that's the whole
    point of grading a team against ITS OPPONENT rather than in a vacuum. */
+/* ---------------- model scorecard (Power › Scorecard) ----------------
+   Did the model's number beat the book's number against what happened?
+   Line, total and team total, each graded the way a bet would be: take the
+   side the model likes, and it wins, loses or pushes against the result.
+   NFL and college history is walk-forward (each game projected before it was
+   played). Book team totals aren't kept once a game is played, so the app
+   freezes each game's numbers (S.snap) every time it loads data before
+   kickoff, and team totals are graded from those — tracking starts the day
+   you first load them. Break-even at -110 is 52.4%. */
+function takeSnaps(){
+  try{
+    const iso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+    S.snap=S.snap||{};
+    const put=(k,o,date)=>{ if(date&&String(date)<iso&&S.snap[k])return; S.snap[k]=Object.assign({d:date},o); };
+    if(S.cfbr&&Array.isArray(S.cfbr.games)) S.cfbr.games.forEach(g=>{
+      if(g.fcs||g.hs!=null||g.pem==null)return;
+      if(g.tt_home==null&&g.tt_away==null&&g.line_total==null&&g.line==null)return;
+      put('cfb:'+g.id,{pem:g.pem,pt:g.pem_total,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date);
+    });
+    const keys=Object.keys(S.snap); if(keys.length>2500){ keys.sort((a,b)=>String(S.snap[a].d).localeCompare(String(S.snap[b].d))).slice(0,keys.length-2500).forEach(k=>delete S.snap[k]); }
+  }catch(e){}
+}
+const sgn=x=>x>0?1:(x<0?-1:0);
+const gradeSide=(modelOver,diff)=>diff===0?'P':(((diff>0)===modelOver)?'W':'L');
+function scoreRows(lg){
+  const rows=[];
+  if(lg==='cfb'){
+    const d=S.cfbr; if(!d||!d.games)return rows;
+    d.games.forEach(g=>{
+      if(g.fcs||g.hs==null||g.pem==null)return;
+      const m=g.hs-g.as_, tot=g.hs+g.as_, r={id:g.id,wk:g.wk,date:g.date,home:g.home,away:g.away,m,tot,hs:g.hs,as:g.as_};
+      if(g.line!=null){ const gap=g.line-g.pem;              // + = model likes home more than the book
+        if(gap!==0){ r.lg=Math.abs(gap); r.lside=gap>0?g.home:g.away; r.lres=gradeSide(gap>0,m+g.line); }
+        r.lerrM=Math.abs(m+g.pem); r.lerrB=Math.abs(m+g.line); }
+      if(g.line_total!=null&&g.pem_total!=null){ const gap=g.pem_total-g.line_total;
+        if(gap!==0){ r.tg=Math.abs(gap); r.tside=gap>0?'Over':'Under'; r.tres=gradeSide(gap>0,tot-g.line_total); }
+        r.terrM=Math.abs(tot-g.pem_total); r.terrB=Math.abs(tot-g.line_total); }
+      const sn=S.snap&&S.snap['cfb:'+g.id];
+      if(sn&&sn.pt!=null&&sn.pem!=null){
+        const mh=(sn.pt-sn.pem)/2, ma=(sn.pt+sn.pem)/2;
+        r.tt=[];
+        if(sn.th!=null&&mh!==sn.th)r.tt.push({team:g.home,gap:Math.abs(mh-sn.th),side:mh>sn.th?'Over':'Under',res:gradeSide(mh>sn.th,g.hs-sn.th),errM:Math.abs(g.hs-mh),errB:Math.abs(g.hs-sn.th)});
+        if(sn.ta!=null&&ma!==sn.ta)r.tt.push({team:g.away,gap:Math.abs(ma-sn.ta),side:ma>sn.ta?'Over':'Under',res:gradeSide(ma>sn.ta,g.as_-sn.ta),errM:Math.abs(g.as_-ma),errB:Math.abs(g.as_-sn.ta)});
+      }
+      rows.push(r);
+    });
+  } else {
+    const d=S.games; if(!d||!d.games)return rows;
+    d.games.forEach(g=>{
+      if(!('margin' in g)||g.proj==null||g.spread==null)return;
+      const gap=g.proj-g.spread;                              // + = model likes home more than the book (spread>0 = home favored)
+      const r={id:g.id,wk:g.wk,date:g.date,home:g.home,away:g.away,m:g.margin,tot:g.pts,hs:g.hs,as:g.as};
+      if(gap!==0){ r.lg=Math.abs(gap); r.lside=gap>0?g.home:g.away; r.lres=gradeSide(gap>0,g.margin-g.spread); }
+      r.lerrM=Math.abs(g.margin-g.proj); r.lerrB=Math.abs(g.margin-g.spread);
+      rows.push(r);
+    });
+  }
+  rows.sort((a,b)=>String(b.date).localeCompare(String(a.date))||b.wk-a.wk);
+  return rows;
+}
+function scoreTable(items,gk,label){
+  const tiers=[[0,'All'],[1,'1+ pt'],[2,'2+ pts'],[3,'3+ pts'],[5,'5+ pts']];
+  let h=`<table class="pow" style="width:100%;table-layout:fixed"><colgroup><col style="width:46%"><col style="width:27%"><col style="width:27%"></colgroup><thead><tr><th style="text-align:left;letter-spacing:0">${esc(label)}</th><th style="letter-spacing:0">W-L-P</th><th style="letter-spacing:0">Win%</th></tr></thead><tbody>`;
+  tiers.forEach(([min,lab])=>{
+    const xs=items.filter(x=>x[gk]!=null&&x[gk]>=min&&(min>0||x[gk]>0));
+    const w=xs.filter(x=>x.res==='W').length,l=xs.filter(x=>x.res==='L').length,p=xs.filter(x=>x.res==='P').length;
+    const pc=(w+l)?w/(w+l):null;
+    const col=pc==null?'var(--ink-soft)':(w+l>=15?(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)')):'var(--ink-soft)');
+    h+=`<tr><td style="text-align:left">${lab}${min===1?' <span style="font-size:10px;color:var(--ink-soft)">(past noise)</span>':''}</td><td class="n">${w}-${l}${p?'-'+p:''}</td><td class="n" style="color:${col};font-weight:${w+l>=15?700:400}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</td></tr>`;
+  });
+  return h+`</tbody></table>`;
+}
+function scoreMae(rows,km,kb){
+  const xs=rows.filter(r=>r[km]!=null&&r[kb]!=null); if(!xs.length)return null;
+  const a=xs.reduce((s,r)=>s+r[km],0)/xs.length, b=xs.reduce((s,r)=>s+r[kb],0)/xs.length;
+  return {n:xs.length,m:a,b:b};
+}
+function renderScorecard(host){
+  const lg=S.scoreLg||'cfb';
+  const rows=scoreRows(lg);
+  const ab=t=>lg==='cfb'?cfbAb(t):t;
+  let html=`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+    <button class="sgbtn" data-scorelg="nfl" aria-selected="${lg==='nfl'}">NFL</button>
+    <button class="sgbtn" data-scorelg="cfb" aria-selected="${lg==='cfb'}">College</button></div>`;
+  if(!rows.length){
+    host.innerHTML=html+`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No graded games yet. Tap <b>Refresh all data</b> on the Roster tab.</div>`;
+    return;
+  }
+  html+=`<div class="note" style="margin:0 0 10px">${rows.length} played games with a model number and a book line. Each is graded as a bet on the side the model likes: it wins, loses or pushes against the result. Break-even at −110 is 52.4%. Gaps under 1 point are inside the noise (home-field convention, rounding), so read the tiers, not the All row. Rows under 15 games stay grey.</div>`;
+  // line
+  const lineItems=rows.filter(r=>r.lres).map(r=>({lg:r.lg,res:r.lres}));
+  const lm=scoreMae(rows,'lerrM','lerrB');
+  html+=`<div class="pblock"><div class="pbh">Line · model side vs spread</div><div class="pbody">${scoreTable(lineItems.map(x=>({g:x.lg,res:x.res})),'g','Gap')}
+    ${lm?`<div class="note" style="margin:8px 0 0">Average miss on the margin: model <b>${lm.m.toFixed(2)}</b> · book <b>${lm.b.toFixed(2)}</b> (${lm.n} games). Lower is closer to what happened.</div>`:''}</div></div>`;
+  // total
+  const totItems=rows.filter(r=>r.tres).map(r=>({g:r.tg,res:r.tres}));
+  if(totItems.length){
+    const tm=scoreMae(rows,'terrM','terrB');
+    html+=`<div class="pblock"><div class="pbh">Total · model over/under vs book total</div><div class="pbody">${scoreTable(totItems,'g','Gap')}
+      ${tm?`<div class="note" style="margin:8px 0 0">Average miss on the total: model <b>${tm.m.toFixed(2)}</b> · book <b>${tm.b.toFixed(2)}</b> (${tm.n} games).</div>`:''}</div></div>`;
+  } else html+=`<div class="pblock"><div class="pbh">Total</div><div class="pbody"><div class="note" style="margin:0">${lg==='nfl'?'The NFL model projects a margin only — it has no total of its own yet, so there is nothing to grade.':'No totals graded yet.'}</div></div></div>`;
+  // team totals
+  const ttAll=[]; rows.forEach(r=>(r.tt||[]).forEach(t=>ttAll.push(t)));
+  const nSnap=S.snap?Object.keys(S.snap).length:0;
+  if(ttAll.length){
+    const mm=ttAll.reduce((s,t)=>s+t.errM,0)/ttAll.length, bb=ttAll.reduce((s,t)=>s+t.errB,0)/ttAll.length;
+    html+=`<div class="pblock"><div class="pbh">Team totals · model vs book team total</div><div class="pbody">${scoreTable(ttAll.map(t=>({g:t.gap,res:t.res})),'g','Gap')}
+      <div class="note" style="margin:8px 0 0">Average miss on a team's points: model <b>${mm.toFixed(2)}</b> · book <b>${bb.toFixed(2)}</b> (${ttAll.length} team games).</div></div></div>`;
+  } else html+=`<div class="pblock"><div class="pbh">Team totals</div><div class="pbody"><div class="note" style="margin:0">${lg==='nfl'?'The NFL feed has no team-total lines and the model has no totals yet.':`Tracking started — ${nSnap} upcoming game${nSnap===1?'':'s'} frozen so far. The book's team totals aren't kept once a game is played, so the app saves each game's numbers before kickoff and grades them after. The first results show up after this weekend's games, once you've loaded data again afterward.`}</div></div></div>`;
+  // recent games
+  const mark=r=>r==='W'?`<span style="color:var(--win);font-weight:700">W</span>`:(r==='L'?`<span style="color:var(--loss);font-weight:700">L</span>`:(r==='P'?'<span style="color:var(--ink-soft)">P</span>':'<span style="color:var(--ink-soft)">–</span>'));
+  html+=`<div class="pblock"><div class="pbh">Recent games</div><div class="pbody"><table class="pow" style="width:100%;table-layout:fixed"><colgroup><col style="width:44%"><col style="width:17%"><col style="width:13%"><col style="width:13%"><col style="width:13%"></colgroup><thead><tr><th style="text-align:left;letter-spacing:0">Game</th><th style="letter-spacing:0">Score</th><th style="letter-spacing:0">Line</th><th style="letter-spacing:0">Tot</th><th style="letter-spacing:0">TT</th></tr></thead><tbody>`;
+  rows.slice(0,25).forEach(r=>{
+    const tt=(r.tt&&r.tt.length)?r.tt.map(t=>t.res).join(''):'';
+    html+=`<tr><td style="text-align:left;font-size:12px;white-space:nowrap">${esc(ab(r.away))} @ ${esc(ab(r.home))}<div style="font-size:10px;color:var(--ink-soft)">${r.lside?esc(ab(r.lside))+' '+r.lg.toFixed(1):'no line'}${r.tside?' · '+r.tside+' '+r.tg.toFixed(1):''}</div></td>
+      <td class="n" style="font-size:12px">${r.as}-${r.hs}</td><td class="n">${mark(r.lres)}</td><td class="n">${mark(r.tres)}</td><td class="n">${tt?tt.split('').map(mark).join(' '):mark(null)}</td></tr>`;
+  });
+  html+=`</tbody></table></div></div>`;
+  host.innerHTML=html;
+}
 function renderPower(){
   const host=document.getElementById('powerBoard'); if(!host)return;
   const lgHost=document.getElementById('powerLg');
@@ -1090,9 +1210,11 @@ function renderPower(){
   if(lgHost) lgHost.innerHTML=`<nav class="tabs" style="margin-bottom:14px">
       <button data-plg="nfl" aria-selected="${plg==='nfl'}">NFL</button>
       <button data-plg="cfb" aria-selected="${plg==='cfb'}">College</button>
+      <button data-plg="score" aria-selected="${plg==='score'}">Scorecard</button>
     </nav>`;
   const ps=document.getElementById('powerSearch');
-  if(ps) ps.hidden=(plg==='cfb'&&cfbView!=='rank');
+  if(ps) ps.hidden=((plg==='cfb'&&cfbView!=='rank')||plg==='score');
+  if(plg==='score'){ renderScorecard(host); return; }
   if(plg==='cfb'){ renderCfbPower(host); return; }
   const rts=S.ratings;
   if(!rts||!Array.isArray(rts.teams)||!rts.teams.length){
@@ -1540,7 +1662,7 @@ function mergeImport(raw){
     return;
   }
   if(data&&data.kind==='cfb_ratings'){
-    S.cfbr=data; cfbWeek=null; save(); renderAll();
+    S.cfbr=data; cfbWeek=null; takeSnaps(); save(); renderAll();
     const nl=(data.games||[]).filter(g=>g.line!=null).length;
     impSay(`Loaded college ratings for ${data.season}: ${data.teams.length} FBS teams through week ${data.through_week}${nl?`, ${nl} games with lines`:''}.`);
     return;
@@ -1727,6 +1849,7 @@ document.getElementById('powerBoard').addEventListener('change',e=>{
   }
 });
 document.getElementById('powerBoard').addEventListener('click',e=>{
+  if((S.powerLg||'nfl')==='score'){ const b=e.target.closest('[data-scorelg]'); if(b){ S.scoreLg=b.dataset.scorelg; save(); renderPower(); } return; }
   if((S.powerLg||'nfl')==='cfb'){ onCfbPowerClick(e); return; }
   const th=e.target.closest('.pow th[data-sort]');
   if(th){
@@ -2366,7 +2489,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-16 22:00 UTC';
+const BUILD_STAMP='2026-10-16 23:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
