@@ -1322,6 +1322,30 @@ function cfbPoints(g){
     ${row(esc(cfbAb(g.home)),mh,bh==null?null:bh,false)}
   </div>${implied?'<div class="note" style="margin:2px 0 0;font-size:10px">~ team totals implied by the book\'s spread and total (no posted team total yet)</div>':''}`;
 }
+/* One college matchup, everything the Power › Board card shows: kickoff,
+   Line / Model / Edge, model side, weather, the Points table and the final.
+   Sides reuses it (input=false) so the two screens can't drift apart. */
+function cfbMatchup(g,e,upsetsOnly,input){
+  const played=g.hs!=null;
+  const L=cfbLine(g);
+  const hot=e&&e.edge>=7?'var(--hl-qb)':(e&&e.edge>=3?'rgba(95,227,154,.45)':'transparent');
+  const wpFav=g.home_wp>=0.5?g.home:g.away, wpv=Math.max(g.home_wp,1-g.home_wp);
+  return `        <div class="note" style="margin:0 0 6px">${esc(cfbKick(g))}${g.conf_game?' · conference':''}${g.notes?' · '+esc(g.notes):''}</div>
+        <div class="stats" style="grid-template-columns:1fr 1fr 70px">
+          <div class="stat"><div class="n" style="font-size:15px">${L?cfbSpr(g,L.v):'—'}</div><div class="l">Line${L&&L.src==='you'?' (yours)':''}</div></div>
+          <div class="stat"><div class="n" style="font-size:15px">${cfbSpr(g,g.pem)}</div><div class="l">Model</div></div>
+          <div class="stat" style="background:${hot}"><div class="n">${e?e.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
+        </div>
+        ${e&&e.pickTeam?`<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)}</b> · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}</div>`
+          :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}</div>`}
+        ${(()=>{const w=g.hs==null?wxFor('cfb',g.id):null; const t=wxLine(w); return t?`<div class="note" style="margin:4px 0 0">${esc(t)}${w&&w.flags&&w.flags.length?` · <b>${esc(wxTag(w))}</b>`:''}</div>`:'';})()}
+        ${cfbPoints(g)}
+        ${played?`<div class="note" style="margin:4px 0 0">Final ${esc(cfbAb(g.away))} ${g.as_} – ${esc(cfbAb(g.home))} ${g.hs}${g.ats?` · model side ${g.ats==='W'?'covered':(g.ats==='L'?'lost':'pushed')}`:''}${(!g.ats&&e&&e.pick)?` · model side ${cfbCover(g,e)}`:''}</div>`:''}
+        ${input&&g.line==null&&!upsetsOnly?`<div style="display:grid;grid-template-columns:1fr 90px;gap:6px;margin-top:8px;align-items:center">
+          <span class="lab" style="margin:0">${esc(g.home)} line (− = favored)</span>
+          <input data-cfbline="${esc(g.id)}" value="${S.cfbLines&&S.cfbLines[g.id]!=null?esc(S.cfbLines[g.id]):''}" placeholder="-7" inputmode="text" style="text-align:right">
+        </div>`:''}`;
+}
 function cfbBoard(d,upsetsOnly){
   const wk=cfbWeek;
   const maxWk=Math.max(...d.games.map(g=>g.wk));
@@ -1366,21 +1390,7 @@ function cfbBoard(d,upsetsOnly){
         <span class="tag" style="font-size:13px">${tBtn(g.away,cfbLogo(g.away,16)+esc(g.away))} ${g.neutral?'vs':'@'} ${tBtn(g.home,cfbLogo(g.home,16)+esc(g.home))}</span>
       </div>
       <div class="pbody" style="padding:8px 10px">
-        <div class="note" style="margin:0 0 6px">${esc(cfbKick(g))}${g.conf_game?' · conference':''}${g.notes?' · '+esc(g.notes):''}</div>
-        <div class="stats" style="grid-template-columns:1fr 1fr 70px">
-          <div class="stat"><div class="n" style="font-size:15px">${L?cfbSpr(g,L.v):'—'}</div><div class="l">Line${L&&L.src==='you'?' (yours)':''}</div></div>
-          <div class="stat"><div class="n" style="font-size:15px">${cfbSpr(g,g.pem)}</div><div class="l">Model</div></div>
-          <div class="stat" style="background:${hot}"><div class="n">${e?e.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
-        </div>
-        ${e&&e.pickTeam?`<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)}</b> · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}</div>`
-          :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}</div>`}
-        ${(()=>{const w=g.hs==null?wxFor('cfb',g.id):null; const t=wxLine(w); return t?`<div class="note" style="margin:4px 0 0">${esc(t)}${w&&w.flags&&w.flags.length?` · <b>${esc(wxTag(w))}</b>`:''}</div>`:'';})()}
-        ${cfbPoints(g)}
-        ${played?`<div class="note" style="margin:4px 0 0">Final ${esc(cfbAb(g.away))} ${g.as_} – ${esc(cfbAb(g.home))} ${g.hs}${g.ats?` · model side ${g.ats==='W'?'covered':(g.ats==='L'?'lost':'pushed')}`:''}${(!g.ats&&e&&e.pick)?` · model side ${cfbCover(g,e)}`:''}</div>`:''}
-        ${g.line==null&&!upsetsOnly?`<div style="display:grid;grid-template-columns:1fr 90px;gap:6px;margin-top:8px;align-items:center">
-          <span class="lab" style="margin:0">${esc(g.home)} line (− = favored)</span>
-          <input data-cfbline="${esc(g.id)}" value="${S.cfbLines&&S.cfbLines[g.id]!=null?esc(S.cfbLines[g.id]):''}" placeholder="-7" inputmode="text" style="text-align:right">
-        </div>`:''}
+        ${cfbMatchup(g,e,upsetsOnly,true)}
       </div></div>`;
   });
   return html;
@@ -1478,7 +1488,10 @@ function onCfbPowerClick(e){
   if(sb){ S.cfbSrc=sb.dataset.cfbsrc; save(); cfbWeek=null; cfbConf=''; cfbTeam=null; if(cfbView==='team')cfbView='rank'; renderPower(); return true; }
   const v=e.target.closest('[data-cfbview]');
   if(v){ cfbView=v.dataset.cfbview; cfbTeam=null; renderPower(); return true; }
-  if(e.target.closest('[data-cfbback]')){ cfbView=S._cfbBack||'rank'; cfbTeam=null; renderPower(); window.scrollTo(0,0); return true; }
+  if(e.target.closest('[data-cfbback]')){
+    cfbTeam=null;
+    if(S._backTab){ const bt=S._backTab; S._backTab=null; cfbView=S._cfbBack||'rank'; showTab(bt); if(bt==='Sides')renderSides(); return true; }
+    cfbView=S._cfbBack||'rank'; renderPower(); window.scrollTo(0,0); return true; }
   const w=e.target.closest('[data-cfbwk]');
   if(w){ cfbWeek=Number(w.dataset.cfbwk); renderPower(); return true; }
   const s=e.target.closest('th[data-cfbsort]');
@@ -1488,7 +1501,7 @@ function onCfbPowerClick(e){
     if(k==='net'&&cfbSort.dir==='asc'&&s.textContent==='#'){ cfbSort.dir='desc'; }
     renderPower(); return true; }
   const tm=e.target.closest('[data-cfbteam]');
-  if(tm){ if(cfbView!=='team')S._cfbBack=cfbView; cfbTeam=tm.dataset.cfbteam; cfbView='team'; renderPower(); window.scrollTo(0,0); return true; }
+  if(tm){ S._backTab=null; if(cfbView!=='team')S._cfbBack=cfbView; cfbTeam=tm.dataset.cfbteam; cfbView='team'; renderPower(); window.scrollTo(0,0); return true; }
   return false;
 }
 
@@ -2353,7 +2366,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-16 18:00 UTC';
+const BUILD_STAMP='2026-10-16 22:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3116,7 +3129,10 @@ function renderSides(){
           <div class="stat"><div class="n">${ce?ce.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
         </div>${ce&&ce.pickTeam?`<div class="note" style="margin:4px 0 0">Model side: ${esc(ce.pickTeam)} ${ce.num>0?'+':''}${ce.num.toFixed(1)}</div>`:''}`
       : '';
-    const statBlock = (cfb && !((g.mine||g.fromRatings) && (g.spread!=null || g.total!=null)))
+    const cardBlock = (cg && !cg.fcs) ? cfbMatchup(cg,ce,false,false) : null;
+    const sTm=(t)=>(cfb?cfbT(t):TEAMS[t])?`<button class="cfbtm" data-sidesteam="${esc(t)}">${esc(t)}</button>`:esc(t);
+    const statBlock = cardBlock!=null ? cardBlock
+      : (cfb && !((g.mine||g.fromRatings) && (g.spread!=null || g.total!=null)))
       ? `<div class="note" style="margin:0 0 4px">${esc(g.aconf||'')}${g.aconf&&g.hconf?' at ':''}${esc(g.hconf||'')}</div>${cfbModel}`
       : `<div class="stats">
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
@@ -3125,7 +3141,7 @@ function renderSides(){
         </div>`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
-        <span class="tag">${esc(g.away)} @ ${esc(g.home)}</span>
+        <span class="tag">${sTm(g.away)} @ ${sTm(g.home)}</span>
         <span class="cnt">${esc(wkTag+meta)}${g.mine?' · added':''}</span>
         ${g.mine?`<button class="x" data-rmgame="${esc(g.id)}" aria-label="Remove game">×</button>`:''}
       </div>
@@ -3868,6 +3884,21 @@ function pickPhoto(){
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.dataset.on='1';clearTimeout(t._t);t._t=setTimeout(()=>t.dataset.on='0',1600);}
 /* sides board */
 document.getElementById('sidesBoard').addEventListener('click',e=>{
+  const st=e.target.closest('[data-sidesteam]');
+  if(st){
+    const t=st.dataset.sidesteam;
+    window._noSnap=true;
+    S._backTab='Sides';
+    if(LG()==='cfb'){
+      S.powerLg='cfb'; S.cfbSrc='fbs';
+      S._cfbBack='board'; cfbTeam=t; cfbView='team';
+    } else {
+      S.powerLg='nfl'; powerExpanded=t;
+    }
+    showTab('Power'); renderPower();
+    if(LG()!=='cfb'){ const r=document.querySelector(`.pow tbody tr[data-team="${t}"]`); if(r)r.scrollIntoView({block:'center'}); }
+    return;
+  }
   const lg=e.target.closest('[data-lg]');
   if(lg){ S.league=lg.dataset.lg; save(); renderSides(); return; }
 
@@ -4101,6 +4132,7 @@ function renderAll(){_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&r
    new layout to settle before snapping back. */
 document.getElementById('main').addEventListener('click', e => {
   if(!e.target.closest('#cats, #sidesBoard'))return;
+  if(e.target.closest('[data-sidesteam]'))return;
   const y=window.scrollY;
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     if(Math.abs(window.scrollY-y)>1) window.scrollTo(0,y);
