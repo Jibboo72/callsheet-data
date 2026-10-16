@@ -1414,34 +1414,63 @@ function cfbRankings(d){
   return html+`</tbody></table>`;
 }
 
+/* The book numbers a college game is judged against: its posted team totals,
+   else the ones frozen before kickoff (S.snap), else the ones implied by the
+   spread and total (marked ~). */
+function cfbBook(g){
+  let bh=g.tt_home, ba=g.tt_away, implied=false;
+  const sn=S.snap&&S.snap['cfb:'+g.id];
+  if((bh==null||ba==null)&&sn&&sn.th!=null&&sn.ta!=null){ bh=sn.th; ba=sn.ta; }
+  if((bh==null||ba==null)){
+    const L=cfbLine(g), T=g.line_total;
+    if(L&&T!=null){ bh=(T-L.v)/2; ba=(T+L.v)/2; implied=true; }   // line: home spread, negative = home favored
+  }
+  return {bh,ba,implied};
+}
+/* W / L / P for the model's side of each of the four numbers once a game has
+   a final: line, total, home team total, away team total. */
+function cfbGrades(g){
+  const out={};
+  if(g.hs==null||g.as_==null||g.pem==null)return out;
+  const m=g.hs-g.as_, tot=g.hs+g.as_;
+  const L=cfbLine(g);
+  if(L){ const gap=L.v-g.pem; if(gap) out.line=gradeSide(gap>0,m+L.v); }
+  if(g.line_total!=null&&g.pem_total!=null){ const gap=g.pem_total-g.line_total; if(gap) out.total=gradeSide(gap>0,tot-g.line_total); }
+  if(g.pem_total!=null){
+    const bk=cfbBook(g), mh=(g.pem_total-g.pem)/2, ma=(g.pem_total+g.pem)/2;
+    if(bk.bh!=null&&mh!==bk.bh) out.home=gradeSide(mh>bk.bh,g.hs-bk.bh);
+    if(bk.ba!=null&&ma!==bk.ba) out.away=gradeSide(ma>bk.ba,g.as_-bk.ba);
+  }
+  return out;
+}
+const gradeStyle=r=>r==='W'?'color:var(--win);font-weight:700':(r==='L'?'color:var(--loss);font-weight:700':'');
 /* Points block for a college matchup: the model's total and each team's
    projected points (total and margin split evenly: home = (T - spread)/2,
    with pem as the home spread, negative = home favored), set beside the
    book's total and team totals. A gap under 1 point is inside what a home-field
    convention (books use 2.5-3, the model fits its own) and rounding explain,
-   so it's greyed out; 3+ is called out. If the book has no team total, the one
-   implied by its spread and total stands in, marked ~. */
+   so it's greyed out; 3+ is called out. After a final, the row of each of the
+   three numbers turns green (model side won) or red (lost). */
 function cfbPoints(g){
   if(g.pem_total==null||g.pem==null)return '';
   const mh=(g.pem_total-g.pem)/2, ma=(g.pem_total+g.pem)/2;
-  let bh=g.tt_home, ba=g.tt_away, implied=false;
-  if((bh==null||ba==null)&&g.line!=null&&g.line_total!=null){
-    bh=(g.line_total-g.line)/2; ba=(g.line_total+g.line)/2; implied=true;   // line: home spread, negative = home favored
-  }
-  const gap=(m,b)=>{
+  const {bh,ba,implied}=cfbBook(g), gr=cfbGrades(g);
+  const gap=(m,b,gs)=>{
     if(b==null)return '<span style="color:var(--ink-soft)">—</span>';
     const x=m-b, a=Math.abs(x);
+    if(gs)return `<span style="${gs}">${x>0?'+':''}${x.toFixed(1)}</span>`;
     const col=a<1?'var(--ink-soft)':(a>=3?'var(--hl-long)':'var(--ink)');
     return `<span style="color:${col};font-weight:${a>=3?700:(a<1?400:600)}">${x>0?'+':''}${x.toFixed(1)}</span>`;
   };
-  const f=v=>v==null?'—':(implied?'~':'')+Number(v).toFixed(1);
-  const row=(lab,m,b,bold)=>`<div style="${bold?'font-weight:700':''}">${lab}</div><div style="text-align:right">${m.toFixed(1)}</div><div style="text-align:right">${b==null?'—':(typeof b==='string'?b:Number(b).toFixed(1))}</div><div style="text-align:right">${gap(m,typeof b==='string'?null:b)}</div>`;
-  const bookTotal=g.line_total!=null?g.line_total:null;
+  const row=(lab,m,b,bold,res)=>{
+    const gs=gradeStyle(res);
+    return `<div style="${gs||(bold?'font-weight:700':'')}">${lab}</div><div style="text-align:right;${gs}">${m.toFixed(1)}</div><div style="text-align:right;${gs}">${b==null?'—':Number(b).toFixed(1)}</div><div style="text-align:right">${gap(m,b,gs)}</div>`;
+  };
   return `<div style="margin:8px 0 0;font-size:12px;line-height:1.7;display:grid;grid-template-columns:1fr 54px 54px 48px;column-gap:6px;font-family:'IBM Plex Mono',monospace">
     <div class="lab" style="margin:0">Points</div><div class="lab" style="margin:0;text-align:right">Model</div><div class="lab" style="margin:0;text-align:right">Book${implied?' ~':''}</div><div class="lab" style="margin:0;text-align:right">Gap</div>
-    ${row('Total',g.pem_total,bookTotal,true)}
-    ${row(esc(cfbAb(g.away)),ma,ba==null?null:(implied?ba:ba),false)}
-    ${row(esc(cfbAb(g.home)),mh,bh==null?null:bh,false)}
+    ${row('Total',g.pem_total,g.line_total!=null?g.line_total:null,true,gr.total)}
+    ${row(esc(cfbAb(g.away)),ma,ba,false,gr.away)}
+    ${row(esc(cfbAb(g.home)),mh,bh,false,gr.home)}
   </div>${implied?'<div class="note" style="margin:2px 0 0;font-size:10px">~ team totals implied by the book\'s spread and total (no posted team total yet)</div>':''}`;
 }
 /* One college matchup, everything the Power › Board card shows: kickoff,
@@ -1454,8 +1483,8 @@ function cfbMatchup(g,e,upsetsOnly,input){
   const wpFav=g.home_wp>=0.5?g.home:g.away, wpv=Math.max(g.home_wp,1-g.home_wp);
   return `        <div class="note" style="margin:0 0 6px">${esc(cfbKick(g))}${g.conf_game?' · conference':''}${g.notes?' · '+esc(g.notes):''}</div>
         <div class="stats" style="grid-template-columns:1fr 1fr 70px">
-          <div class="stat"><div class="n" style="font-size:15px">${L?cfbSpr(g,L.v):'—'}</div><div class="l">Line${L&&L.src==='you'?' (yours)':''}</div></div>
-          <div class="stat"><div class="n" style="font-size:15px">${cfbSpr(g,g.pem)}</div><div class="l">Model</div></div>
+          <div class="stat"><div class="n" style="font-size:15px;${gradeStyle(cfbGrades(g).line)}">${L?cfbSpr(g,L.v):'—'}</div><div class="l">Line${L&&L.src==='you'?' (yours)':''}</div></div>
+          <div class="stat"><div class="n" style="font-size:15px;${gradeStyle(cfbGrades(g).line)}">${cfbSpr(g,g.pem)}</div><div class="l">Model</div></div>
           <div class="stat" style="background:${hot}"><div class="n">${e?e.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
         </div>
         ${e&&e.pickTeam?`<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)}</b> · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}</div>`
@@ -2489,7 +2518,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-16 23:00 UTC';
+const BUILD_STAMP='2026-10-17 00:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3155,6 +3184,63 @@ function weatherUndersBlock(games){
   return h+`</div></div>`;
 }
 
+/* Finals the data files haven't caught up to yet (nflverse and CFBD rebuild
+   hours later). ESPN's public scoreboard — the same feed SportsMF reads —
+   is asked once per date for completed games, matched by team and day, and
+   laid over games that have no result yet. */
+const FIN={}, FINASKED={};
+/* The calendar day a game kicks off in Eastern time. The college feed stamps
+   kickoffs in UTC (a Thursday 8 PM ET game reads Friday 00:00), so those are
+   converted; ratings-built games and NFL dates are already local. */
+function gameDay(g,lg){
+  const d=String(g.date||'');
+  if(lg==='cfb'&&g.kick&&!g.fromRatings&&!g.mine&&/^\d{1,2}:\d{2}$/.test(g.kick)){
+    const t=new Date(d+'T'+g.kick.padStart(5,'0')+':00Z');
+    if(!isNaN(t))return t.toLocaleDateString('en-CA',{timeZone:'America/New_York'});
+  }
+  return d;
+}
+const finNorm=t=>String(t||'').toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]/g,'');
+const NFL_ALIAS={WSH:'WAS',LAR:'LA',JAC:'JAX',LVR:'LV',LV:'LV'};
+function finKeys(lg,e){
+  const c=((e.competitions||[])[0]||{}).competitors||[]; const h=c.find(x=>x.homeAway==='home'), a=c.find(x=>x.homeAway==='away');
+  if(!h||!a)return null;
+  const names=x=>{ const t=x.team||{}; return lg==='nfl'?[NFL_ALIAS[t.abbreviation]||t.abbreviation]:[t.location,t.shortDisplayName,t.displayName,t.name].filter(Boolean).map(finNorm); };
+  return {h:names(h),a:names(a),hs:Number(h.score),as:Number(a.score)};
+}
+function finFor(lg,g){
+  const list=FIN[lg]; if(!list)return null;
+  const gh=lg==='nfl'?[g.home]:[finNorm(g.home)], ga=lg==='nfl'?[g.away]:[finNorm(g.away)];
+  const t0=new Date(g.date+'T12:00:00').getTime();
+  return list.find(f=>Math.abs(f.t-t0)<=36*3600e3 && f.h.some(x=>gh.includes(x)) && f.a.some(x=>ga.includes(x)))||null;
+}
+async function ensureFinals(lg,games){
+  const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  const need=[...new Set(games.filter(g=>g.date&&gameDay(g,lg)<=todayIso&&!('margin' in g)&&!(lg==='cfb'&&g.hs!=null)).map(g=>gameDay(g,lg).replace(/-/g,'')))];
+  const fresh=need.filter(d=>!FINASKED[lg+d]||Date.now()-FINASKED[lg+d]>120000);
+  if(!fresh.length)return;
+  fresh.forEach(d=>FINASKED[lg+d]=Date.now());
+  const base='https://site.api.espn.com/apis/site/v2/sports/football/'+(lg==='nfl'?'nfl':'college-football')+'/scoreboard';
+  let added=0;
+  await Promise.all(fresh.map(async d=>{
+    try{
+      const r=await fetch(`${base}?dates=${d}${lg==='cfb'?'&groups=80&limit=300':''}`); if(!r.ok)return;
+      const j=await r.json(); FIN[lg]=FIN[lg]||[];
+      (j.events||[]).forEach(e=>{
+        const st=e.status&&e.status.type; if(!st||!(st.completed||st.state==='post'))return;
+        const k=finKeys(lg,e); if(!k||isNaN(k.hs)||isNaN(k.as))return;
+        k.t=new Date(e.date).getTime(); k.id=e.id;
+        if(!FIN[lg].some(f=>f.id===k.id)){ FIN[lg].push(k); added++; }
+      });
+    }catch(_){}
+  }));
+  if(added&&!document.getElementById('paneSides').hidden)renderSides();
+}
+function withFinal(lg,g){
+  if(('margin' in g)||(lg==='cfb'&&g.hs!=null))return g;
+  const f=finFor(lg,g); if(!f)return g;
+  return Object.assign({},g,{hs:f.hs,as:f.as,margin:f.hs-f.as,pts:f.hs+f.as,_espn:true});
+}
 function renderSides(){
   const host=document.getElementById('sidesBoard');
   const cfb=LG()==='cfb';
@@ -3163,7 +3249,7 @@ function renderSides(){
       <button data-lg="cfb" aria-selected="${cfb}">College Saturday</button>
     </nav>`
     + (isClosed(S.week)?`<div class="flag" style="margin-bottom:14px">Week ${S.week} is closed. Placing a new bet here will ask you to confirm first — grading and removing still work normally.</div>`:'');
-  const all=GM();
+  const all=GM().map(g=>withFinal(cfb?'cfb':'nfl',g));
   if(!all.length){
     host.innerHTML=toggle+slipPanel()+addGameForm()+`<div class="pblock"><div class="pbh">${cfb?'College schedule':'Game lines'}</div><div class="pbody">
       <div class="note" style="margin:0">No ${cfb?'college':'NFL'} schedule loaded. Tap <b>Refresh all data</b> on the Roster tab to load <code>${cfb?'cfb':'games'}-2026.json</code>.</div></div></div>`;
@@ -3194,11 +3280,17 @@ function renderSides(){
       const d=String(a.date||'').localeCompare(String(b.date||''));
       if(d)return pa?-d:d;
     }
-    const fa=('margin' in a)?1:0, fb=('margin' in b)?1:0;
-    if(fa!==fb)return fa-fb;
-    return String(a.date||'').localeCompare(String(b.date||''))
-        || String(a.kick||'').localeCompare(String(b.kick||''));
+    // today and what's still to come on top, in order; earlier days drop to
+    // the bottom, most recent first, so Saturday morning opens on Saturday
+    const lgk=cfb?'cfb':'nfl';
+    const da=gameDay(a,lgk), db=gameDay(b,lgk);
+    const pa=da<todayIso?1:0, pb=db<todayIso?1:0;
+    if(pa!==pb)return pa-pb;
+    const dd=da.localeCompare(db);
+    if(dd)return pa?-dd:dd;
+    return String(a.kick||'').localeCompare(String(b.kick||''));
   });
+  ensureFinals(cfb?'cfb':'nfl',games);
   const cal=(SRC()&&SRC().calibration)||{};
   const todayWk=weekForToday();
   const onTodayWk = todayWk!=null && Number(wk)===Number(todayWk);
@@ -3221,18 +3313,19 @@ function renderSides(){
   if(!cfb && !q) html+=weatherUndersBlock(games);
   let markedFinal=false;
   games.forEach(g=>{
-    const played0=('margin' in g);
+    const played0=!q&&gameDay(g,cfb?'cfb':'nfl')<todayIso;
     if(played0&&!markedFinal){
       markedFinal=true;
-      const n=games.filter(x=>'margin' in x).length;
+      const n=games.filter(x=>gameDay(x,cfb?'cfb':'nfl')<todayIso).length;
       html+=`<div class="pblock" style="border-style:dashed;background:transparent;margin-bottom:14px">
         <div class="pbody" style="padding:7px 10px">
-          <div class="lab" style="margin:0">Final · ${n} game${n===1?'':'s'}</div>
+          <div class="lab" style="margin:0">Earlier days · ${n} game${n===1?'':'s'}</div>
         </div></div>`;
     }
     const hasLine=g.spread!=null;
     const edge=(g.proj!=null&&hasLine)?(g.proj-g.spread):null;
     const eCol=edge==null?'var(--ink-soft)':(Math.abs(edge)>=2?(edge>0?'var(--win)':'var(--loss)'):'var(--ink-soft)');
+    const nflGrade=(!cfb&&hasLine&&g.proj!=null&&('margin' in g)&&edge!==0)?gradeSide(edge>0,g.margin-g.spread):null;
     const fav=hasLine?(g.spread>0?g.home:g.away):null;
     const line=hasLine?`${esc(fav)} -${Math.abs(g.spread).toFixed(1)}`:'no line';
     const played='margin' in g;
@@ -3243,7 +3336,8 @@ function renderSides(){
     const meta = cfb
       ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':''].filter(Boolean).join(' · ')
       : String(g.date||'').slice(5)+(g.div?' · div':'');
-    const cg = cfb && S.cfbr ? (S.cfbr.games||[]).find(x=>x.id===String(g.id)) : null;
+    let cg = cfb && S.cfbr ? (S.cfbr.games||[]).find(x=>x.id===String(g.id)) : null;
+    if(cg&&cg.hs==null&&('margin' in g)&&g.hs!=null)cg=Object.assign({},cg,{hs:g.hs,as_:g.as});
     const ce = cg ? cfbEdge(cg) : null;
     const cfbModel = cg && !cg.fcs
       ? `<div class="stats" style="grid-template-columns:1fr 1fr 70px;margin-top:6px">
@@ -3260,7 +3354,7 @@ function renderSides(){
       : `<div class="stats">
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
-          <div class="stat"><div class="n" style="color:${eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
+          <div class="stat"><div class="n" style="${nflGrade?gradeStyle(nflGrade):'color:'+eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
         </div>`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
