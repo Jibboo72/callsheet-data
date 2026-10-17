@@ -2635,7 +2635,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-17 15:45 UTC';
+const BUILD_STAMP='2026-10-17 16:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3423,6 +3423,15 @@ function gradeItem(it,betLg){
   if(mk!=='side'&&mk!=='total'&&mk!=='ml')return null;
   const g=findGameFor(lg,it); const fs=finalScoreOf(lg,g); if(!fs)return null;
   const txt=_nrm(it.desc);
+  // Team total ("MSST TT o24.5", "Mississippi State team total under 27"):
+  // graded on that one team's points, never the game total. If the wording
+  // doesn't say clearly which team, it's left for you to grade.
+  if(/(^|[^a-z])(tt|team total|team tot|team pts)(?=[^a-z]|$)/.test(txt)){
+    const m=txt.match(/(?:^|[^a-z])(over|under|o|u)\s*(\d+(?:\.\d+)?)/); if(!m)return null;
+    const sd=sideOfText(lg,g,txt); if(!sd)return null;
+    const pts=sd.side==='home'?fs.hs:fs.as, line=Number(m[2]); if(pts===line)return 'P';
+    return ((m[1][0]==='o')===(pts>line))?'W':'L';
+  }
   if(mk==='total'){
     const m=txt.match(/(?:^|[^a-z])(over|under|o|u)\s*(\d+(?:\.\d+)?)/); if(!m)return null;
     const line=Number(m[2]), tot=fs.hs+fs.as; if(tot===line)return 'P';
