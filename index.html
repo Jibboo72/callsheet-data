@@ -1174,6 +1174,60 @@ function scoreMae(rows,km,kb){
   const a=xs.reduce((s,r)=>s+r[km],0)/xs.length, b=xs.reduce((s,r)=>s+r[kb],0)/xs.length;
   return {n:xs.length,m:a,b:b};
 }
+/* Fade tracker. The 2026 backtest had the model's total at 43% (52-68) when
+   it sat 5+ points from the book's — so betting the OTHER side would have
+   been 56.7%, but that is one small tier picked after looking, which is how
+   noise gets mistaken for an edge. So the rule is fixed here, before any
+   result is known, and graded only on games from FADE_START on, using the
+   numbers frozen in S.snap before kickoff: when the model's total is 5+
+   points above the book's, fade it (bet the Under); 5+ below, bet the Over.
+   Games the app never loaded before kickoff are left out, not back-filled. */
+const FADE_START='2026-10-17', FADE_GAP=5;
+function fadeRows(lg){
+  const out={done:[],open:[]}; if(!S.snap)return out;
+  const pre=lg+':';
+  const res={};
+  if(lg==='cfb'){ ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>{ if(g.hs!=null&&g.as_!=null)res[String(g.id)]=g.hs+g.as_; }); }
+  else { ((S.games&&S.games.games)||[]).forEach(g=>{ if('margin' in g)res[String(g.id)]=g.pts; }); }
+  const names={};
+  if(lg==='cfb') ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>names[String(g.id)]=cfbAb(g.away)+' @ '+cfbAb(g.home));
+  else ((S.games&&S.games.games)||[]).forEach(g=>names[String(g.id)]=g.away+' @ '+g.home);
+  Object.keys(S.snap).forEach(k=>{
+    if(!k.startsWith(pre))return;
+    const sn=S.snap[k], id=k.slice(pre.length);
+    if(!sn||sn.pt==null||sn.lt==null||String(sn.d||'')<FADE_START)return;
+    const gap=sn.pt-sn.lt; if(Math.abs(gap)<FADE_GAP)return;
+    const r={id,date:sn.d,name:names[id]||id,model:sn.pt,book:sn.lt,bet:gap>0?'Under':'Over'};
+    if(res[id]!=null){ const a=res[id]; r.actual=a; r.res=a===sn.lt?'P':((gap>0)===(a<sn.lt)?'W':'L'); out.done.push(r); }
+    else out.open.push(r);
+  });
+  out.done.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  out.open.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  return out;
+}
+function fadeBlock(lg){
+  const f=fadeRows(lg);
+  const w=f.done.filter(x=>x.res==='W').length, l=f.done.filter(x=>x.res==='L').length, p=f.done.filter(x=>x.res==='P').length;
+  const n=w+l, pc=n?w/n:null;
+  const col=pc==null||n<30?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+  const mark=r=>r==='W'?'<span style="color:var(--win);font-weight:700">W</span>':(r==='L'?'<span style="color:var(--loss);font-weight:700">L</span>':'<span style="color:var(--ink-soft)">P</span>');
+  let h=`<div class="pblock"><div class="pbh">Fade tracker · total, ${FADE_GAP}+ pts from the book</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Test of one idea, fixed in advance: when the model's total is ${FADE_GAP}+ points off the book's, bet the other way. Counts games from ${FADE_START} on, using numbers saved before kickoff. The backtest's 56.7% for this idea is one small sample picked after the fact — it needs about 100 games above 53% before it means anything.</div>
+    <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="stat"><div class="n">${w}-${l}${p?'-'+p:''}</div><div class="l">W-L-P</div></div>
+      <div class="stat"><div class="n" style="color:${col}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</div><div class="l">Win %</div></div>
+      <div class="stat"><div class="n">${n}<span style="font-size:11px;color:var(--ink-soft)"> / 100</span></div><div class="l">Graded</div></div>
+    </div>`;
+  if(f.open.length){
+    h+=`<div class="lab" style="margin:10px 0 4px">Flagged now · ${f.open.length}</div>`;
+    f.open.slice(0,12).forEach(r=>{ h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(r.name)}</b><br><span style="color:var(--ink-soft);font-size:11px">model ${r.model.toFixed(1)} · book ${r.book}</span></span><span class="v" style="white-space:nowrap;margin-left:8px">${r.bet} ${r.book}</span></div>`; });
+  } else h+=`<div class="note" style="margin:8px 0 0">${n?'Nothing flagged right now.':'No game has been flagged yet — flags appear once a game with a 5+ point gap has been loaded before kickoff.'}</div>`;
+  if(f.done.length){
+    h+=`<div class="lab" style="margin:10px 0 4px">Graded</div>`;
+    f.done.slice(0,15).forEach(r=>{ h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(r.name)}</b><br><span style="color:var(--ink-soft);font-size:11px">model ${r.model.toFixed(1)} · book ${r.book} · final ${r.actual}</span></span><span class="v" style="white-space:nowrap;margin-left:8px">${r.bet} ${mark(r.res)}</span></div>`; });
+  }
+  return h+`</div></div>`;
+}
 function renderScorecard(host){
   const lg=S.scoreLg||'cfb';
   const rows=scoreRows(lg);
@@ -1198,6 +1252,7 @@ function renderScorecard(host){
     html+=`<div class="pblock"><div class="pbh">Total · model over/under vs book total</div><div class="pbody">${scoreTable(totItems,'g','Gap')}
       ${tm?`<div class="note" style="margin:8px 0 0">Average miss on the total: model <b>${tm.m.toFixed(2)}</b> · book <b>${tm.b.toFixed(2)}</b> (${tm.n} games).</div>`:''}</div></div>`;
   } else html+=`<div class="pblock"><div class="pbh">Total</div><div class="pbody"><div class="note" style="margin:0">${lg==='nfl'?'No NFL totals graded yet — the model total arrives with the next data rebuild (Roster › Refresh all data).':'No totals graded yet.'}</div></div></div>`;
+  html+=fadeBlock(lg);
   // team totals
   const ttAll=[]; rows.forEach(r=>(r.tt||[]).forEach(t=>ttAll.push(t)));
   const nSnap=S.snap?Object.keys(S.snap).length:0;
@@ -2573,7 +2628,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-17 01:30 UTC';
+const BUILD_STAMP='2026-10-17 02:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
