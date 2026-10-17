@@ -2635,7 +2635,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-17 16:45 UTC';
+const BUILD_STAMP='2026-10-17 23:55 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3345,6 +3345,7 @@ function finKeys(lg,e){
 function finFor(lg,g){
   const list=FIN[lg]; if(!list)return null;
   const gh=lg==='nfl'?[g.home]:[finNorm(g.home)], ga=lg==='nfl'?[g.away]:[finNorm(g.away)];
+  if(g.id){ const byId=list.find(f=>String(f.id)===String(g.id)); if(byId)return byId; }
   const t0=new Date(g.date+'T12:00:00').getTime();
   return list.find(f=>Math.abs(f.t-t0)<=36*3600e3 && f.h.some(x=>gh.includes(x)) && f.a.some(x=>ga.includes(x)))||null;
 }
@@ -3410,19 +3411,38 @@ function finalScoreOf(lg,g){
   if(hs==null||as==null){ const f=finFor(lg,g); if(f){ hs=f.hs; as=f.as; } }
   return (hs==null||as==null)?null:{hs:Number(hs),as:Number(as)};
 }
+/* Shorthand team names typed by hand ("Miss St", "N Dakota St", "SE Mo St"):
+   directions and State/Saint are folded, and each typed word may be the start
+   of the matching word in the team's name. Same reading SportsMF uses. */
+const _DIRW={north:'n',northern:'n',south:'s',southern:'s',east:'e',eastern:'e',west:'w',western:'w',southeast:'se',southeastern:'se',southwest:'sw',southwestern:'sw',northeast:'ne',northeastern:'ne',northwest:'nw',northwestern:'nw',state:'st',saint:'st',univ:'',university:'',the:'',of:'',college:''};
+const _shortW=w=>(w in _DIRW?_DIRW[w]:w);
+function shortHit(t,txt){
+  const words=String(txt).replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(Boolean).map(_shortW).filter(Boolean);
+  const nm=_nrm(t).replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(Boolean).map(_shortW).filter(Boolean);
+  if(!nm.length)return 0;
+  for(let i=0;i+nm.length<=words.length;i++){
+    if(nm.every((w,j)=>{ const tw=words[i+j]; return tw===w||(tw.length>=3&&w.startsWith(tw))||(w.length<=2&&tw===w); }))return nm.join(' ').length;
+  }
+  return 0;
+}
 function sideOfText(lg,g,txt){
   const best=t=>{ let n=0; gradeAliases(lg,t).forEach(a=>{ const re=new RegExp('(^|[^a-z0-9])'+a.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![a-z0-9])'); if(re.test(txt)&&a.length>n)n=a.length; }); return n; };
-  const h=best(g.home), a=best(g.away);
+  let h=best(g.home), a=best(g.away);
+  if(!h&&!a){ h=shortHit(g.home,txt); a=shortHit(g.away,txt); }
   if(h===a)return null;
   return {side:h>a?'home':'away', name:h>a?g.home:g.away};
 }
 /* one bet or parlay leg -> 'W' | 'L' | 'P' | null */
 function gradeItem(it,betLg){
   const lg=(it.kind==='cfb'||it.league==='cfb'||(it.kind!=='nfl'&&it.kind!=='side'&&betLg==='cfb'))?'cfb':'nfl';
-  const mk=it.market||'side';
+  let mk=it.market||'side';
   if(mk!=='side'&&mk!=='total'&&mk!=='ml')return null;
   const g=findGameFor(lg,it); const fs=finalScoreOf(lg,g); if(!fs)return null;
-  const txt=_nrm(it.desc);
+  const txt=_nrm(String(it.desc||'').replace(/\u2212/g,'-'));
+  // The Side/Total/ML button can be left on Side by accident; the wording
+  // wins. "o49.5" / "under 52" is a total, "ML" / "to win" a moneyline.
+  if(mk==='side'&&/(?:^|[^a-z])(over|under|o|u)\s*\d/.test(txt))mk='total';
+  else if(mk==='side'&&/(^|[^a-z])(ml|moneyline|money line|to win)(?=[^a-z]|$)/.test(txt))mk='ml';
   // Team total ("MSST TT o24.5", "Mississippi State team total under 27"):
   // graded on that one team's points, never the game total. If the wording
   // doesn't say clearly which team, it's left for you to grade.
