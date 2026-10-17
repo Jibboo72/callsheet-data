@@ -2635,7 +2635,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-17 14:00 UTC';
+const BUILD_STAMP='2026-10-17 15:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -2770,6 +2770,23 @@ const GM=()=>{
       imported.push({id:String(g.id),wk:g.wk,date:g.date,kick:g.kick||'',away:g.away,home:g.home,
         aconf:g.aconf||'',hconf:g.hconf||'',neutral:!!g.neutral,conf_game:!!g.conf_game,fromRatings:true,
         spread:g.line!=null?-g.line:null,total:g.line_total!=null?g.line_total:null,
+        ...(g.hs!=null&&g.as_!=null?{hs:g.hs,as:g.as_,margin:g.hs-g.as_,pts:g.hs+g.as_}:{})});
+    });
+  }
+  // FCS-vs-FCS games aren't in either FBS file, but the FCS ratings file has
+  // every one with a line and the model's number. Add them the same way, so
+  // they can be bet from Sides instead of typed in by hand. Their official
+  // names also let SportsMF match the bets to ESPN's scoreboard exactly.
+  if(LG()==='cfb'&&S.fcsr&&Array.isArray(S.fcsr.games)){
+    const have=new Set(imported.map(g=>String(g.id)));
+    S.fcsr.games.forEach(g=>{
+      if(have.has(String(g.id))||!g.date)return;
+      if(!(g.hdiv==='fcs'&&g.adiv==='fcs'))return;      // FBS-vs-FCS already came from the FBS file
+      have.add(String(g.id));
+      imported.push({id:String(g.id),wk:g.wk,date:g.date,kick:g.kick||'',away:g.away,home:g.home,
+        aconf:g.aconf||'',hconf:g.hconf||'',neutral:!!g.neutral,conf_game:!!g.conf_game,fromRatings:true,fcsOnly:true,
+        spread:g.line!=null?-g.line:null,total:g.line_total!=null?g.line_total:null,
+        proj:g.pem!=null?-g.pem:null,
         ...(g.hs!=null&&g.as_!=null?{hs:g.hs,as:g.as_,margin:g.hs-g.as_,pts:g.hs+g.as_}:{})});
     });
   }
@@ -3341,8 +3358,10 @@ async function ensureFinals(lg,games){
   let added=0;
   await Promise.all(fresh.map(async d=>{
     try{
-      const r=await fetch(`${base}?dates=${d}${lg==='cfb'?'&groups=80&limit=300':''}`); if(!r.ok)return;
-      const j=await r.json(); FIN[lg]=FIN[lg]||[];
+      const urls=lg==='cfb'?[`${base}?dates=${d}&groups=80&limit=300`,`${base}?dates=${d}&groups=81&limit=300`]:[`${base}?dates=${d}`];
+      const js=await Promise.all(urls.map(u=>fetch(u).then(r=>r.ok?r.json():null).catch(()=>null)));
+      const j={events:[].concat(...js.filter(Boolean).map(x=>x.events||[]))}; if(!j.events.length)return;
+      FIN[lg]=FIN[lg]||[];
       (j.events||[]).forEach(e=>{
         const st=e.status&&e.status.type; if(!st||!(st.completed||st.state==='post'))return;
         const k=finKeys(lg,e); if(!k||isNaN(k.hs)||isNaN(k.as))return;
@@ -3376,7 +3395,7 @@ function gradeAliases(lg,t){
 function findGameFor(lg,ref){
   const id=String(ref.game||''), pools=[];
   if(lg==='nfl')pools.push((S.games&&S.games.games)||[]);
-  else{ pools.push((S.cfb&&S.cfb.games)||[]); pools.push((S.cfbr&&S.cfbr.games)||[]); pools.push((S.mine&&S.mine.cfb)||[]); }
+  else{ pools.push((S.cfb&&S.cfb.games)||[]); pools.push((S.cfbr&&S.cfbr.games)||[]); pools.push((S.fcsr&&S.fcsr.games)||[]); pools.push((S.mine&&S.mine.cfb)||[]); }
   if(lg==='nfl')pools.push((S.mine&&S.mine.nfl)||[]);
   if(id){ for(const p of pools){ const g=p.find(x=>String(x.id)===id); if(g)return g; } }
   const m=String(ref.match||'').split('@').map(x=>x.trim());
@@ -3387,6 +3406,7 @@ function finalScoreOf(lg,g){
   if(!g)return null;
   let hs=g.hs, as=(g.as!=null?g.as:g.as_);
   if((hs==null||as==null)&&lg==='cfb'&&S.cfbr){ const c=(S.cfbr.games||[]).find(x=>String(x.id)===String(g.id)); if(c){ hs=c.hs; as=c.as_; } }
+  if((hs==null||as==null)&&lg==='cfb'&&S.fcsr){ const c=(S.fcsr.games||[]).find(x=>String(x.id)===String(g.id)); if(c){ hs=c.hs; as=c.as_; } }
   if(hs==null||as==null){ const f=finFor(lg,g); if(f){ hs=f.hs; as=f.as; } }
   return (hs==null||as==null)?null:{hs:Number(hs),as:Number(as)};
 }
@@ -3457,6 +3477,9 @@ function renderSides(){
       <button data-lg="nfl" aria-selected="${!cfb}">NFL Sunday</button>
       <button data-lg="cfb" aria-selected="${cfb}">College Saturday</button>
     </nav>`
+    + (cfb?`<nav class="tabs" style="margin:-6px 0 14px">
+      ${[['all','All'],['fbs','FBS'],['fcs','FCS']].map(([k,l])=>`<button data-cfbdiv="${k}" aria-selected="${(S.cfbDiv||'all')===k}">${l}</button>`).join('')}
+    </nav>`:'')
     + (isClosed(S.week)?`<div class="flag" style="margin-bottom:14px">Week ${S.week} is closed. Placing a new bet here will ask you to confirm first — grading and removing still work normally.</div>`:'');
   const all=GM().map(g=>withFinal(cfb?'cfb':'nfl',g));
   if(!all.length){
@@ -3477,7 +3500,9 @@ function renderSides(){
   const base=q
     ? all.filter(g=>[g.away,g.home,nick(g.away),nick(g.home),g.aconf,g.hconf]
         .filter(Boolean).join(' ').toLowerCase().includes(q))
-    : all.filter(g=>dateInWeek(g.date,wk));
+    : all.filter(g=>dateInWeek(g.date,wk))
+        // College Saturday FBS / FCS toggle. Games you added by hand show in all three.
+        .filter(g=>!cfb||g.mine||!S.cfbDiv||S.cfbDiv==='all'||(S.cfbDiv==='fcs'?!!g.fcsOnly:!g.fcsOnly));
   // searching: games still to come first (soonest first), then games already
   // played at the bottom, most recent first — not oldest-first from September
   const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
@@ -3543,7 +3568,7 @@ function renderSides(){
     const wxFlag=(!cfb&&fw)?wxTag(fw):'';
     const wkTag = q?`Wk ${g.wk} · `:'';
     const meta = cfb
-      ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':''].filter(Boolean).join(' · ')
+      ? [String(g.date||'').slice(5), g.kick||'', g.neutral?'neutral':'', g.conf_game?'conf':'', g.fcsOnly?'FCS':''].filter(Boolean).join(' · ')
       : String(g.date||'').slice(5)+(g.div?' · div':'');
     let cg = cfb && S.cfbr ? (S.cfbr.games||[]).find(x=>x.id===String(g.id)) : null;
     if(cg&&cg.hs==null&&('margin' in g)&&g.hs!=null)cg=Object.assign({},cg,{hs:g.hs,as_:g.as});
@@ -3564,7 +3589,7 @@ function renderSides(){
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
           <div class="stat"><div class="n" style="${nflGrade?gradeStyle(nflGrade):'color:'+eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
-        </div>${(!cfb&&!g.mine)?nflPoints(g):''}`;
+        </div>${(!cfb&&!g.mine)?nflPoints(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${sTm(g.away)} @ ${sTm(g.home)}</span>
@@ -4325,6 +4350,8 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
     if(LG()!=='cfb'){ const r=document.querySelector(`.pow tbody tr[data-team="${t}"]`); if(r)r.scrollIntoView({block:'center'}); }
     return;
   }
+  const dv=e.target.closest('[data-cfbdiv]');
+  if(dv){ S.cfbDiv=dv.dataset.cfbdiv; save(); renderSides(); return; }
   const lg=e.target.closest('[data-lg]');
   if(lg){ S.league=lg.dataset.lg; save(); renderSides(); return; }
 
