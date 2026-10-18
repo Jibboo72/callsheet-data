@@ -1597,6 +1597,24 @@ function nflGrades(g){
   if(bk.a!=null&&ma!==bk.a) out.away=gradeSide(ma>bk.a,g.as-bk.a);
   return out;
 }
+/* The same line college cards carry under the Line / Model / Edge tiles:
+   the side the model likes against the book's number, that team's win
+   chance from the model margin, and the model total beside the line.
+   Win chance is a normal curve on the margin with the NFL's ~13-point
+   spread of outcomes — an approximation, not a fitted probability. */
+function nflSideNote(g){
+  if(g.proj==null)return '';
+  const erf=x=>{const t=1/(1+0.3275911*Math.abs(x)),y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);return x>=0?y:-y;};
+  const ph=0.5*(1+erf(g.proj/13/Math.SQRT2));
+  const fav=ph>=0.5?g.home:g.away, wp=Math.max(ph,1-ph);
+  const tot=g.ptot!=null?` · model total ${g.ptot.toFixed(1)}${g.total!=null?` (line ${g.total})`:''}`:'';
+  const edge=g.spread!=null?g.proj-g.spread:null;
+  if(edge!=null&&Math.abs(edge)>=0.05){
+    const n=edge>0?-g.spread:g.spread;
+    return `<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(edge>0?g.home:g.away)} ${n>0?'+':''}${n.toFixed(1)}</b> · ${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}</div>`;
+  }
+  return `<div class="note" style="margin:6px 0 0">${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}</div>`;
+}
 function nflPoints(g){
   if(g.ptot==null||g.proj==null)return '';
   return pointsTable(esc(g.away),esc(g.home),g.ptot,(g.ptot-g.proj)/2,(g.ptot+g.proj)/2,nflBook(g),nflGrades(g));
@@ -2646,7 +2664,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-18 00:30 UTC';
+const BUILD_STAMP='2026-10-18 01:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3629,7 +3647,7 @@ function renderSides(){
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
           <div class="stat"><div class="n" style="${nflGrade?gradeStyle(nflGrade):'color:'+eCol}">${edge==null?'—':(edge>0?'+':'')+edge.toFixed(1)}</div><div class="l">Model vs line</div></div>
-        </div>${(!cfb&&!g.mine)?nflPoints(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
+        </div>${(!cfb&&!g.mine)?nflSideNote(g)+nflPoints(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${sTm(g.away)} @ ${sTm(g.home)}</span>
