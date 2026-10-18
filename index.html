@@ -1470,6 +1470,17 @@ function cfbRankings(d){
   const k=cfbSort.key, dir=cfbSort.dir==='asc'?1:-1;
   const val=t=>k==='rec'?(t.w-t.l):t[k];
   rows=rows.slice().sort((a,b)=>k==='team'?dir*a.team.localeCompare(b.team):dir*(val(a)-val(b)));
+  // The # column ranks whatever column the table is sorted on (1 = highest
+  // value), within the conference when one is picked — so tapping Off shows
+  // each team's offense rank, not its overall rank. Sorting by team name
+  // keeps the overall rank. Searching doesn't renumber; flipping the
+  // direction reads the same ranks bottom-up.
+  const rankOf={};
+  if(k==='team'){ d.teams.forEach(t=>{ rankOf[t.team]=cfbConf?t.conf_rank:t.rank; }); }
+  else {
+    d.teams.filter(t=>!cfbConf||t.conf===cfbConf)
+      .sort((a,b)=>(val(b)-val(a))||(b.net-a.net)).forEach((t,i)=>{ rankOf[t.team]=i+1; });
+  }
   const COLS=[['net','Net'],['off','Off'],['deff','Def'],['sos','SOS']];
   const fcs=CFBSRC()==='fcs';
   let html=cfbConfSelect(d,fcs?'All FCS':'All FBS')+`<div class="note" style="margin:0 0 10px">Points better than an average ${fcs?'FCS':'FBS'} team on a neutral field, opponent-adjusted${fcs?' across every Division I game they play':''}. Net = Off + Def; Def is flipped so higher is better. Rating gap + ${d.model.hfa} for home field = projected spread. SOS = average Net of opponents played.${fcs&&d.fbs_avg!=null?` On this scale an average FBS team is ${sgn1(d.fbs_avg)}.`:''} Tap a team for its page.</div>
@@ -1480,7 +1491,7 @@ function cfbRankings(d){
   if(!rows.length) html+=`<tr><td colspan="7" class="empty" style="border:0">Nobody matches that.</td></tr>`;
   rows.forEach(t=>{
     html+=`<tr data-cfbteam="${esc(t.team)}">
-      <td>${cfbConf?t.conf_rank:t.rank}</td>
+      <td>${rankOf[t.team]}</td>
       <td>${cfbLogo(t.team)}${esc(t.team)}</td>
       <td class="n" style="font-size:12px">${t.w}-${t.l}</td>
       <td class="n">${sgn1(t.net)}</td><td class="n">${sgn1(t.off)}</td><td class="n">${sgn1(t.deff)}</td>
@@ -2635,7 +2646,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-17 23:55 UTC';
+const BUILD_STAMP='2026-10-18 00:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
