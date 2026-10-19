@@ -745,7 +745,7 @@ function screenPanel(cid){
     <div class="pblock"><div class="pbh">Candidates · ${esc(label)}</div><div class="pbody">
       <div style="display:grid;grid-template-columns:1fr 1fr 70px;gap:6px;margin-bottom:8px">
         <div><span class="lab">Market</span>
-          <select data-sc="mkt" data-c="${cid}">${MKT.map(m=>`<option value="${m.v}"${sc.mkt===m.v?' selected':''}>${m.label}</option>`).join('')}</select></div>
+          <select data-sc="mkt" data-c="${cid}">${MKT.filter(m=>m.screen!==false).map(m=>`<option value="${m.v}"${sc.mkt===m.v?' selected':''}>${m.label}</option>`).join('')}</select></div>
         <div><span class="lab">Side</span>
           <select data-sc="side" data-c="${cid}">${SIDES.map(o=>`<option value="${o.v}"${sc.side===o.v?' selected':''}>${o.label}</option>`).join('')}</select></div>
         <div><span class="lab">Line</span>
@@ -2326,7 +2326,11 @@ const MKT=[
   {v:'td',  label:'Anytime TD',        short:'td',   step:0.5},
   {v:'ftd', label:'First TD',          short:'ftd',  step:0.5},
   {v:'ptd', label:'Passing TD',        short:'ptd',  step:0.5},
-  {v:'ryd', label:'Rushing yards',     short:'ryd',  step:0.5}
+  {v:'ryd', label:'Rushing yards',     short:'ryd',  step:0.5},
+  // added with the Props tab; the candidate screener has no game logs for these
+  {v:'car', label:'Rush attempts',     short:'rush att',  step:0.5, screen:false},
+  {v:'lrush',label:'Longest rush',     short:'long rush', step:0.5, screen:false},
+  {v:'cyd', label:'Rush+rec yards',    short:'rush+rec',  step:0.5, screen:false}
 ];
 const SIDES=[
   {v:'atleast', label:'at least (N+)'},
@@ -2926,7 +2930,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-19 22:00 UTC';
+const BUILD_STAMP='2026-10-19 23:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
