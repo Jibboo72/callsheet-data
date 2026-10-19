@@ -37,7 +37,11 @@ BASE = "https://api.sportsgameodds.com/v2"
 # Reception and longest-reception markets are the thin ones we care about;
 # receiving yards is included because it's the liquid market next door.
 WANT = ("receptions", "receiving_yards", "longest_reception",
-        "receiving_longest", "targets", "touchdown", "rushing_yards")
+        "receiving_longest", "targets", "touchdown", "rushing_yards",
+        # Props tab: rush attempts and longest rush (the SGO ids are expected
+        # to be rushing_attempts / rushing_longestRush -- if a pull shows
+        # neither, check the stat ids in the first-event dump on stderr).
+        "rushing_attempts", "rushing_longest")
 
 # Which leagues to pull. College is ~55 events a week against NFL's ~16, so
 # it is off unless asked for — the monthly object pool is shared with

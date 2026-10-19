@@ -434,7 +434,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx'];
+const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx','props'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -511,6 +511,7 @@ async function load(){
   document.getElementById('setAutoGrade').checked=S.autoGrade!==false;
   if(S.importUrl) document.getElementById('impUrl').value=S.importUrl;
   renderAll();
+  try{ takePropSnaps(); if(gradePropLog())save(); }catch(e){}
   syncSampleBtn();
   const bi=document.getElementById('buildInfo');
   if(bi)bi.textContent=`build ${BUILD_STAMP} · week 1 starts ${WEEK1_START}`;
@@ -530,6 +531,7 @@ async function load(){
   } else setTimeout(autoGradeBets,2500);
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden)autoGradeBets(); });
   setInterval(autoGradeBets,5*60*1000);
+  setInterval(()=>{ try{ takePropSnaps(); if(gradePropLog())save(); }catch(e){} },5*60*1000);
 }
 let t; function save(){
   clearTimeout(t);
@@ -1279,6 +1281,250 @@ function renderScorecard(host){
   html+=`</tbody></table></div></div>`;
   host.innerHTML=html;
 }
+/* ---------------- Props: model numbers vs. book prices ----------------
+   data/props-YYYY.json (export_props.py) carries, for each skill player in
+   the next slate, a probability distribution for five markets. This turns a
+   distribution into the chance of whatever line the book posted, compares it
+   with the book's own price, and ranks the result.
+
+   HONEST FRAMING, because it matters: the book's de-vigged price is the best
+   probability we have. The model is checked out of sample (see the file's
+   calib block) and is only allowed to NUDGE the book's number (15-30%
+   depending on market). The first real test, anytime TDs in week 6, did not
+   show the model beating the book. So "EV" here means "price vs. our blended
+   probability", the tiers say when model and book agree, and the tracker
+   saves every pick before kickoff so the record, not this code, decides. */
+const PMK={
+  td:   {label:'Anytime TD',     short:'TD',        f:'atd',   k:0.15},
+  ptd:  {label:'Passing TDs',    short:'pass TD',   f:'ptd',   k:0.30},
+  car:  {label:'Rush attempts',  short:'rush att',  f:'car',   k:0.30},
+  lrush:{label:'Longest rush',   short:'long rush', f:'lrush', k:0.30},
+  cyd:  {label:'Rush+rec yards', short:'rush+rec',  f:'combo', k:0.20}
+};
+const PMK_ORDER=['td','ptd','car','lrush','cyd'];
+const sfxStrip=s=>String(s||'').replace(/(jr|sr|iii|ii|iv)$/,'');
+
+/* chance of OVER `line` from the exported distribution; null if the line is
+   one the model can't price (whole numbers push, anytime TD is 0.5 only) */
+function propProb(E,mk,side,line){
+  const d=E[PMK[mk].f]; if(d==null)return null;
+  const L=Number(line); if(isNaN(L))return null;
+  let over=null;
+  if(mk==='td'){ if(Math.abs(L-0.5)>0.01)return null; over=d; }
+  else{
+    if(Math.abs(L-Math.round(L))<0.01)return null;
+    if(mk==='ptd'||mk==='car'){ let s=0; for(let k=Math.floor(L)+1;k<d.length;k++)s+=d[k]; over=s; }
+    else if(mk==='lrush'){ const i=Math.floor(L); over=i<d.length?d[i]:0; }
+    else if(mk==='cyd'){
+      const x=(Math.floor(L)+1)/5, i=Math.floor(x), fr=x-i;
+      const a=i<d.length?d[i]:0, b=i+1<d.length?d[i+1]:0; over=a+(b-a)*fr;
+    }
+  }
+  if(over==null)return null;
+  over=Math.min(0.995,Math.max(0.005,over));
+  return side==='under'?1-over:over;
+}
+
+let _pbMemo=null;
+function propBoard(){
+  if(!S.props||!Array.isArray(S.props.players)||!S.odds||!Array.isArray(S.odds.games))return [];
+  const memoKey=[S.odds.pulled,S.props.generated,myBooks().join(',')].join('|');
+  if(_pbMemo&&_pbMemo.key===memoKey)return _pbMemo.rows;
+  const idx={};
+  S.props.players.forEach(E=>{
+    [E.key,sfxStrip(E.key)].forEach(k=>{ const id=E.team+'|'+E.opp+'|'+k; if(!idx[id])idx[id]=E; });
+  });
+  const now=Date.now(), best={};
+  S.odds.games.forEach(g=>{
+    const t0=Date.parse(g.start||''); if(!isNaN(t0)&&t0<now)return;     // kicked off: that price is history
+    (g.props||[]).forEach(pr=>{
+      const mk=OMKT[pr.market]; if(!mk||!PMK[mk])return;
+      if(pr.line==null||!pr.player)return;
+      if(pr.side!=='over'&&pr.side!=='under')return;
+      const k=mkey(String(pr.player).replace(/_\d+_[A-Z]+$/,''));
+      const E=idx[g.home+'|'+g.away+'|'+k]||idx[g.away+'|'+g.home+'|'+k]
+            ||idx[g.home+'|'+g.away+'|'+sfxStrip(k)]||idx[g.away+'|'+g.home+'|'+sfxStrip(k)];
+      if(!E)return;
+      const line=Number(pr.line);
+      const pm=propProb(E,mk,pr.side,line); if(pm==null)return;
+      // best price at THIS line among your books; else the consensus (not bettable at yours)
+      let bk=null;
+      Object.entries(pr.books||{}).forEach(([bid,b])=>{
+        if(!myBooks().includes(bid))return;
+        const o=parseInt(b.odds,10); if(isNaN(o))return;
+        if(b.line!=null&&Math.abs(Number(b.line)-line)>0.01)return;   // that book quotes a different line
+        if(!bk||toDec(o)>toDec(bk.odds))bk={book:bid,odds:o};
+      });
+      if(!bk)return;                                       // only what you can actually bet at your books
+      const cons=parseInt(pr.odds,10);
+      const price=bk.odds;
+      const dec=toDec(price), imp=1/dec;
+      // What the posted prices themselves say: median implied chance across your
+      // books at this line, minus the book's cut (a yes-only TD market keeps more).
+      const bi=[]; Object.entries(pr.books||{}).forEach(([bid,b])=>{
+        if(!myBooks().includes(bid))return; const o=parseInt(b.odds,10); if(isNaN(o))return;
+        if(b.line!=null&&Math.abs(Number(b.line)-line)>0.01)return; bi.push(1/toDec(o)); });
+      bi.sort((a,b)=>a-b);
+      const med=bi.length?(bi.length%2?bi[(bi.length-1)/2]:(bi[bi.length/2-1]+bi[bi.length/2])/2):imp;
+      const pe=Math.min(0.97,med*(mk==='td'&&pr.side==='over'?0.92:0.955));
+      // The feed's own "fair" price is used only when the posted prices back it up;
+      // for long shots it is sometimes derived from a No price nobody really offers.
+      const fo=parseInt(pr.fair,10);
+      let pf=pe, hasFair=false;
+      if(!isNaN(fo)){ const f=1/toDec(fo); if(Math.abs(f-pe)<=Math.max(0.03,0.25*pe)){ pf=f; hasFair=true; } }
+      // the model only nudges the book's number: blend in log space so long shots can't swing wildly
+      const kk=hasFair?PMK[mk].k:0.30;
+      const pb=Math.min(0.97,Math.pow(pf,1-kk)*Math.pow(pm,kk)), ev=pb*dec-1, gap=pm-pf, n=E.n||0;
+      if(pf<0.03||pb>0.97||ev>1.0)return;                 // long-shot noise and data glitches
+      // a price far more generous than the rest of your books is usually stale or a typo:
+      // listed, flagged, never tiered
+      const outlier=bi.length>=2&&imp<0.7*med;
+      let tier='';
+      const floor=mk==='td'?0.15:0.25;                  // no tiers on long shots
+      if(!outlier&&pb>=floor){
+        if(hasFair&&Math.abs(gap)<=0.12&&n>=4&&ev>=0.05&&pm>imp&&pf>=imp)tier='A';
+        else if(Math.abs(gap)<=0.15&&n>=3&&ev>=0.02&&pm>imp)tier='B';
+      }
+      const id=E.pid+'|'+mk+'|'+pr.side+'|'+line;
+      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pf,pb,ev,gap,tier,hasFair,outlier,start:g.start,gh:g.home,ga:g.away};
+      if(!best[id]||row.ev>best[id].ev)best[id]=row;
+    });
+  });
+  const rows=Object.values(best);
+  _pbMemo={key:memoKey,rows};
+  return rows;
+}
+const fmtOdds=o=>(o>0?'+':'')+o;
+const propPick=r=>`${r.side==='under'?'Under':'Over'} ${r.line} ${PMK[r.mk].short}`;
+const pctS=x=>Math.round(x*100)+'%';
+const evS=x=>(x>=0?'+':'')+Math.round(x*100)+'%';
+const tierChip=t=>t?`<span style="display:inline-block;min-width:18px;text-align:center;padding:0 5px;font-weight:700;font-size:11px;border:2px solid var(--ink);${t==='A'?'background:var(--win);color:#fff;border-color:var(--win)':'background:transparent'}">${t}</span>`:'';
+
+/* the small block on each NFL game card */
+function propsBlock(g){
+  try{
+    if(!S.props||!S.odds)return '';
+    const rows=propBoard().filter(r=>r.E.date===g.date&&((r.E.team===g.home&&r.E.opp===g.away)||(r.E.team===g.away&&r.E.opp===g.home)));
+    if(!rows.length)return '';
+    const tiered=rows.filter(r=>r.tier).sort((a,b)=>b.ev-a.ev);
+    let pick=[]; const usedM={};
+    tiered.forEach(r=>{ if(pick.length<3&&!usedM[r.mk]){ usedM[r.mk]=1; pick.push(r); } });   // spread across markets first
+    tiered.forEach(r=>{ if(pick.length<3&&!pick.includes(r))pick.push(r); });
+    if(!pick.length)return '';
+    return `<div class="note" style="margin:6px 0 0;border-top:1px dashed var(--ink-soft);padding-top:6px"><b>Props</b> · price vs model, unproven${pick.map(r=>`<div style="margin-top:4px">${tierChip(r.tier)} <b>${esc(r.E.name)}</b> ${esc(propPick(r))} <span style="white-space:nowrap">${fmtOdds(r.price)}${r.book?' '+esc(bookName(r.book)):''}</span> · ${pctS(r.pb)} · <b style="color:${r.ev>0.05?'var(--win)':'var(--ink-soft)'}">${evS(r.ev)}</b></div>`).join('')}</div>`;
+  }catch(e){ return ''; }
+}
+
+/* ---------- forward tracker: saved before kickoff, graded afterwards ---------- */
+function takePropSnaps(){
+  try{
+    const rows=propBoard(); if(!rows.length)return;
+    S.propLog=S.propLog||{};
+    const now=Date.now(), byGame={};
+    rows.forEach(r=>{ (byGame[r.E.gid]=byGame[r.E.gid]||[]).push(r); });
+    const put=(r,list)=>{
+      const k=[r.E.gid,r.E.pid,r.mk,r.side,r.line,list].join('|');
+      const t0=Date.parse(r.start||''); 
+      const old=S.propLog[k];
+      if(old&&(old.res||(!isNaN(old.start)&&old.start<=now)))return;      // frozen once the game starts
+      S.propLog[k]={k,list,gid:r.E.gid,wk:Number(String(r.E.gid).split('_')[1])||null,date:r.E.date,pid:r.E.pid,name:r.E.name,
+        team:r.E.team,opp:r.E.opp,mk:r.mk,side:r.side,line:r.line,odds:r.price,book:r.book,
+        pm:+r.pm.toFixed(3),pf:+r.pf.toFixed(3),pb:+r.pb.toFixed(3),ev:+r.ev.toFixed(3),tier:r.tier,start:t0,res:null,u:null};
+    };
+    Object.values(byGame).forEach(arr=>{
+      arr.filter(r=>r.tier).sort((a,b)=>b.ev-a.ev).slice(0,5).forEach(r=>put(r,'ev'));
+      arr.filter(r=>r.imp<=0.75).sort((a,b)=>b.pb-a.pb).slice(0,3).forEach(r=>put(r,'prob'));
+    });
+  }catch(e){}
+}
+function gradePropLog(){
+  let ch=false;
+  try{
+    if(!S.props||!S.props.results||!S.propLog)return false;
+    Object.values(S.propLog).forEach(e=>{
+      if(e.res)return;
+      if(!(Date.now()>e.start+4.5*3600e3))return;                      // game not surely over
+      const res=S.props.results[String(e.wk)]; if(!res)return;
+      const row=res[e.pid];
+      if(!row){ if(Object.values(res).some(x=>x.team===e.team)){ e.res='V'; e.u=0; ch=true; } return; }
+      const val={td:row.td,ptd:row.ptd,car:row.car,lrush:row.lrush,cyd:row.combo}[e.mk];
+      const win=e.side==='under'?val<e.line:val>e.line;
+      e.res=win?'W':'L'; e.v=val; e.u=win?toDec(e.odds)-1:-1; ch=true;
+    });
+  }catch(err){}
+  return ch;
+}
+function propTrackerHtml(){
+  const all=Object.values(S.propLog||{});
+  if(!all.length)return `<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">Nothing saved yet. Picks are saved automatically the first time a game's prop prices and the model are both loaded, and frozen at kickoff. Refresh all data on the Roster tab, then come back after the games.</div>`;
+  const sum=arr=>{
+    const g=arr.filter(e=>e.res==='W'||e.res==='L'), w=g.filter(e=>e.res==='W').length;
+    const u=g.reduce((s,e)=>s+e.u,0), exp=g.length?g.reduce((s,e)=>s+e.pb,0)/g.length:0;
+    return {n:g.length,w,l:g.length-w,u,roi:g.length?u/g.length:0,hit:g.length?w/g.length:0,exp,pend:arr.filter(e=>!e.res).length};
+  };
+  const row=(lab,arr)=>{
+    const s=sum(arr);
+    return `<tr><td style="text-align:left;font-size:12px">${lab}</td><td class="n">${s.n?s.w+'-'+s.l:'—'}</td><td class="n">${s.n?pctS(s.hit)+'<div style="font-size:10px;color:var(--ink-soft)">exp '+pctS(s.exp)+'</div>':'—'}</td><td class="n" style="color:${s.u>0?'var(--win)':(s.u<0?'var(--loss)':'inherit')}">${s.n?(s.u>=0?'+':'')+s.u.toFixed(1)+'u':'—'}</td><td class="n">${s.pend||''}</td></tr>`;
+  };
+  const evs=all.filter(e=>e.list==='ev'), prs=all.filter(e=>e.list==='prob');
+  let html=`<div class="note" style="margin:0 0 10px">Every pick below was saved <b>before kickoff</b> and graded 1 unit at the saved price. Hit % is what actually happened; <b>exp</b> is what the blended probability said. Until a list has a few hundred graded picks, treat the numbers as noise. A pick whose player was inactive is a void and doesn't count.</div>
+  <div class="pblock"><div class="pbh">Record</div><div class="pbody"><table class="pow" style="width:100%;table-layout:fixed"><colgroup><col style="width:36%"><col style="width:14%"><col style="width:20%"><col style="width:17%"><col style="width:13%"></colgroup><thead><tr><th style="text-align:left">List</th><th>W-L</th><th>Hit</th><th>Units</th><th>Open</th></tr></thead><tbody>
+  ${row('Best EV · all',evs)}${row('&nbsp;&nbsp;Tier A',evs.filter(e=>e.tier==='A'))}${row('&nbsp;&nbsp;Tier B',evs.filter(e=>e.tier==='B'))}${row('Most likely',prs)}
+  ${PMK_ORDER.map(m=>row('EV · '+PMK[m].label,evs.filter(e=>e.mk===m))).join('')}
+  </tbody></table></div></div>`;
+  const rec=all.filter(e=>e.res).sort((a,b)=>b.start-a.start).slice(0,25);
+  if(rec.length){
+    html+=`<div class="pblock"><div class="pbh">Recent graded</div><div class="pbody">${rec.map(e=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--stock)"><span>${esc(e.name)} · ${esc(e.side==='under'?'U':'O')} ${e.line} ${esc(PMK[e.mk].short)} <span style="color:var(--ink-soft)">${fmtOdds(e.odds)}</span></span><b style="color:${e.res==='W'?'var(--win)':(e.res==='L'?'var(--loss)':'var(--ink-soft)')}">${e.res==='V'?'void':e.res+' ('+e.v+')'}</b></div>`).join('')}</div></div>`;
+  }
+  return html;
+}
+
+function renderPropsTab(host){
+  const view=S.propsView||'board', mode=S.propsMode||'ev', mf=S.propsMkt||'all';
+  let html=`<div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:10px">
+    <button class="sgbtn" data-pv="board" aria-selected="${view==='board'}">Board</button>
+    <button class="sgbtn" data-pv="track" aria-selected="${view==='track'}">Tracker</button></div>`;
+  if(!S.props||!Array.isArray(S.props.players)){
+    host.innerHTML=html+`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No prop models loaded yet. Tap <b>Refresh all data</b> on the Roster tab (needs the props file from the latest data build).</div>`;
+    return;
+  }
+  if(view==='track'){ takePropSnaps(); if(gradePropLog())save(); host.innerHTML=html+propTrackerHtml(); return; }
+  const all=propBoard();
+  const q=(powerQuery||'').trim().toLowerCase();
+  const gen=String(S.props.generated||'').slice(5,16).replace('T',' ');
+  html+=`<div class="note" style="margin:0 0 10px">Model numbers vs. the books' own prices, updated ${esc(gen)} UTC. <b>Tier A</b> = the model, the book's fair price and your best price all point the same way; <b>B</b> = model and price agree, book fair doesn't confirm. Win % blends the model into the book's own number (it only nudges it). Only prices at your books are listed. <b>Unproven</b>: the tracker saves each pick before kickoff, and that record is the test.</div>
+  <details style="margin:0 0 10px"><summary style="cursor:pointer;font-size:12px">How these are built and how far to trust them</summary><div class="note" style="margin:6px 0 0">${PMK_ORDER.map(m=>{ const c=S.props.calib&&S.props.calib[PMK[m].f]; return `<b>${PMK[m].label}</b>${c?`: tested on ${c.n} player games last year → this year, model error ${c.brier} vs ${c.base} for a naive guess (lower is better).`:'.'}`;}).join('<br>')}<br><br>Rush attempts, longest rush and yardage are scored at lines near the middle, where any model barely beats a coin flip on error alone; what matters there is that the probabilities are honest, and they are close. That test only shows the model is honest about its own odds. It does not show it beats the book. On the one real comparison so far (anytime TDs, week 6, 198 players) the book's price scored better than the model, which is why the model only nudges the book. Play-by-play history can't tell us about injuries or news, so check those yourself. Players are assumed active: a prop on an inactive player is voided by the books.</div></details>
+  <div class="seg" style="grid-template-columns:1fr 1fr;margin-bottom:6px"><button class="sgbtn" data-pm="ev" aria-selected="${mode==='ev'}">Best EV</button><button class="sgbtn" data-pm="prob" aria-selected="${mode==='prob'}">Most likely</button></div>
+  <div class="seg" style="margin-bottom:10px"><button class="sgbtn" data-pk="all" aria-selected="${mf==='all'}">All</button>${PMK_ORDER.map(m=>`<button class="sgbtn" data-pk="${m}" aria-selected="${mf===m}">${esc(PMK[m].label)}</button>`).join('')}</div>`;
+  if(!all.length){
+    host.innerHTML=html+`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No prop prices matched the models yet. The odds file has to be for the same games (refresh all data after the Wednesday odds pull).</div>`;
+    return;
+  }
+  let rows=all.filter(r=>(mf==='all'||r.mk===mf));
+  if(q) rows=rows.filter(r=>(r.E.name+' '+r.E.team+' '+r.E.opp).toLowerCase().includes(q));
+  if(mode==='ev') { const tr=r=>r.tier==='A'?0:(r.tier==='B'?1:2); rows=rows.filter(r=>r.ev>0&&r.pb>=0.08).sort((a,b)=>tr(a)-tr(b)||b.ev-a.ev); }
+  else rows=rows.filter(r=>r.imp<=0.75).sort((a,b)=>b.pb-a.pb);
+  const missing=PMK_ORDER.filter(m=>!all.some(r=>r.mk===m));
+  if(missing.length) html+=`<div class="note" style="margin:0 0 10px;color:var(--ink-soft)">No prices yet for: ${missing.map(m=>esc(PMK[m].label)).join(', ')}. The books haven't posted them or the odds pull doesn't include them yet.</div>`;
+  const shown=rows.slice(0,60);
+  html+=`<div class="note" style="margin:0 0 8px">${rows.length} ${mode==='ev'?'priced props with a positive EV':'priced props'}${rows.length>60?' · showing the top 60':''}</div>`;
+  shown.forEach(r=>{
+    const d=r.E.date.slice(5);
+    html+=`<div class="pblock" style="margin-bottom:8px"><div class="pbody" style="padding:8px 10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${esc(r.E.name)}</b>${tierChip(r.tier)}</div>
+      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}</div>
+      <div class="stats" style="grid-template-columns:1.5fr 1fr 1fr 1fr">
+        <div class="stat"><div class="n" style="font-size:14px">${esc(propPick(r))}</div><div class="l">Pick</div></div>
+        <div class="stat"><div class="n" style="font-size:15px">${fmtOdds(r.price)}</div><div class="l">${esc(bookName(r.book))}</div></div>
+        <div class="stat"><div class="n" style="font-size:15px">${pctS(r.pb)}</div><div class="l">Win %</div></div>
+        <div class="stat"><div class="n" style="font-size:15px;color:${r.ev>0.05?'var(--win)':(r.ev<-0.05?'var(--loss)':'inherit')}">${evS(r.ev)}</div><div class="l">EV</div></div>
+      </div>
+      <div class="note" style="margin:6px 0 0">Model ${pctS(r.pm)} · book fair ${pctS(r.pf)}${r.hasFair?'':' (est.)'} · price implies ${pctS(r.imp)} · ${r.E.n} games of history · team ${r.E.imp} pts implied</div>
+    </div></div>`;
+  });
+  host.innerHTML=html;
+}
+
 function renderPower(){
   const host=document.getElementById('powerBoard'); if(!host)return;
   const lgHost=document.getElementById('powerLg');
@@ -1287,10 +1533,12 @@ function renderPower(){
       <button data-plg="nfl" aria-selected="${plg==='nfl'}">NFL</button>
       <button data-plg="cfb" aria-selected="${plg==='cfb'}">College</button>
       <button data-plg="score" aria-selected="${plg==='score'}">Scorecard</button>
+      <button data-plg="props" aria-selected="${plg==='props'}">Props</button>
     </nav>`;
   const ps=document.getElementById('powerSearch');
-  if(ps) ps.hidden=((plg==='cfb'&&cfbView!=='rank')||plg==='score');
+  if(ps){ ps.hidden=((plg==='cfb'&&cfbView!=='rank')||plg==='score'||(plg==='props'&&(S.propsView||'board')==='track')); ps.placeholder=plg==='props'?'Search player or team':'Search teams'; }
   if(plg==='score'){ renderScorecard(host); return; }
+  if(plg==='props'){ renderPropsTab(host); return; }
   if(plg==='cfb'){ renderCfbPower(host); return; }
   const rts=S.ratings;
   if(!rts||!Array.isArray(rts.teams)||!rts.teams.length){
@@ -1819,9 +2067,15 @@ function mergeImport(raw){
   catch(e){ impSay("That file isn't valid JSON.",true); return; }
   const src=data&&data.players;
   if(data&&data.kind==='odds'){
-    S.odds=slimOdds(data); takeSnaps(); save(); renderAll();
+    S.odds=slimOdds(data); takeSnaps(); _pbMemo=null; takePropSnaps(); save(); renderAll();
     const n=(data.games||[]).length;
     impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
+    return;
+  }
+  if(data&&data.kind==='props'){
+    S.props=data; _pbMemo=null; takePropSnaps(); gradePropLog(); save(); renderAll();
+    const np=(data.players||[]).length;
+    impSay(`Prop models ${String(data.generated||'').slice(0,16)} UTC: ${np} player-games, results through week ${data.through_week}.`);
     return;
   }
   if(data&&data.kind==='weather'){
@@ -1957,6 +2211,7 @@ const DATA_BASE='https://raw.githubusercontent.com/Jibboo72/callsheet-data/main/
 const REFRESH_FILES=[
   ['Games & lines',  `games-${DATA_SEASON}.json`],
   ['Odds',           `odds-${DATA_SEASON}.json`],
+  ['Prop models',    `props-${DATA_SEASON}.json`],
   ['Power ratings',  `ratings-${DATA_SEASON}.json`],
   ['College schedule', `cfb-${DATA_SEASON}.json`],
   ['College ratings',  `cfb-ratings-${DATA_SEASON}.json`],
@@ -2024,6 +2279,11 @@ document.getElementById('powerBoard').addEventListener('change',e=>{
   }
 });
 document.getElementById('powerBoard').addEventListener('click',e=>{
+  if((S.powerLg||'nfl')==='props'){
+    const b=e.target.closest('[data-pv],[data-pm],[data-pk]');
+    if(b){ if(b.dataset.pv)S.propsView=b.dataset.pv; if(b.dataset.pm)S.propsMode=b.dataset.pm; if(b.dataset.pk)S.propsMkt=b.dataset.pk; save(); renderPower(); }
+    return;
+  }
   if((S.powerLg||'nfl')==='score'){ const b=e.target.closest('[data-scorelg]'); if(b){ S.scoreLg=b.dataset.scorelg; save(); renderPower(); } return; }
   if((S.powerLg||'nfl')==='cfb'){ onCfbPowerClick(e); return; }
   const th=e.target.closest('.pow th[data-sort]');
@@ -2244,7 +2504,7 @@ function slimOdds(d){
       props:(g.props||[]).filter(pr=>OMKT[pr.market]&&pr.line!=null&&(pr.side==='over'||pr.side==='under')).map(pr=>{
         const books={};
         Object.entries(pr.books||{}).forEach(([id,b])=>{ if(b&&keepBook(id)) books[id]={odds:b.odds,line:b.line}; });
-        return {market:pr.market,player:pr.player,side:pr.side,line:pr.line,odds:pr.odds,books:Object.keys(books).length?books:null};
+        return {market:pr.market,player:pr.player,side:pr.side,line:pr.line,odds:pr.odds,fair:pr.fair,books:Object.keys(books).length?books:null};
       })}))};
 }
 const OMKT={receiving_receptions:'rec', receiving_yards:'yds',
@@ -2252,7 +2512,9 @@ const OMKT={receiving_receptions:'rec', receiving_yards:'yds',
             touchdowns:'td', anytime_touchdown:'td',
             'rushing+receiving_touchdowns':'td',
             firstTouchdown:'ftd', first_touchdown:'ftd',
-            passing_touchdowns:'ptd', rushing_yards:'ryd'};
+            passing_touchdowns:'ptd', rushing_yards:'ryd',
+            rushing_attempts:'car', rushing_longestRush:'lrush', rushing_longest:'lrush',
+            'rushing+receiving_yards':'cyd'};
 const mkey=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 function sgoKey(pid){
   // TRAVIS_KELCE_1_NFL -> traviskelce
@@ -2664,7 +2926,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-18 01:40 UTC';
+const BUILD_STAMP='2026-10-19 22:00 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3647,7 +3909,7 @@ function renderSides(){
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
           <div class="stat"><div class="n" style="font-size:17px;${nflGrade?gradeStyle(nflGrade):''}">${edge==null?'—':esc(edge>=0?g.home:g.away)+' +'+Math.abs(edge).toFixed(1)}</div><div class="l">Model edge</div></div>
-        </div>${(!cfb&&!g.mine)?nflSideNote(g)+nflPoints(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
+        </div>${(!cfb&&!g.mine)?nflSideNote(g)+nflPoints(g)+propsBlock(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${sTm(g.away)} @ ${sTm(g.home)}</span>
