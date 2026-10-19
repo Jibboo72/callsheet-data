@@ -164,6 +164,19 @@ jobs:
           python export_roster.py "${{ steps.season.outputs.season }}" \
             "data/roster-${{ steps.season.outputs.season }}.json"
 
+      # Player-prop probability models for the Props tab (anytime TD, passing
+      # TDs, rush attempts, longest rush, rush+receiving yards). Reads the
+      # games and roster files written just above, plus nflverse play-by-play.
+      # Optional: if anything here fails the rest of the build still lands and
+      # the old props file stays put.
+      - name: Build prop models
+        if: steps.season.outputs.run == 'yes' && steps.pbp.outputs.has == 'yes'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          python export_props.py "${{ steps.season.outputs.season }}" \
+            "data/props-${{ steps.season.outputs.season }}.json"
+
       # College schedule for the Saturday board. Schedules and results only —
       # this source carries no spreads or totals (those need a CollegeFootballData
       # API key), so lines get typed in at bet time. Not gated on NFL pbp.
