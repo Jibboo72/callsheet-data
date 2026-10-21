@@ -31,6 +31,15 @@ METHOD
    beating a winless FCS team.
 7. Win probability = Normal CDF(spread / sd_margin). sd_margin comes from the
    backtest residuals, not a guess.
+8. THE MARK. A game that lands far below the closing line (a big favorite
+   losing or barely winning) leaves a permanent mark for the rest of the
+   season: scar_s of the shortfall beyond scar_t points comes off the team's
+   rating (half offense, half defense) and never decays, however many wins
+   follow. Deliberately small: in the 2021-2025 backtest a mark this size cost
+   0.02 points of accuracy per game, while bigger marks cost real accuracy.
+   It only runs when the schedule carries an `exp_margin` column (home
+   expected margin from the closing line); it is not part of next season's
+   prior.
 
 Every tunable knob is in CONFIG and is set by backtest_cfb.py.
 
@@ -63,13 +72,15 @@ CONFIG = dict(
                             # (program level -- recruiting, coaching, depth)
     hfa=2.5,                # home-field advantage, points
     sd_margin=15.8,         # game-margin SD for win % (backtest residual sd)
+    scar_t=25.0,            # a game this many points below the line leaves a mark...
+    scar_s=0.10,            # ...of this share of the shortfall beyond it, for the season
 )
 
 # The FCS model: same engine over every Division I game (FBS and FCS), so
 # FCS teams are rated off their whole schedule, not just their FBS games.
 # Knobs tuned separately by backtest_fcs.py against FCS-vs-FCS closing lines.
 # Tuned on 2022-2024 FCS-vs-FCS games; held-out 2025: MAE 12.15 vs line 11.86.
-FCS_CONFIG = dict(CONFIG, scope="di", alpha=1.0, alpha_fcs=2.0, hfa=2.0)
+FCS_CONFIG = dict(CONFIG, scope="di", alpha=1.0, alpha_fcs=2.0, hfa=2.0, scar_s=0.0)
 
 
 # --------------------------------------------------------------------------
@@ -250,9 +261,25 @@ def fit(games, cfg=None, prior=None, as_of_wk=None):
     off, dfn = off - oc, dfn - dc
     pri_o = np.where(is_fcs, pri_o, off)
     pri_d = np.where(is_fcs, pri_d, dfn)
+    # the mark (see METHOD 8): applied to what is shown and projected, not to
+    # the prior that carries into next season
+    scar = {}
+    S, T0 = cfg.get("scar_s", 0.0), cfg.get("scar_t", 25.0)
+    if S > 0 and len(g) and "exp_margin" in g.columns:
+        short = g.exp_margin.values.astype(float) - (g.home_points.values - g.away_points.values)
+        for h, a, sh in zip(g.home_team.values, g.away_team.values, short):
+            if np.isnan(sh):
+                continue
+            if sh > T0:
+                scar[h] = scar.get(h, 0.0) + S * (sh - T0)         # home fell short
+            elif -sh > T0:
+                scar[a] = scar.get(a, 0.0) + S * (-sh - T0)        # away fell short
+    mark = np.array([scar.get(t, 0.0) for t in teams])
+    off = off - mark / 2.0
+    dfn = dfn + mark / 2.0
     tdf = pd.DataFrame({"team": teams, "div": [div[t] for t in teams],
                         "off": off, "def": dfn, "net": off - dfn,
-                        "pri_o": pri_o, "pri_d": pri_d})
+                        "pri_o": pri_o, "pri_d": pri_d, "scar": mark})
     return {"teams": tdf, "avg": float(beta[2 * n] + oc + dc), "cfg": cfg,
             "as_of_wk": int(now), "n_games": int(len(g))}
 

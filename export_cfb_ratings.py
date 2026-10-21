@@ -288,6 +288,13 @@ def build(season):
     if any(bool(v.get("sgo", False)) for v in lmap.values()):
         line_src = (line_src + "; " if line_src else "") + "upcoming games: SportsGameOdds"
 
+    # closing line -> expected home margin, so the ratings can mark a team that
+    # lands far below it (cfb_ratings.py, METHOD 8)
+    sched["exp_margin"] = [
+        (-float(lmap[int(i)].line_spread)
+         if int(i) in lmap and pd.notna(lmap[int(i)].line_spread) else np.nan)
+        for i in sched.game_id]
+
     played_wks = sorted(sched[sched.played].wk.unique())
     through = int(max(played_wks)) if played_wks else 0
     next_wk = int(sched[~sched.played].wk.min()) if (~sched.played).any() else through + 1
@@ -397,6 +404,7 @@ def build(season):
             net=round(float(r.net), 1), off_rank=int(r.off_rank), def_rank=int(r.def_rank),
             w=rec[t]["w"], l=rec[t]["l"], cw=rec[t]["cw"], cl=rec[t]["cl"],
             sos=round(sos, 1), rsos=round(rsos, 1), trend=trend[t],
+            scar=round(float(T.loc[t, "scar"]), 2) if "scar" in T.columns else 0.0,
             exp_w=round(s.get("exp_w", 0), 1), exp_l=round(s.get("exp_l", 0), 1),
             reach=round(s.get("reach", 0), 4), win=round(s.get("win", 0), 4),
             cfp=round(s.get("cfp", 0), 4)))
