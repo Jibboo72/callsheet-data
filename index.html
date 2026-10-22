@@ -2930,7 +2930,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-19 23:30 UTC';
+const BUILD_STAMP='2026-10-22 23:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3763,11 +3763,164 @@ function gradeItem(it,betLg){
   if(line==null||Math.abs(line)>60)return null;
   const r=margin+line; return r>0?'W':(r<0?'L':'P');
 }
+/* ---------------- auto-grade player props ----------------
+   Once a player's game is final, props on him grade themselves from ESPN's
+   box score: card picks (with the same knock-on effects as tapping W/L —
+   card record, the linked bet, a round robin it belongs to), prop bets
+   and TD bets in the Bank, and prop legs inside parlays. Left for you:
+   a player who isn't in any final box score that week (inactive, or the
+   name doesn't match), college props without an ESPN game id, round-robin
+   bets themselves (they settle from their legs), and anything worded in a
+   way it can't read. Same Settings switch as game bets. */
+const PROP_STAT={rec:[['receiving','REC']],yds:[['receiving','YDS']],lng:[['receiving','LONG']],tgt:[['receiving','TGTS']],
+  td:[['rushing','TD'],['receiving','TD']],ptd:[['passing','TD']],pyd:[['passing','YDS']],ryd:[['rushing','YDS']],car:[['rushing','CAR']],
+  lrush:[['rushing','LONG']],cyd:[['rushing','YDS'],['receiving','YDS']]};
+const pnorm=s=>String(s||'').toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g,'').replace(/[^a-z]/g,'');
+const pinit=s=>{ const w=String(s||'').toLowerCase().replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/g,'').replace(/[^a-z\s-]/g,'').trim().split(/\s+/); return w.length>=2?w[0][0]+w.slice(1).join('').replace(/[^a-z]/g,''):''; };
+const PG_SUM={}, PG_WK={};
+const ymdC=d=>String(d||'').replace(/-/g,'');
+async function pgJSON(u){ const r=await fetch(u); if(!r.ok)throw new Error(r.status); return r.json(); }
+/* every FINAL NFL game in a sheet week, with its box score, indexed by player */
+async function propWeek(wk){
+  const c=PG_WK[wk];
+  if(c&&Date.now()-c.at<120000)return c;
+  const [lo,hi]=weekBounds(wk); if(!lo||!hi)return null;
+  const sb=await pgJSON(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${ymdC(lo)}-${ymdC(hi)}&limit=100`);
+  const fin=(sb.events||[]).filter(e=>e.status&&e.status.type&&(e.status.type.completed||e.status.type.state==='post'));
+  await Promise.all(fin.map(async e=>{ if(!PG_SUM[e.id]){ try{ PG_SUM[e.id]=await pgJSON(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${e.id}`); }catch(_){} } }));
+  const idx={full:{},init:{},names:[]};
+  fin.forEach(e=>{ const s=PG_SUM[e.id]; if(!s)return;
+    ((s.boxscore&&s.boxscore.players)||[]).forEach(tg=>(tg.statistics||[]).forEach(cat=>(cat.athletes||[]).forEach(a=>{
+      const nm=a.athlete&&a.athlete.displayName; if(!nm)return;
+      const k=pnorm(nm); if(!idx.full[k]){ idx.full[k]={s,nm}; idx.names.push(nm); }
+      const ki=pinit(nm); if(ki)(idx.init[ki]=idx.init[ki]||[]).push({s,nm});
+    })));
+  });
+  return PG_WK[wk]={at:Date.now(),idx};
+}
+function propFind(idx,who){
+  if(!who)return null;
+  const f=idx.full[pnorm(who)]; if(f)return f;
+  const i=idx.init[pinit(who)]; return i&&i.length===1?i[0]:null;
+}
+function boxVal(s,nm,pairs){
+  let v=null; const k=pnorm(nm);
+  ((s.boxscore&&s.boxscore.players)||[]).forEach(tg=>(tg.statistics||[]).forEach(cat=>{
+    const pr=pairs.filter(p=>p[0]===cat.name); if(!pr.length)return;
+    const up=(cat.labels||[]).map(l=>String(l).toUpperCase());
+    (cat.athletes||[]).forEach(a=>{ if(a.athlete&&pnorm(a.athlete.displayName)===k)pr.forEach(p=>{ const i=up.indexOf(p[1]); if(i>=0)v=(v||0)+(parseFloat(a.stats[i])||0); }); });
+  }));
+  return v;
+}
+function firstTdScorer(s){
+  const sp=(s.scoringPlays||[]).filter(x=>/touchdown|^td$/i.test((x.type&&(x.type.text||x.type.abbreviation))||'')||/\btouchdown\b|\d+\s*yd.*\b(run|pass|return|reception)\b/i.test(x.text||''));
+  if(!sp.length)return '';
+  const t=String(sp[0].text||'');
+  return t.split(/\s+\d+\s*(yd|yard)/i)[0].trim();
+}
+/* structured pick {mkt, side, line} or a bet's text -> 'W'|'L'|'P'|null */
+function propGrade(idx,who,mkt,side,line){
+  const hit=propFind(idx,who); if(!hit)return null;
+  if(mkt==='ftd'){ const sc=firstTdScorer(hit.s); if(!sc)return 'L'; return pnorm(sc)===pnorm(hit.nm)||pinit(sc)===pinit(hit.nm)?'W':'L'; }
+  const pairs=PROP_STAT[mkt]; if(!pairs)return null;
+  const v=boxVal(hit.s,hit.nm,pairs); const val=v===null?0:v, n=Number(line);
+  if(isNaN(n))return null;
+  if(side!=='atleast'&&val===n)return 'P';
+  return meets(val,side||'over',n)?'W':'L';
+}
+function readPropText(txt){
+  const t=' '+String(txt||'').toLowerCase().replace(/−/g,'-')+' ';
+  const K=[[/first\s*(td|touchdown)|\bftd\b/,'ftd'],[/pass(ing)?\s*(td|touchdown)/,'ptd'],[/pass(ing)?\s*y(ar)?ds/,'pyd'],
+    [/rush(ing)?\s*\+\s*rec|rush\s*&\s*rec|scrimmage/,'cyd'],[/long(est)?\s*rush/,'lrush'],[/long(est)?\s*(rec|reception|catch)/,'lng'],
+    [/rush(ing)?\s*att|carries/,'car'],[/rush(ing)?\s*y(ar)?ds/,'ryd'],[/rec(eiving)?\s*y(ar)?ds|receiving yards/,'yds'],[/\btargets?\b/,'tgt'],
+    [/receptions?|\brec\b|catches/,'rec'],[/anytime|\batd\b|\btd\b|touchdown/,'td']];
+  const k=K.find(x=>x[0].test(t)); if(!k)return null;
+  let side='over', line=null, m;
+  if((m=t.match(/(?:^|[^a-z])(o|over|u|under)\s*(\d+(?:\.\d+)?)/))){ side=/^o/.test(m[1])?'over':'under'; line=Number(m[2]); }
+  else if((m=t.match(/(\d+(?:\.\d+)?)\s*\+/))){ side='atleast'; line=Number(m[1]); }
+  else if(k[1]==='td'||k[1]==='ftd'){ side='atleast'; line=1; }
+  if(line===null)return null;
+  return {mkt:k[1],side,line};
+}
+/* who a bet or leg is about: its player field, else a name from that week's box scores found in the text */
+function propWho(idx,item){
+  const w=item.pickWho||(item.match&&!/@|parlay/i.test(item.match)?item.match:'');
+  if(w&&propFind(idx,w))return w;
+  const d=' '+String(item.desc||'').toLowerCase().replace(/[^a-z\s'-]/g,' ').replace(/\s+/g,' ')+' ';
+  let best='';
+  idx.names.forEach(nm=>{ const n=' '+nm.toLowerCase().replace(/[^a-z\s'-]/g,' ').replace(/\b(jr|sr|ii|iii|iv|v)\b/g,' ').replace(/\s+/g,' ').trim()+' '; if(d.includes(n)&&n.length>best.length)best=nm; });
+  return best||w;
+}
+/* same side effects as tapping W/L on a card pick, for any week */
+function applyPickGrade(wk,cid,p,g){
+  S.ledger[cid]=S.ledger[cid]||{w:0,l:0};
+  p.grade=g; p.autoGrade=true;
+  if(g==='W'||g==='P')S.ledger[cid].w++;
+  if(g==='L')S.ledger[cid].l++;
+  if(p.betId){ const b=BANKKEY().bets.find(x=>x.id===p.betId); if(b&&!b.result){ b.result=g; b.auto=true; } }
+  if(p.rrBatch){
+    const sw=S.week; S.week=wk;
+    try{
+      const bet=BANKKEY().bets.find(x=>x.id===p.rrBatch);
+      if(bet&&!bet.result){ const st=settlementForBatch(cid,bet); if(st){ bet.result=st.pl>=0?'W':'L'; bet.fixedReturn=st.ret; bet.desc=`${catById(cid).name} · ${st.won}/${st.bets} won`; bet.auto=true; } }
+    } finally { S.week=sw; }
+  }
+}
+const LEG_PROP=new WeakMap();
+let _pgBusy=false;
+async function autoGradeProps(){
+  if(_pgBusy||S.autoGrade===false)return 0;
+  _pgBusy=true;
+  try{
+    const bank=BANKKEY();
+    const isPropItem=x=>x&&(x.kind==='prop'||x.market==='td'||x.kind==='custom'||x.market==='other');
+    const weeks=new Set();
+    Object.entries(S.cards||{}).forEach(([wk,cards])=>Object.entries(cards||{}).forEach(([cid,cd])=>(cd&&cd.picks||[]).forEach(p=>{
+      if(!p.grade&&!p.benched&&!p.cfb&&cid!=='ctd'&&p.mkt&&p.line!=null&&p.line!=='')weeks.add(Number(wk));
+    })));
+    bank.bets.forEach(b=>{ if(b.result||b.wk==null||b.kind==='cfb')return;
+      if((isPropItem(b)&&!b.rrMode)||(b.kind==='parlay'&&(b.legs||[]).some(isPropItem)))weeks.add(Number(b.wk)); });
+    /* the latest week that has started, by today's date (not the week you happen to be viewing) */
+    const today=new Date().toISOString().slice(0,10);
+    let cur=Number(S.week)||1;
+    for(let w=1;w<=30;w++){ const [lo]=weekBounds(w); if(lo&&lo<=today)cur=Math.max(cur,w); else if(lo)break; }
+    const list=[...weeks].filter(w=>w>=1&&w<=cur&&w>=cur-10);
+    let n=0;
+    for(const wk of list){
+      let W; try{ W=await propWeek(wk); }catch(_){ continue; }
+      if(!W)continue;
+      const idx=W.idx;
+      /* card picks first, so a linked bet follows its pick */
+      Object.entries((S.cards&&S.cards[wk])||{}).forEach(([cid,cd])=>(cd&&cd.picks||[]).forEach(p=>{
+        if(p.grade||p.benched||p.cfb||cid==='ctd'||!p.mkt||p.line==null||p.line==='')return;
+        const g=propGrade(idx,p.who,p.mkt,p.side,p.line);
+        if(g){ applyPickGrade(wk,cid,p,g); n++; }
+      }));
+      bank.bets.forEach(b=>{
+        if(b.result||Number(b.wk)!==wk||b.kind==='cfb')return;
+        if(b.kind==='parlay'){ (b.legs||[]).forEach(l=>{ if(!isPropItem(l))return; const r=readPropText(l.desc); if(!r)return; const g=propGrade(idx,propWho(idx,l),r.mkt,r.side,r.line); if(g)LEG_PROP.set(l,g); }); return; }
+        if(!isPropItem(b)||b.rrMode||/pending/i.test(b.desc||''))return;
+        const r=readPropText(b.desc); if(!r)return;
+        const g=propGrade(idx,propWho(idx,b),r.mkt,r.side,r.line);
+        if(!g)return;
+        b.result=g; b.auto=true; n++;
+        const cd=S.cards&&S.cards[wk]&&b.card&&S.cards[wk][b.card];
+        const p=cd&&(cd.picks||[]).find(x=>x.betId===b.id);
+        if(p&&!p.grade){ S.ledger[b.card]=S.ledger[b.card]||{w:0,l:0}; p.grade=g; p.autoGrade=true; if(g==='W'||g==='P')S.ledger[b.card].w++; if(g==='L')S.ledger[b.card].l++; }
+      });
+    }
+    if(n){ save(); renderCards(); renderBank(); renderLedger(); toast(`Auto-graded ${n} prop${n===1?'':'s'} from box scores`); }
+    return n;
+  }catch(e){ console.warn('prop auto-grade',e); return 0; }
+  finally{ _pgBusy=false; }
+}
+
 let _agBusy=false;
 async function autoGradeBets(){
   if(_agBusy||S.autoGrade===false)return;
   _agBusy=true;
   try{
+    await autoGradeProps();
     const b=BANKKEY();
     const open=b.bets.filter(x=>!x.result&&x.kind!=='prop');
     if(!open.length)return;
@@ -3784,7 +3937,7 @@ async function autoGradeBets(){
       let res=null;
       if(x.kind==='parlay'){
         const legs=x.legs||[]; if(!legs.length)return;
-        const rs=legs.map(l=>gradeItem(l,x.league==='cfb'?'cfb':'nfl'));
+        const rs=legs.map(l=>gradeItem(l,x.league==='cfb'?'cfb':'nfl')||LEG_PROP.get(l)||null);
         if(rs.includes('L'))res='L';
         else if(rs.every(r=>r==='W'))res='W';
       } else res=gradeItem(x,x.kind==='cfb'?'cfb':'nfl');
