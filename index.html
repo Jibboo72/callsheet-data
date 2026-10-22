@@ -2930,7 +2930,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-22 23:40 UTC';
+const BUILD_STAMP='2026-10-23 00:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3947,6 +3947,109 @@ async function autoGradeBets(){
   }catch(e){ console.warn('auto-grade',e); }
   finally{ _agBusy=false; }
 }
+/* ---------------- prediction card (Sides) ----------------
+   Tap "Prediction" on a game: projected final score from your power
+   ratings, the market's implied score, confidence (model win probability)
+   and a short write-up — same numbers SportsMF shows on its Our Pick card. */
+const PRED_OPEN={};
+function pnCdf(z){ const t=1/(1+0.2316419*Math.abs(z)), d=0.3989423*Math.exp(-z*z/2), p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z>0?1-p:p; }
+const pnOrd=n=>{ const s=['th','st','nd','rd'],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
+function predData(g,cfb){
+  if(cfb){
+    const src=((S.cfbr&&S.cfbr.games)||[]).find(x=>String(x.id)===String(g.id))||((S.fcsr&&S.fcsr.games)||[]).find(x=>String(x.id)===String(g.id));
+    if(!src||src.pem==null)return null;
+    const M=-src.pem, T=src.pem_total!=null?+src.pem_total:null, mM=src.line!=null?-src.line:null, mT=src.line_total!=null?+src.line_total:null;
+    return {M,T,mM,mT,wp:src.home_wp!=null?+src.home_wp:pnCdf(M/15.8),src};
+  }
+  if(g.proj==null)return null;
+  const M=+g.proj, T=g.ptot!=null?+g.ptot:null;
+  return {M,T,mM:g.spread!=null?+g.spread:null,mT:g.total!=null?+g.total:null,wp:pnCdf(M/13.5),src:g};
+}
+function nflRecord(t){
+  let w=0,l=0,tie=0;
+  ((S.games&&S.games.games)||[]).forEach(x=>{ if(!('margin' in x)||x.margin==null)return; if(x.home!==t&&x.away!==t)return;
+    const m=x.home===t?x.margin:-x.margin; if(m>0)w++; else if(m<0)l++; else tie++; });
+  return w+l+tie?`${w}-${l}${tie?'-'+tie:''}`:'';
+}
+function predStory(g,cfb,P,fw){
+  const out=[], nm=t=>cfb?t:((TEAMS[t]&&TEAMS[t][0])||t);
+  const hn=nm(g.home), an=nm(g.away);
+  if(cfb){
+    const L=[].concat((S.cfbr&&S.cfbr.teams)||[],(S.fcsr&&S.fcsr.teams)||[]), f=n=>L.find(x=>x.team===n);
+    const th=f(g.home), ta=f(g.away);
+    if(th&&ta){
+      out.push(`${an}${ta.w!=null?` (${ta.w}-${ta.l})`:''} is ${pnOrd(ta.rank)} in your ratings; ${hn}${th.w!=null?` (${th.w}-${th.l})`:''} is ${pnOrd(th.rank)}.`);
+      const ms=[[th.off_rank,ta.def_rank,`${hn}'s ${pnOrd(th.off_rank)}-ranked offense against ${an}'s ${pnOrd(ta.def_rank)} defense`],[ta.off_rank,th.def_rank,`${an}'s ${pnOrd(ta.off_rank)}-ranked offense against ${hn}'s ${pnOrd(th.def_rank)} defense`]].filter(x=>x[0]&&x[1]).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]))[0];
+      if(ms&&ms[1]-ms[0]>=25&&ms[0]<=40)out.push(`Biggest mismatch: ${ms[2]}.`);
+      const tr=t=>(t.trend||[]).length>=4?t.trend[t.trend.length-1]-t.trend[t.trend.length-4]:0;
+      const up=[[tr(th),hn],[tr(ta),an]].sort((a,b)=>Math.abs(b[0])-Math.abs(a[0]))[0];
+      if(Math.abs(up[0])>=3)out.push(`${up[1]} is trending ${up[0]>0?'up':'down'} (${Math.abs(up[0]).toFixed(1)} rating points over three weeks).`);
+    }
+  } else {
+    const T=(S.games&&S.games.teams)||{}, th=T[g.home], ta=T[g.away];
+    if(th&&ta){
+      const rh=nflRecord(g.home), ra=nflRecord(g.away);
+      out.push(`${an}${ra?` (${ra})`:''} is ${pnOrd(ta.rating_rank)} in your power ratings; ${hn}${rh?` (${rh})`:''} is ${pnOrd(th.rating_rank)}.`);
+      const rk=(key,t)=>{ const a=Object.entries(T).filter(([,x])=>x&&isFinite(x[key])).sort((p,q)=>q[1][key]-p[1][key]); const i=a.findIndex(([k])=>k===t); return i>=0?i+1:null; };
+      const ms=[[th.off_rank,ta.def_rank,`${hn}'s ${pnOrd(th.off_rank)}-ranked offense against ${an}'s ${pnOrd(ta.def_rank)} defense`],[ta.off_rank,th.def_rank,`${an}'s ${pnOrd(ta.off_rank)}-ranked offense against ${hn}'s ${pnOrd(th.def_rank)} defense`]];
+      [['off_pass','def_pass','passing game','pass defense'],['off_rush','def_rush','run game','run defense']].forEach(([o,dd,lo,ld])=>{
+        const a1=rk(o,g.home),b1=rk(dd,g.away),a2=rk(o,g.away),b2=rk(dd,g.home);
+        if(a1&&b1)ms.push([a1,b1,`${hn}'s ${lo} (${pnOrd(a1)}) against ${an}'s ${ld} (${pnOrd(b1)})`]);
+        if(a2&&b2)ms.push([a2,b2,`${an}'s ${lo} (${pnOrd(a2)}) against ${hn}'s ${ld} (${pnOrd(b2)})`]);
+      });
+      const best=ms.filter(x=>x[0]&&x[1]).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]))[0];
+      if(best&&best[1]-best[0]>=10&&best[0]<=12)out.push(`Biggest mismatch: ${best[2]}.`);
+    }
+  }
+  const fav=P.M>=0?hn:an, fm=Math.abs(P.M).toFixed(1);
+  if(P.mM==null)out.push(`The model makes ${fav} a ${fm}-point favorite.`);
+  else{
+    const mf=P.mM>=0?hn:an, mm=Math.abs(P.mM), e=P.M-P.mM, sn=e>0?hn:an;
+    const mkt=mm<0.25?"a pick'em":`${mf} by ${mm%1?mm.toFixed(1):mm}`;
+    out.push(Math.abs(e)<1?`The model makes it ${fav} by ${fm}, in line with the market's ${mkt}.`
+      :`The model makes it ${fav} by ${fm} against the market's ${mkt}: a ${Math.abs(e).toFixed(1)}-point edge toward ${sn}${Math.abs(e)>=3?', big enough to flag':''}.`);
+  }
+  if(P.T!=null){
+    const te=P.mT!=null?P.T-P.mT:null;
+    out.push(te!=null&&Math.abs(te)>=1?`Projects ${Math.round(P.T)} total points against ${P.mT}, leaning ${te>0?'over':'under'} by ${Math.abs(te).toFixed(1)}.`:`Projects ${Math.round(P.T)} total points${P.mT!=null?`, close to the ${P.mT} market`:''}.`);
+  }
+  if(fw&&!fw.unknown&&fw.wind!=null){
+    const pr=[]; if(fw.wind>=15)pr.push(`wind ${Math.round(fw.wind)} mph${fw.gust?` (gusts ${Math.round(fw.gust)})`:''}`); if(fw.temp!=null&&fw.temp<=35)pr.push(`${Math.round(fw.temp)}°`); if(fw.pop>=50)pr.push(`${fw.pop}% chance of ${fw.snow>0?'snow':'rain'}`);
+    if(pr.length)out.push(`Weather to watch: ${pr.join(', ')}.`);
+  }
+  if(!cfb&&(g.inj_home>=1||g.inj_away>=1)){ const ih=+g.inj_home||0, ia=+g.inj_away||0; out.push(`Injuries already priced in: ${ih>=ia?hn:an} lose about ${Math.max(ih,ia).toFixed(1)} points${Math.min(ih,ia)>=0.3?` (${ih>=ia?an:hn} ${Math.min(ih,ia).toFixed(1)})`:''}.`); }
+  return out;
+}
+function predBlock(g,cfb,fw){
+  const P=predData(g,cfb);
+  if(!P)return '';
+  const open=!!PRED_OPEN[g.id];
+  const btn=`<button class="btn ghost" data-pred="${esc(g.id)}" style="width:auto;padding:5px 12px;margin-top:8px">${open?'Hide prediction ▴':'Prediction ▾'}</button>`;
+  if(!open)return btn;
+  let hp=null, ap=null;
+  if(P.T!=null){ hp=Math.round((P.T+P.M)/2); ap=Math.round((P.T-P.M)/2); if(hp===ap){ if(P.M>0)hp++; else ap++; } }
+  const conf=Math.round(Math.max(P.wp,1-P.wp)*100), favH=P.wp>=0.5;
+  const mk=P.mT!=null&&P.mM!=null?`Market says ${esc(g.away)} ${((P.mT-P.mM)/2).toFixed(1)} – ${esc(g.home)} ${((P.mT+P.mM)/2).toFixed(1)}`:'';
+  const story=predStory(g,cfb,P,fw);
+  let res='';
+  if('margin' in g&&g.hs!=null&&ap!=null){
+    const winOk=(g.margin>0)===(P.M>0);
+    const e=P.mM!=null?P.M-P.mM:0, cov=P.mM!=null&&Math.abs(e)>=0.05?(g.margin-P.mM===0?'push':((e>0)===(g.margin-P.mM>0)?'W':'L')):null;
+    res=`<div class="note" style="margin:6px 0 0">We said ${esc(g.away)} ${ap} – ${esc(g.home)} ${hp}. Winner ${winOk?'✓':'✗'}${cov?` · side ${cov==='W'?'✓':cov==='L'?'✗':'push'}`:''}</div>`;
+  }
+  return btn+`<div class="pred" style="margin-top:8px;border:1px solid var(--rule,rgba(0,0,0,.18));border-radius:10px;padding:10px">
+    <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="stat"><div class="n">${ap==null?'—':ap}${!favH?' 🏆':''}</div><div class="l">${esc(g.away)}</div></div>
+      <div class="stat"><div class="n">${hp==null?'—':hp}${favH?' 🏆':''}</div><div class="l">${esc(g.home)}</div></div>
+      <div class="stat"><div class="n" style="${conf>=60?'color:var(--win)':''}">${conf}%</div><div class="l">Confidence</div></div>
+    </div>
+    ${mk?`<div class="note" style="margin:6px 0 0">${mk}${P.T!=null?` · our total ${(Math.round(P.T*10)/10).toFixed(1)}`:''}</div>`:''}
+    ${story.map(t=>`<div class="note" style="margin:6px 0 0;line-height:1.45">${esc(t)}</div>`).join('')}
+    ${res}
+    <div class="note" style="margin:8px 0 0;opacity:.75">From your power ratings. A flag to look closer, not a bet.</div>
+  </div>`;
+}
+
 function renderSides(){
   const host=document.getElementById('sidesBoard');
   const cfb=LG()==='cfb';
@@ -4075,6 +4178,7 @@ function renderSides(){
       </div>
       <div class="pbody" style="padding:9px 10px">
         ${statBlock}
+        ${predBlock(g,cfb,fw)}
         ${played?`<div class="note" style="margin:8px 0 0">Final ${esc(g.away)} ${g.as} – ${esc(g.home)} ${g.hs} · total ${g.pts} ${g.total!=null?(g.pts>g.total?'(over)':'(under)'):''}</div>`:''}
         ${wx?`<div class="note" style="margin:6px 0 0">${wxFlag?`<span class="pill" style="background:var(--hl-fade);color:var(--ink);margin-right:6px">WEATHER UNDER · ${esc(wxFlag)}</span>`:''}${esc(wx)}</div>`:''}
         <div class="add" style="border-top:0;padding:8px 0 0;grid-template-columns:1fr 1fr">
@@ -4812,6 +4916,8 @@ function pickPhoto(){
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.dataset.on='1';clearTimeout(t._t);t._t=setTimeout(()=>t.dataset.on='0',1600);}
 /* sides board */
 document.getElementById('sidesBoard').addEventListener('click',e=>{
+  const pb=e.target.closest('[data-pred]');
+  if(pb){ PRED_OPEN[pb.dataset.pred]=!PRED_OPEN[pb.dataset.pred]; renderSides(); return; }
   const st=e.target.closest('[data-sidesteam]');
   if(st){
     const t=st.dataset.sidesteam;
