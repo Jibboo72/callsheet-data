@@ -272,6 +272,7 @@ select[data-cfbconf]{width:100%}
     <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setAutoGrade" style="width:auto;margin-top:3px">
       <span><b>Grade game bets automatically</b><br><span class="note" style="margin:0">When a game goes final, spread, total and moneyline bets on it are marked W, L or P for you, and SportsMF follows. Parlays grade once a leg loses or every leg wins. Anything it can't read, and anything you've already graded, is left alone.</span></span></label>
   </div></div>
+  <div id="syncPanel"></div>
   <div id="moveBets"></div>
   <div id="csvImport"></div>
   <div class="pblock" style="margin-bottom:16px"><div class="pbh">Import data by hand</div><div class="pbody">
@@ -518,6 +519,7 @@ async function load(){
   checkForNewerBuild();   // async, non-blocking — the rest of the app doesn't wait on this
   checkBackupReminder();
   renderBackupStatus();
+  setTimeout(()=>{ try{ syncPanelInit(); scheduleSync(3000); }catch(e){} },0);
   if(migration){
     setTimeout(()=>toast(`Week ${migration.old} archived as Week 0 (closed) — ${migration.movedBets} bet${migration.movedBets===1?'':'s'} moved. Now on Week 1.`),300);
   }
@@ -535,6 +537,7 @@ async function load(){
 }
 let t; function save(){
   clearTimeout(t);
+  try{ scheduleSync(); }catch(e){}
   t=setTimeout(async()=>{
     const core={}, ref={};
     Object.keys(S).forEach(k=>{ if(REDOWNLOADABLE.includes(k)) ref[k]=S[k]; else core[k]=S[k]; });
@@ -2930,7 +2933,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-23 00:30 UTC';
+const BUILD_STAMP='2026-10-23 00:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -5647,6 +5650,88 @@ document.getElementById('shareOut').addEventListener('click',()=>{
 });
 /* Restoring from the saved .json is one tap — reading the text out of a
    file by hand on iOS is miserable. */
+/* ---------------- GitHub sync ----------------
+   On an iPhone every home-screen icon keeps its own private storage, so
+   SportsMF can't see this Call Sheet's bets directly. With a GitHub token
+   saved here (it stays on this device only, never in backups or the sync
+   file), everything you typed — bets, picks, settings — is copied to
+   data/sync.json in your repo a few seconds after each change. SportsMF
+   reads it from there, and "Load from GitHub" restores it onto a new
+   device or a second icon. A copy with far fewer bets than GitHub never
+   overwrites it (that's an empty or wrong icon). */
+const SYNC_TOKEN_KEY='cs.ghToken', SYNC_HASH_KEY='cs.syncHash', SYNC_AT_KEY='cs.syncAt';
+const SYNC_API='https://api.github.com/repos/Jibboo72/callsheet-data/contents/data/sync.json';
+const syncTok=()=>{ try{ return localStorage.getItem(SYNC_TOKEN_KEY)||''; }catch(e){ return ''; } };
+function syncHash(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))|0; } return String(h); }
+const b64=s=>btoa(unescape(encodeURIComponent(s)));
+const unb64=s=>decodeURIComponent(escape(atob(String(s).replace(/\s/g,''))));
+let _syncT=null, _syncBusy=false;
+function syncMsg(txt,bad){ const el=document.getElementById('syncMsg'); if(el){ el.textContent=txt; el.style.color=bad?'var(--loss)':'var(--ink-soft)'; } }
+function syncStatus(){
+  const at=+(localStorage.getItem(SYNC_AT_KEY)||0);
+  syncMsg(!syncTok()?'Not set up. SportsMF can\'t see your bets from its own icon until this is on.':(at?`On. Last synced ${new Date(at).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}.`:'On. Syncs a few seconds after your next change.'));
+}
+function scheduleSync(delay){
+  if(!syncTok())return;
+  clearTimeout(_syncT); _syncT=setTimeout(()=>pushSync().catch(()=>{}),delay==null?8000:delay);
+}
+async function remoteSync(tok){
+  const r=await fetch(SYNC_API+'?ref=main&t='+Date.now(),{headers:Object.assign({Accept:'application/vnd.github+json'},tok?{Authorization:'Bearer '+tok}:{}),cache:'no-store'});
+  if(r.status===404)return {sha:null,data:null};
+  if(!r.ok)throw new Error('GitHub '+r.status);
+  const j=await r.json();
+  let data=null; try{ data=JSON.parse(unb64(j.content||'')); }catch(e){}
+  return {sha:j.sha,data};
+}
+async function pushSync(force){
+  const tok=syncTok(); if(!tok||_syncBusy)return;
+  const core=JSON.parse(backupBlob()); delete core._backup;
+  const body=JSON.stringify(core), h=syncHash(body);
+  if(!force&&localStorage.getItem(SYNC_HASH_KEY)===h)return;
+  _syncBusy=true;
+  try{
+    let {sha,data}=await remoteSync(tok);
+    const mine=((core.bank||{}).bets||[]).length, theirs=data?((data.bank||{}).bets||[]).length:0;
+    if(!force&&theirs>5&&mine<theirs/2){ syncMsg(`Not synced: this copy has ${mine} bets, GitHub has ${theirs}. Open your main Call Sheet icon, or tap Load from GitHub here.`,true); return; }
+    core._sync={at:new Date().toISOString(),app:'callsheet',v:1};
+    const put=async s=>fetch(SYNC_API,{method:'PUT',headers:{Authorization:'Bearer '+tok,Accept:'application/vnd.github+json','Content-Type':'application/json'},
+      body:JSON.stringify({message:`Call Sheet sync ${core._sync.at.slice(0,16).replace('T',' ')}`,content:b64(JSON.stringify(core)),branch:'main',...(s?{sha:s}:{})})});
+    let r=await put(sha);
+    if(r.status===409||r.status===422){ sha=(await remoteSync(tok)).sha; r=await put(sha); }
+    if(!r.ok){ syncMsg(r.status===401||r.status===403?'GitHub refused the token. Check it has Contents read & write on callsheet-data.':`Sync failed (GitHub ${r.status}). Will retry on the next change.`,true); return; }
+    localStorage.setItem(SYNC_HASH_KEY,h); localStorage.setItem(SYNC_AT_KEY,String(Date.now()));
+    syncStatus();
+  }catch(e){ syncMsg('Sync failed: '+e.message+'. Will retry on the next change.',true); }
+  finally{ _syncBusy=false; }
+}
+function syncPanelInit(){
+  const host=document.getElementById('syncPanel'); if(!host)return;
+  host.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Sync to SportsMF</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Copies your bets and picks to <code>data/sync.json</code> in your repo so SportsMF (and any other icon or phone) can see them. Needs a GitHub fine-grained token with <b>Contents: Read and write</b> on <b>callsheet-data</b>. It's stored on this device only.</div>
+    <input id="syncTok" type="password" autocomplete="off" placeholder="${syncTok()?'Token saved: paste a new one to replace':'github_pat_…'}">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+      <button class="btn" id="syncSave">Save &amp; sync now</button>
+      <button class="btn ghost" id="syncLoad">Load from GitHub</button>
+    </div>
+    ${syncTok()?'<button class="btn ghost" id="syncOff" style="margin-top:6px">Turn off sync on this device</button>':''}
+    <div class="note" id="syncMsg" style="margin:8px 0 0"></div></div></div>`;
+  syncStatus();
+  document.getElementById('syncSave').onclick=async()=>{
+    const v=document.getElementById('syncTok').value.trim();
+    if(v){ try{ localStorage.setItem(SYNC_TOKEN_KEY,v); }catch(e){} }
+    if(!syncTok()){ syncMsg('Paste a token first.',true); return; }
+    syncMsg('Syncing…'); await pushSync(true); syncPanelInit();
+  };
+  document.getElementById('syncLoad').onclick=async()=>{
+    syncMsg('Loading…');
+    try{ const {data}=await remoteSync(syncTok()); if(!data){ syncMsg('Nothing on GitHub yet.',true); return; } applyBackup(JSON.stringify(Object.assign({},data,{_backup:{at:(data._sync||{}).at||''}}))); localStorage.removeItem(SYNC_HASH_KEY); syncStatus(); }
+    catch(e){ syncMsg('Could not load: '+e.message,true); }
+  };
+  const off=document.getElementById('syncOff');
+  if(off) off.onclick=()=>{ try{ localStorage.removeItem(SYNC_TOKEN_KEY); localStorage.removeItem(SYNC_HASH_KEY); }catch(e){} syncPanelInit(); };
+}
+document.addEventListener('visibilitychange',()=>{ if(document.hidden&&syncTok())pushSync().catch(()=>{}); });
+
 function applyBackup(txt){
   let data;
   try{ data=JSON.parse(txt); }catch(e){ backupMsg('That file is not valid backup text.',true); return; }
