@@ -195,6 +195,12 @@ select[data-cfbconf]{width:100%}
 .hist .t{flex:1;min-width:0}
 .pill{font-family:Oswald,sans-serif;font-weight:700;font-size:10px;letter-spacing:.08em;padding:3px 7px;color:#fff}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.fresh{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.fresh .fc{flex:1 1 0;min-width:96px;border:2px solid var(--ink);padding:5px 7px;background:var(--stock-2);border-left-width:8px}
+.fresh .fc b{display:block;font-family:Oswald,sans-serif;font-weight:700;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft)}
+.fresh .fc span{display:block;font-size:12px;line-height:1.25;margin-top:2px}
+.fresh .fc i{font-style:normal;font-size:10px;color:var(--ink-soft)}
+.fresh .ok{border-left-color:var(--win)}.fresh .warn{border-left-color:var(--hl-long)}.fresh .bad{border-left-color:var(--loss)}.fresh .none{border-left-color:var(--ink-soft)}
 </style>
 </head>
 <body>
@@ -214,6 +220,8 @@ select[data-cfbconf]{width:100%}
     </div>
   </div>
 </header>
+
+<div class="fresh" id="fresh"></div>
 
 <nav class="tabs" role="tablist">
   <button role="tab" id="tabCards" aria-selected="true">Props</button>
@@ -2933,7 +2941,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-23 00:40 UTC';
+const BUILD_STAMP='2026-10-23 17:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -5160,7 +5168,38 @@ document.getElementById('bankSummary').addEventListener('change',e=>{
   if(e.target.id==='bankUnit'){BANKKEY().unit=Math.max(1,Number(e.target.value)||14);save();renderBank();renderSides();}
 });
 
-function renderAll(){_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderPower();renderBank();renderLedger();}
+/* "Data as of" strip under the title: when each feed was last produced, colored
+   by age, so it's obvious at a glance whether lines are current. */
+function freshAge(ms){
+  const m=Math.max(0,Math.round(ms/60000));
+  if(m<2)return 'just now';
+  if(m<60)return m+' min ago';
+  const h=Math.round(m/60);
+  if(h<48)return h+(h===1?' hr':' hrs')+' ago';
+  return Math.round(h/24)+' days ago';
+}
+function renderFresh(){
+  const el=document.getElementById('fresh'); if(!el)return;
+  const now=Date.now();
+  const when=ts=>{ if(!ts)return null; const t=Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts)?ts:ts+'Z'); return isNaN(t)?null:t; };
+  const chip=(label,t,okH,warnH,miss)=>{
+    if(t==null)return `<div class="fc none"><b>${label}</b><span>${miss||'not loaded'}</span></div>`;
+    const h=(now-t)/3600000, cls=h<=okH?'ok':h<=warnH?'warn':'bad';
+    const d=new Date(t), txt=d.toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'});
+    return `<div class="fc ${cls}"><b>${label}</b><span>${txt}<br><i>${freshAge(now-t)}</i></span></div>`;
+  };
+  const nflT=when(S.odds&&S.odds.pulled);
+  const colT=when(S.cfbr&&S.cfbr.generated);
+  const mdlT=when(S.props&&S.props.generated);
+  el.innerHTML=
+    chip('NFL lines',nflT,30,80)+
+    chip('College lines',colT,30,80)+
+    chip('Prop models',mdlT,48,120)+
+    chip('App refreshed',S.lastRefresh||null,2,12,'tap Refresh all');
+}
+renderFresh();
+setInterval(()=>{ try{ renderFresh(); }catch(e){} },60*1000);
+function renderAll(){try{renderFresh();}catch(e){}_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderPower();renderBank();renderLedger();}
 
 /* Every tap inside Props or Sides (BET, grade, fold, add, unit buttons...)
    rebuilds that whole list's innerHTML. That's what was making the page
