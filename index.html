@@ -2950,7 +2950,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-24 02:20 UTC';
+const BUILD_STAMP='2026-10-24 03:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3971,6 +3971,107 @@ async function autoGradeBets(){
    Tap "Prediction" on a game: projected final score from your power
    ratings, the market's implied score, confidence (model win probability)
    and a short write-up — same numbers SportsMF shows on its Our Pick card. */
+/* ---------------- this week's qualifiers (NFL sides) ----------------
+   The betting rules, applied for you. A game qualifies when:
+     - it's week 5 or later (weeks 1-4 edges tested worse than a coin flip),
+     - the model is 2+ points off the line you can bet (DraftKings from the
+       odds pull when it has the game, otherwise the games-file line),
+     - the injury adjustment doesn't push the other way (it's the one part
+       of the edge that tested as real).
+   1.5 units when the edge is 3+ and injuries move the same way; else 1.
+   2021-25 walk-forward: model side covered ~52% at 2+, ~54% at 3+, barely
+   past the 52.4% break-even -- a short list to look at, not a lock list. */
+function nflQualifiers(games,wk){
+  if(+wk<=4) return `<div class="pblock"><div class="pbh">This week's qualifiers</div><div class="pbody"><div class="note" style="margin:0">None in weeks 1–4 — early-season edges tested worse than a coin flip. Qualifiers start in week 5.</div></div></div>`;
+  const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  const rows=[];
+  games.forEach(g=>{
+    if(('margin' in g)||g.proj==null||g.mine)return;
+    if(String(g.date||'')<todayIso)return;
+    const ln=nflLines(g), sp=ln&&ln.spread;
+    const dkHome=(sp&&sp.home!=null)?+sp.home:null;            // betting convention: home's number
+    const homeNum=dkHome!=null?dkHome:(g.spread!=null?-g.spread:null);
+    if(homeNum==null)return;
+    const edge=g.proj+homeNum;                                 // + = model likes home vs this number
+    if(Math.abs(edge)<2)return;
+    const ia=g.inj_adj!=null?+g.inj_adj:null;
+    const injAgree=ia==null?null:(Math.abs(ia)<0.3?0:(Math.sign(ia)===Math.sign(edge)?1:-1));
+    if(injAgree===-1)return;
+    const home=edge>0, team=home?g.home:g.away, num=home?homeNum:-homeNum;
+    const price=sp?(home?sp.home_odds:sp.away_odds):null;
+    const units=(Math.abs(edge)>=3&&injAgree===1)?1.5:1;
+    rows.push({g,team,num,price,edge:Math.abs(edge),ia,injAgree,units,src:dkHome!=null?'DK':'consensus'});
+  });
+  rows.sort((a,b)=>b.edge-a.edge);
+  let h=`<div class="pblock"><div class="pbh">This week's qualifiers · ${rows.length}</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Model 2+ points off the line, injuries not pushing the other way, flat stakes. Tested 2021–25 at about 52% (2+) and 54% (3+), barely past break-even — shop every book for a better number before betting, and re-check after Thursday's and Sunday morning's injury updates.</div>`;
+  if(!rows.length) h+=`<div class="note" style="margin:0">Nothing qualifies right now.</div>`;
+  rows.forEach(r=>{
+    const injTxt=r.injAgree==null?'no injury report yet':(r.injAgree===1?`injuries agree (${Math.abs(r.ia).toFixed(1)} pts)`:'injuries neutral');
+    h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed rgba(22,21,15,.3)">
+      <div style="font-family:Oswald,sans-serif;font-weight:700;font-size:15px">${esc(r.team)} ${r.num>0?'+':''}${r.num.toFixed(1)}${r.price?` <span style="font-weight:400;font-size:12px">${esc(String(r.price))} ${r.src}</span>`:` <span style="font-weight:400;font-size:12px">${r.src}</span>`} · <span style="color:var(--win)">${r.units} unit${r.units===1?'':'s'}</span></div>
+      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} · edge ${r.edge.toFixed(1)} · ${injTxt}</div>
+    </div>`;
+  });
+  return h+`</div></div>`;
+}
+
+/* ---------------- closing line value (Bank) ----------------
+   For a straight side or total bet: how your number compares with the
+   closing line. Positive = you got a better number than the close (more
+   points on a side, a lower over / higher under). NFL close = the games
+   file's line once the game is final (nflverse closing number); college =
+   the ratings file's line (CollegeFootballData, DraftKings where posted).
+   Before kickoff it's measured against the current line and marked "so far".
+   Team totals, moneylines, props and parlays aren't measured. */
+function betClv(x){
+  if(!x||x.kind==='parlay'||x.kind==='prop')return null;
+  const lg=x.kind==='cfb'?'cfb':'nfl';
+  let mk=x.market||'side'; if(mk!=='side'&&mk!=='total')return null;
+  const g=findGameFor(lg,x); if(!g)return null;
+  const txt=_nrm(String(x.desc||'').replace(/−/g,'-'));
+  if(/(^|[^a-z])(tt|team total|team tot|team pts)(?=[^a-z]|$)/.test(txt))return null;
+  if(/(^|[^a-z])(ml|moneyline|money line|to win)(?=[^a-z]|$)/.test(txt))return null;
+  if(mk==='side'&&/(?:^|[^a-z])(over|under|o|u)\s*\d/.test(txt))mk='total';
+  let closeHome=null, closeTot=null, final=false;
+  if(lg==='nfl'){
+    if(g.spread!=null)closeHome=-g.spread; if(g.total!=null)closeTot=+g.total; final=('margin' in g);
+  } else {
+    const c=((S.cfbr&&S.cfbr.games)||[]).find(y=>String(y.id)===String(g.id)); if(!c)return null;
+    if(c.line!=null)closeHome=+c.line; if(c.line_total!=null)closeTot=+c.line_total; final=c.hs!=null;
+  }
+  if(mk==='total'){
+    const m=txt.match(/(?:^|[^a-z])(over|under|o|u)\s*(\d+(?:\.\d+)?)/); if(!m||closeTot==null)return null;
+    const L=Number(m[2]), over=m[1][0]==='o';
+    return {pts:over?closeTot-L:L-closeTot, close:(over?'o':'u')+closeTot, final};
+  }
+  const sd=sideOfText(lg,g,txt); if(!sd||closeHome==null)return null;
+  let rest=txt; gradeAliases(lg,sd.name).forEach(a=>{ rest=rest.replace(a,' '); });
+  const n=rest.match(/(?:^|\s)([+-])\s?(\d+(?:\.\d+)?)(?!\d)/);
+  let line=null; if(n)line=Number(n[1]+n[2]); else if(/(^|\s)(pk|pick|pickem|pick em)(\s|$)/.test(rest))line=0;
+  if(line==null||Math.abs(line)>60)return null;
+  const closeSide=sd.side==='home'?closeHome:-closeHome;
+  return {pts:line-closeSide, close:`${sd.name} ${closeSide>0?'+':''}${closeSide}`, final};
+}
+function clvLine(c){
+  if(!c)return '';
+  const col=c.pts>0.01?'var(--win)':(c.pts<-0.01?'var(--loss)':'var(--ink-soft)');
+  return `<div class="what" style="color:${col}">${c.final?'Close':'Line now'} ${esc(c.close)} · ${c.pts>0?'+':''}${c.pts.toFixed(1)} pts vs ${c.final?'the close':'your number (so far)'}</div>`;
+}
+function clvSummary(){
+  const b=BANKKEY(); const xs=b.bets.map(x=>({x,c:betClv(x)})).filter(r=>r.c&&r.c.final);
+  if(!xs.length)return `<div class="pblock" style="margin-bottom:14px"><div class="pbh">Closing line value</div><div class="pbody"><div class="note" style="margin:0">Once a straight side or total you logged is final, this shows whether you got a better number than the close — the earliest sign of real skill, long before the win rate means anything.</div></div></div>`;
+  const beat=xs.filter(r=>r.c.pts>0.01).length, worse=xs.filter(r=>r.c.pts<-0.01).length, same=xs.length-beat-worse;
+  const avg=xs.reduce((a,r)=>a+r.c.pts,0)/xs.length;
+  const col=avg>0.01?'var(--win)':(avg<-0.01?'var(--loss)':'var(--ink)');
+  return `<div class="pblock" style="margin-bottom:14px"><div class="pbh">Closing line value · ${xs.length} bet${xs.length===1?'':'s'}</div><div class="pbody">
+    <div class="stats"><div class="stat"><div class="n" style="color:var(--win)">${beat}</div><div class="l">Beat<br>the close</div></div>
+    <div class="stat"><div class="n">${same}</div><div class="l">Same<br>number</div></div>
+    <div class="stat"><div class="n" style="color:var(--loss)">${worse}</div><div class="l">Worse<br>than close</div></div></div>
+    <div class="note" style="margin:8px 0 0">Average <b style="color:${col}">${avg>0?'+':''}${avg.toFixed(2)} pts</b> per bet versus the closing number. Consistently positive is the best early sign the picks are sharp; consistently negative means the market is moving against you after you bet.</div>
+  </div></div>`;
+}
+
 const PRED_OPEN={};
 function pnCdf(z){ const t=1/(1+0.2316419*Math.abs(z)), d=0.3989423*Math.exp(-z*z/2), p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z>0?1-p:p; }
 const pnOrd=n=>{ const s=['th','st','nd','rd'],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
@@ -4144,7 +4245,7 @@ function renderSides(){
     host.innerHTML=html; return;
   }
 
-  if(!cfb && !q) html+=weatherUndersBlock(games);
+  if(!cfb && !q) html+=weatherUndersBlock(games)+nflQualifiers(games,wk);
   let markedFinal=false;
   games.forEach(g=>{
     const played0=!q&&gameDay(g,cfb?'cfb':'nfl')<todayIso;
@@ -4365,7 +4466,7 @@ function renderBank(){
     const nicks=(m.match(/[A-Z]{2,4}/g)||[]).map(t=>TEAMS[t]?TEAMS[t][0]:'').join(' ');
     return `${m} ${nicks} ${x.desc} ${lg} wk${x.wk}`.toLowerCase().includes(bq);
   }):allRows;
-  document.getElementById('bankList').innerHTML=`
+  document.getElementById('bankList').innerHTML=clvSummary()+`
     <div class="cat"><div class="band" style="background:var(--stock-2);cursor:default"><span class="tag">Bet log${thisWeek&&!bq?` · week ${S.week}`:''}</span><span class="cnt">${bq?`${rows.length} of ${allRows.length}`:rows.length}</span></div>
     ${rows.length?rows.map(x=>{
       const st=Number(x.stake)||0;
@@ -4433,6 +4534,7 @@ function renderBank(){
             ? x.legs.map(l=>`<div style="font-weight:400">• ${esc(legName(l))}${l.odds!=null&&l.odds!==''?' <strong>'+fmtAm(l.odds)+'</strong>':''}</div>`).join('')
             : esc(x.desc)}</div>
           ${outcome}
+          ${(()=>{ try{ return clvLine(betClv(x)); }catch(_){ return ''; } })()}
           <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''}${x.odds!=null?' · '+fmtAm(x.odds):''} · ${unitStr(st)}</div>
         </div>
         <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
