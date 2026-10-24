@@ -281,6 +281,11 @@ def build(season):
     cfg = dict(cr.CONFIG)
     sched = cr.load_schedule(season)
     prior = cr.season_prior(season, cfg)
+    # METHOD 9 in cfb_ratings.py: returning production / talent / recruiting
+    prior = cr.offseason_adjust(
+        prior, season,
+        sorted(set(sched.loc[sched.home_division == "fbs", "home_team"])
+               | set(sched.loc[sched.away_division == "fbs", "away_team"])))
     info = team_info(season)
 
     lines, line_src = get_lines(season)

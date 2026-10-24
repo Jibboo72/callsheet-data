@@ -40,6 +40,22 @@ METHOD
    It only runs when the schedule carries an `exp_margin` column (home
    expected margin from the closing line); it is not part of next season's
    prior.
+9. OFFSEASON ADJUSTMENT to the prior (added 2026-10-23). Last season's
+   rating says nothing about who left. Before a season is fit, each FBS
+   team's prior net rating moves by
+       -0.31 x prior net               (regression toward average)
+       +1.56 x returning production    (CFBD percentPPA, z-score)
+       +0.04 x returning passing       (CFBD percentPassingPPA, z-score)
+       +0.40 x roster talent           (247 team talent, log, z-score)
+       +2.40 x incoming recruit class  (247 class points, z-score)
+   split half to offense, half to defense. Coefficients were fit on how far
+   teams' final ratings landed from their priors in 2018-2022 only, then
+   tested walk-forward on 2023-2025 against closing lines: MAE 12.54 ->
+   12.50 overall and 13.33 -> 13.13 in weeks 1-3. Transfer-portal counts
+   were tried and added nothing. It makes the ratings a little more
+   accurate; it does NOT make the edge beat the line (model side at 2+
+   pts: 49.2% -> 49.7%). The adjustment is applied to the season being
+   fit only -- the chain of priors from season to season stays as before.
 
 Every tunable knob is in CONFIG and is set by backtest_cfb.py.
 
@@ -314,6 +330,91 @@ def project(model, home, away, neutral=False):
     total = 2 * model["avg"] + h.off + a["def"] + a.off + h["def"]
     wp = 0.5 * (1 + math.erf(spread / (cfg["sd_margin"] * math.sqrt(2))))
     return {"margin": float(spread), "total": float(total), "home_wp": float(wp)}
+
+
+# --------------------------------------------------------------------------
+# offseason adjustment (METHOD 9)
+# --------------------------------------------------------------------------
+
+PRE_COEF = dict(pri=-0.31, ret=1.56, ret_pass=0.04, talent=0.40, recruit=2.40)
+RESEARCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "research", "cfbd")
+_CFBD_PATHS = {"returning": "/player/returning", "talent": "/talent",
+               "recruiting": "/recruiting/teams"}
+
+
+def _cfbd(name, season):
+    """research/cfbd/<name>_<season>.json if it's there, else CollegeFootballData
+    (needs CFBD_KEY), saved there for next time. [] when neither works."""
+    path = os.path.join(RESEARCH, f"{name}_{season}.json")
+    if os.path.exists(path):
+        try:
+            import json
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    key = os.environ.get("CFBD_KEY", "").strip()
+    if not key:
+        return []
+    try:
+        import json
+        import requests
+        r = requests.get("https://api.collegefootballdata.com" + _CFBD_PATHS[name],
+                         params={"year": season},
+                         headers={"Authorization": f"Bearer {key}"}, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        try:
+            os.makedirs(RESEARCH, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(data, f, separators=(",", ":"))
+        except Exception:
+            pass
+        return data
+    except Exception as e:
+        print(f"CFBD {name} {season} unavailable ({e})", file=sys.stderr)
+        return []
+
+
+def offseason_adjust(prior, season, teams, coef=None):
+    """Move each FBS team's prior (off, def) for `season` by METHOD 9.
+    `teams`: the season's FBS teams. Teams or features that are missing just
+    contribute 0 for that piece; no data at all -> the prior unchanged."""
+    if not prior:
+        return prior
+    c = {**PRE_COEF, **(coef or {})}
+    ret = {r["team"]: r for r in _cfbd("returning", season)}
+    tal = {r["team"]: r["talent"] for r in _cfbd("talent", season)}
+    rec = {r["team"]: r["points"] for r in _cfbd("recruiting", season)}
+    if not (ret or tal or rec):
+        print(f"offseason adjustment: no CFBD data for {season}, prior unchanged",
+              file=sys.stderr)
+        return prior
+    ts = [t for t in teams if t in prior]
+    df = pd.DataFrame({"team": ts})
+    df["ret"] = [ret.get(t, {}).get("percentPPA") for t in ts]
+    df["ret_pass"] = [ret.get(t, {}).get("percentPassingPPA") for t in ts]
+    tv = pd.to_numeric(pd.Series([tal.get(t) for t in ts]), errors="coerce")
+    df["talent"] = np.log(tv.where(tv > 0))
+    df["recruit"] = [rec.get(t) for t in ts]
+    out = dict(prior)
+    for k in ("ret", "ret_pass", "talent", "recruit"):
+        x = pd.to_numeric(df[k], errors="coerce")
+        sd = x.std()
+        df[k + "_z"] = ((x - x.mean()) / sd) if sd and sd > 0 else 0.0
+    moved = 0
+    for _, r in df.iterrows():
+        o, d = prior[r.team]
+        a = c["pri"] * (o - d)
+        for k in ("ret", "ret_pass", "talent", "recruit"):
+            v = r[k + "_z"]
+            if pd.notna(v):
+                a += c[k] * float(v)
+        out[r.team] = (o + a / 2.0, d - a / 2.0)
+        moved += 1
+    print(f"offseason adjustment {season}: {moved} teams "
+          f"(returning {len(ret)}, talent {len(tal)}, recruiting {len(rec)})", file=sys.stderr)
+    return out
 
 
 def season_prior(season, cfg=None, first=2018):
