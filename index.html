@@ -1650,6 +1650,17 @@ function cfbLine(g){
   const m=S.cfbLines&&S.cfbLines[g.id];
   return (m!=null&&m!=='')?{v:Number(m),src:'you'}:null;
 }
+/* "#12" for an FBS team, "FCS #5" for an FCS team, from the power ratings */
+let _cfbRk=null,_cfbRkKey='';
+function cfbRankOf(t){
+  const key=(S.cfbr&&S.cfbr.generated||'')+'|'+(S.fcsr&&S.fcsr.generated||'');
+  if(!_cfbRk||_cfbRkKey!==key){
+    _cfbRk={}; _cfbRkKey=key;
+    ((S.fcsr&&S.fcsr.teams)||[]).forEach(x=>{ if(x.rank!=null)_cfbRk[x.team]='FCS #'+x.rank; });
+    ((S.cfbr&&S.cfbr.teams)||[]).forEach(x=>{ if(x.rank!=null)_cfbRk[x.team]='#'+x.rank; });
+  }
+  return _cfbRk[t]||'';
+}
 function cfbEdge(g){
   const L=cfbLine(g); if(!L||g.fcs)return null;
   const e=Math.abs(g.pem-L.v);
@@ -2950,7 +2961,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-24 03:30 UTC';
+const BUILD_STAMP='2026-10-24 15:05 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4282,7 +4293,9 @@ function renderSides(){
         </div>${ce&&ce.pickTeam?`<div class="note" style="margin:4px 0 0">Model side: ${esc(ce.pickTeam)} ${ce.num>0?'+':''}${ce.num.toFixed(1)}</div>`:''}`
       : '';
     const cardBlock = (cg && !cg.fcs) ? cfbMatchup(cg,ce,false,false) : null;
-    const sTm=(t)=>(cfb?cfbT(t):TEAMS[t])?`<button class="cfbtm" data-sidesteam="${esc(t)}">${esc(t)}</button>`:esc(t);
+    // power-ratings rank in front of each college team: FBS rank, or "FCS #n"
+    const rk=(t)=>{ if(!cfb)return ''; const R=cfbRankOf(t); return R?`<span style="font-size:10px;font-weight:700;opacity:.75;margin-right:3px">${R}</span>`:''; };
+    const sTm=(t)=>rk(t)+((cfb?cfbT(t):TEAMS[t])?`<button class="cfbtm" data-sidesteam="${esc(t)}">${esc(t)}</button>`:esc(t));
     const statBlock = cardBlock!=null ? cardBlock
       : (cfb && !((g.mine||g.fromRatings) && (g.spread!=null || g.total!=null)))
       ? `<div class="note" style="margin:0 0 4px">${esc(g.aconf||'')}${g.aconf&&g.hconf?' at ':''}${esc(g.hconf||'')}</div>${cfbModel}`
