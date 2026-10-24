@@ -32,16 +32,50 @@ INJURY ADJUSTMENT (step 4 of "tighten the formula")
   itself measures. A missing/unreachable injuries or snap-counts file for
   this season degrades gracefully to a 0 discount (no adjustment), same as
   every other optional signal in this codebase.
+
+LIVE INJURIES FOR THE UPCOMING WEEK (added 2026-10-23)
+  nflverse's injury file runs days behind -- in practice the week about to
+  be played has no rows at all when this runs, so the one part of the
+  projection that tested as real (the injury adjustment) was missing from
+  every edge shown before kickoff. For the next unplayed week only, teams
+  with no nflverse rows get their discount from ESPN's public injury report
+  instead, scored exactly the same way (position weight x status weight x
+  the player's trailing snap share, matched to snap counts by name + team).
+  ESPN unreachable or shaped differently -> no adjustment, as before.
+  Every game carries inj_src ("nflverse" / "espn" / none) and inj_adj (the
+  points the adjustment moved the projection, home perspective).
+
+LAST SEASON'S PLAYS (added 2026-10-23)
+  Ratings are built from this season AND last season's play-by-play (last
+  season enters at CONFIG's prior_season_weight), and calibration is fit
+  the same way one season back. Before this, only the current season was
+  loaded: week 1 had no projection and weeks 2-4 ran off one to three
+  games. 2021-2025 walk-forward, with the injury adjustment: RMSE 13.22 ->
+  13.06, ATS at 2+ pts 51.6% -> 52.1%, at 3+ 50.4% -> 53.6%; weeks 2-4 at
+  2+ went from 45% to 49%.
+
+FROZEN PRE-KICKOFF PROJECTIONS (added 2026-10-23)
+  Once a game is played, its proj/ptot/inj values are the ones this file
+  carried the last time it was built BEFORE kickoff (read back from the
+  previous copy of the output file), flagged frz=1 -- so the Scorecard
+  grades the number that was on the board, not one recomputed afterwards
+  with injury data that arrived late. Games played before this existed (or
+  with no earlier build) fall back to the walk-forward number.
 """
 import json
 import os
+import re
 import sys
+import unicodedata
+import urllib.request
 
 import numpy as np
 import pandas as pd
 
 from power_ratings import (load_pbp, load_games, build_ratings,
-                           load_injury_discount_team_week, CONFIG)
+                           load_injury_discount_team_week, CONFIG,
+                           POSITION_INJURY_WEIGHT, DEFAULT_POSITION_INJURY_WEIGHT,
+                           STATUS_INJURY_WEIGHT, TEAM_FIX)
 
 FIRST_FIT_WEEK = 5          # ratings before this are mostly prior
 
@@ -52,20 +86,160 @@ def _n(v, nd=2):
     return round(float(v), nd)
 
 
+def _pbp_two(season):
+    """This season's play-by-play plus last season's (last season enters the
+    ratings at CONFIG['prior_season_weight']). A missing prior season just
+    means this season alone, as before."""
+    frames = []
+    for s in (season - 1, season):
+        try:
+            frames.append(load_pbp([s]))
+        except Exception as e:
+            print(f"warning: no play-by-play for {s} ({e})", file=sys.stderr)
+    if not frames:
+        raise SystemExit(f"no play-by-play for {season}")
+    return pd.concat(frames, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# live injury report (ESPN) for the upcoming week
+# ---------------------------------------------------------------------------
+ESPN_INJ = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries"
+ESPN_ABBR = {"WSH": "WAS", "LAR": "LA", "JAC": "JAX"}
+TEAM_NAMES = {
+    "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL",
+    "Buffalo Bills": "BUF", "Carolina Panthers": "CAR", "Chicago Bears": "CHI",
+    "Cincinnati Bengals": "CIN", "Cleveland Browns": "CLE", "Dallas Cowboys": "DAL",
+    "Denver Broncos": "DEN", "Detroit Lions": "DET", "Green Bay Packers": "GB",
+    "Houston Texans": "HOU", "Indianapolis Colts": "IND", "Jacksonville Jaguars": "JAX",
+    "Kansas City Chiefs": "KC", "Las Vegas Raiders": "LV", "Los Angeles Chargers": "LAC",
+    "Los Angeles Rams": "LA", "Miami Dolphins": "MIA", "Minnesota Vikings": "MIN",
+    "New England Patriots": "NE", "New Orleans Saints": "NO", "New York Giants": "NYG",
+    "New York Jets": "NYJ", "Philadelphia Eagles": "PHI", "Pittsburgh Steelers": "PIT",
+    "San Francisco 49ers": "SF", "Seattle Seahawks": "SEA", "Tampa Bay Buccaneers": "TB",
+    "Tennessee Titans": "TEN", "Washington Commanders": "WAS",
+}
+
+
+def _nm(s):
+    """Name key for matching ESPN to snap counts: no accents, punctuation or
+    suffixes, lower case."""
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z ]", "", s.lower())
+    s = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b", "", s)
+    return " ".join(s.split())
+
+
+def _fix_team(ab):
+    ab = str(ab or "").upper()
+    ab = ESPN_ABBR.get(ab, ab)
+    return TEAM_FIX.get(ab, ab)
+
+
+def _espn_status(inj):
+    """'Out' / 'Doubtful' / 'Questionable', or None for anything else (IR,
+    PUP, suspended: those players are off the weekly report and already out
+    of the ratings, the same rule the nflverse path follows)."""
+    cands = [inj.get("status")]
+    t = inj.get("type") or {}
+    cands += [t.get("description"), t.get("name"), t.get("abbreviation")]
+    for c in cands:
+        c = str(c or "").lower()
+        if not c:
+            continue
+        if "reserve" in c or c in ("ir", "pup", "susp", "suspension"):
+            return None
+        if "doubt" in c or c == "d":
+            return "Doubtful"
+        if "question" in c or c == "q":
+            return "Questionable"
+        if c == "out" or c == "o" or c.endswith("_out"):
+            return "Out"
+    return None
+
+
+def espn_injury_rows():
+    """Current injury designations from ESPN's public feed, as rows of
+    (team, name key, position, status). Empty list on any failure."""
+    try:
+        req = urllib.request.Request(ESPN_INJ, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        print(f"warning: ESPN injuries unavailable ({e})", file=sys.stderr)
+        return []
+    rows = []
+    for tm in data.get("injuries") or []:
+        team = _fix_team(tm.get("abbreviation")) if tm.get("abbreviation") else \
+            TEAM_NAMES.get(tm.get("displayName") or tm.get("name") or "", "")
+        for inj in tm.get("injuries") or []:
+            a = inj.get("athlete") or {}
+            t = team or _fix_team((a.get("team") or {}).get("abbreviation"))
+            st = _espn_status(inj)
+            nm = a.get("displayName") or " ".join(
+                x for x in (a.get("firstName"), a.get("lastName")) if x)
+            if not t or not st or not nm:
+                continue
+            pos = ((a.get("position") or {}).get("abbreviation")) or ""
+            rows.append(dict(team=t, key=_nm(nm), name=nm, position=pos, status=st))
+    print(f"ESPN injuries: {len(rows)} Out/Doubtful/Questionable rows across "
+          f"{len(set(r['team'] for r in rows))} teams", file=sys.stderr)
+    return rows
+
+
+def espn_discounts(season, before_week):
+    """{team: raw discount} for the upcoming week from ESPN, scored the same
+    way as load_injury_discount_team_week(): position weight x status weight
+    x trailing snap share (mean of his last CONFIG['injury_trailing_weeks']
+    games this season, from snap counts before `before_week`)."""
+    rows = espn_injury_rows()
+    if not rows:
+        return {}
+    try:
+        sn = pd.read_parquet("https://github.com/nflverse/nflverse-data/releases/"
+                             f"download/snap_counts/snap_counts_{season}.parquet")
+    except Exception as e:
+        print(f"warning: snap counts unavailable ({e})", file=sys.stderr)
+        return {}
+    sn = sn.dropna(subset=["week"])
+    sn = sn[sn.week.astype(int) < before_week].copy()
+    sn["team"] = sn["team"].replace(TEAM_FIX)
+    sn["share"] = sn[["offense_pct", "defense_pct", "st_pct"]].max(axis=1)
+    sn["key"] = sn["player"].map(_nm)
+    sn = sn.sort_values("week")
+    tw = CONFIG["injury_trailing_weeks"]
+    trail = (sn.groupby(["team", "key"])["share"]
+               .apply(lambda x: float(x.tail(tw).mean())).to_dict())
+    anyteam = (sn.groupby("key")["share"]
+                 .apply(lambda x: float(x.tail(tw).mean())).to_dict())
+    out, matched = {}, 0
+    for r in rows:
+        share = trail.get((r["team"], r["key"]))
+        if share is None:
+            share = anyteam.get(r["key"], 0.0)   # traded mid-season
+        else:
+            matched += 1
+        pw = POSITION_INJURY_WEIGHT.get(r["position"].upper(), DEFAULT_POSITION_INJURY_WEIGHT)
+        out[r["team"]] = out.get(r["team"], 0.0) + pw * STATUS_INJURY_WEIGHT[r["status"]] * share
+    print(f"ESPN injuries: {matched}/{len(rows)} matched to snap counts", file=sys.stderr)
+    return out
+
+
 def fit_scale_hfa(season):
     """
     Regress actual margin on raw rating difference for one completed season.
     Returns (scale, hfa, n). Walk-forward: each week is projected from
     ratings built only on earlier weeks.
     """
-    pbp = load_pbp([season])
+    pbp = _pbp_two(season)          # same inputs the live ratings get
     g = load_games()
     g = g[(g.season == season) & (g.game_type == "REG")]
     g = g.dropna(subset=["home_score", "away_score"])
     if g.empty:
         return None
 
-    maxwk = int(pbp[pbp.season_type == "REG"].week.max())
+    cur = pbp[(pbp.season == season) & (pbp.season_type == "REG")]
+    maxwk = int(cur.week.max())
     raw, act = [], []
     tx, ty = [], []      # team-points rows: [offense, opposing defense, home]
     for w in range(FIRST_FIT_WEEK, maxwk + 1):
@@ -90,7 +264,7 @@ def fit_scale_hfa(season):
     return float(b[0]), float(b[1]), len(raw), [float(v) for v in pts_coef]
 
 
-def build(season, cache_dir=None):
+def build(season, cache_dir=None, prev_path=None):
     season = int(season)
     g = load_games()
     g = g[(g.season == season) & (g.game_type == "REG")]
@@ -101,14 +275,11 @@ def build(season, cache_dir=None):
     played_through = int(played.week.max()) if len(played) else 0
 
     # --- ratings as they stand now -----------------------------------
-    pbp = load_pbp([season]) if played_through else None
-    if pbp is not None and played_through:
-        ratings = build_ratings(pbp, season, played_through + 1, CONFIG)
-    else:
-        # season hasn't started: carry last season's final ratings forward
-        prev = load_pbp([season - 1])
-        last = int(prev[prev.season_type == "REG"].week.max())
-        ratings = build_ratings(prev, season - 1, last + 1, CONFIG)
+    # This season's plays plus last season's (see the module docstring); before
+    # week 1 that is last season alone, at prior-season weight -- the same
+    # ordering, just scaled, as carrying last season's final ratings forward.
+    pbp = _pbp_two(season)
+    ratings = build_ratings(pbp, season, played_through + 1, CONFIG)
 
     ratings = ratings.copy()
     ratings["rating_rank"] = ratings.rating.rank(ascending=False).astype(int)
@@ -153,18 +324,46 @@ def build(season, cache_dir=None):
         discount = pd.DataFrame(columns=["season", "week", "team_abbr", "discount"])
     disc_idx = discount.set_index(["season", "week", "team_abbr"])["discount"]
 
+    # the week about to be played: nflverse has nothing yet, so use ESPN's
+    # live report for teams it doesn't cover (see the module docstring)
+    unplayed = g[g.home_score.isna()]
+    next_wk = int(unplayed.week.min()) if len(unplayed) else None
+    live = {}
+    if next_wk is not None:
+        have = set(t for (s_, w_, t) in disc_idx.index if s_ == season and w_ == next_wk)
+        if len(have) < 20:
+            live = espn_discounts(season, next_wk)
+            live = {t: v for t, v in live.items() if t not in have}
+
     def _injury_discount(wk, team):
+        """(discount, source)"""
         try:
-            return float(disc_idx.loc[(season, wk, team)])
+            return float(disc_idx.loc[(season, wk, team)]), "nflverse"
         except KeyError:
-            return 0.0
+            pass
+        if wk == next_wk and team in live:
+            return float(live[team]), "espn"
+        if wk == next_wk and live:
+            return 0.0, "espn"          # on ESPN's feed, nobody listed
+        return 0.0, None
+
+    # --- previous copy of this file: pre-kickoff numbers to freeze ------
+    prev = {}
+    if prev_path and os.path.exists(prev_path):
+        try:
+            with open(prev_path) as f:
+                pj = json.load(f)
+            if int(pj.get("season", 0)) == season:
+                prev = {x["id"]: x for x in pj.get("games", [])}
+        except Exception as e:
+            print(f"warning: couldn't read previous {prev_path} ({e})", file=sys.stderr)
 
     # --- walk-forward ratings for games already played ----------------
     # A played game must be projected from ratings built BEFORE it, not from
     # today's ratings (which already contain its result) — otherwise every
     # past projection looks psychic and the Scorecard flatters the model.
     wk_ratings = {}
-    if pbp is not None and played_through:
+    if played_through:
         for w in range(1, played_through + 1):
             try:
                 wk_ratings[w] = build_ratings(pbp, season, w, CONFIG)
@@ -178,14 +377,16 @@ def build(season, cache_dir=None):
         h, a = x.home_team, x.away_team
         proj = None
         ptot = None
-        inj_home = inj_away = None
+        inj_home = inj_away = inj_adj = inj_src = None
         R = wk_ratings.get(int(x.week), ratings)
         if h in R.index and a in R.index:
             diff = float(R.loc[h, "rating"] - R.loc[a, "rating"])
-            inj_home = _injury_discount(int(x.week), h)
-            inj_away = _injury_discount(int(x.week), a)
+            inj_home, s1 = _injury_discount(int(x.week), h)
+            inj_away, s2 = _injury_discount(int(x.week), a)
+            inj_src = s1 or s2
             diff_adj = diff + CONFIG["injury_weight"] * (inj_away - inj_home)
             proj = round(scale * diff_adj + hfa, 2)
+            inj_adj = scale * CONFIG["injury_weight"] * (inj_away - inj_home)
             if pts_coef:
                 # the model's own game total: both teams' projected points,
                 # from offense vs the other side's defense (fit on the prior
@@ -219,7 +420,16 @@ def build(season, cache_dir=None):
             # proj above already has CONFIG["injury_weight"] applied.
             "inj_home": _n(inj_home, 2),
             "inj_away": _n(inj_away, 2),
+            "inj_adj": _n(inj_adj, 2),
+            "inj_src": inj_src,
         }
+        if not pd.isna(x.home_score):
+            # freeze what the board showed before kickoff (module docstring)
+            p0 = prev.get(x.game_id)
+            if p0 and (p0.get("frz") or "margin" not in p0) and p0.get("proj") is not None:
+                for k in ("proj", "ptot", "inj_home", "inj_away", "inj_adj", "inj_src"):
+                    rec[k] = p0.get(k)
+                rec["frz"] = 1
         if not pd.isna(x.home_score):
             rec.update({
                 "hs": int(x.home_score), "as": int(x.away_score),
@@ -242,7 +452,7 @@ def build(season, cache_dir=None):
 if __name__ == "__main__":
     season = sys.argv[1] if len(sys.argv) > 1 else "2026"
     out = sys.argv[2] if len(sys.argv) > 2 else f"games-{season}.json"
-    data = build(season, cache_dir=os.path.dirname(out) or ".")
+    data = build(season, cache_dir=os.path.dirname(out) or ".", prev_path=out)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as f:
         json.dump(data, f, separators=(",", ":"))

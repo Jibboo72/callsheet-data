@@ -1868,11 +1868,16 @@ function nflSideNote(g){
   const fav=ph>=0.5?g.home:g.away, wp=Math.max(ph,1-ph);
   const tot=g.ptot!=null?` · model total ${g.ptot.toFixed(1)}${g.total!=null?` (line ${g.total})`:''}`:'';
   const edge=g.spread!=null?g.proj-g.spread:null;
+  // injury adjustment: points it moved the projection (home perspective)
+  const ia=g.inj_adj!=null?+g.inj_adj:null;
+  const injTxt=(ia!=null&&Math.abs(ia)>=0.3)?` · injuries move it ${Math.abs(ia).toFixed(1)} toward ${esc(ia>0?g.home:g.away)}${g.inj_src==='espn'?' (live report)':''}`
+    :(g.inj_src==null&&!('margin' in g)?' · no injury report yet':'');
+  const early=(+g.wk<=4&&!('margin' in g))?`<div class="note" style="margin:4px 0 0">Early season — the ratings still lean on last season. Weeks 2–4 edges tested at about a coin flip.</div>`:'';
   if(edge!=null&&Math.abs(edge)>=0.05){
     const n=edge>0?-g.spread:g.spread;
-    return `<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(edge>0?g.home:g.away)} ${n>0?'+':''}${n.toFixed(1)}</b> · ${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}</div>`;
+    return `<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(edge>0?g.home:g.away)} ${n>0?'+':''}${n.toFixed(1)}</b> · ${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}</div>${early}`;
   }
-  return `<div class="note" style="margin:6px 0 0">${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}</div>`;
+  return `<div class="note" style="margin:6px 0 0">${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}</div>${early}`;
 }
 function nflPoints(g){
   if(g.ptot==null||g.proj==null)return '';
@@ -2941,7 +2946,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-23 17:30 UTC';
+const BUILD_STAMP='2026-10-24 01:50 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4127,7 +4132,7 @@ function renderSides(){
       }</div>`:''}
     <div class="note" style="margin:0 0 4px">${cfb
       ? (S.cfbr ? 'Model numbers come from the college ratings (Power tab › College). Lines you type on the College Board show here too. Treat the edge as a flag to look closer, not a bet.' : 'Schedule and results only — this feed carries no spreads or totals, so type the number into the bet line yourself. Load the college ratings for model numbers.')
-      : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly it ran about 54% against the closing spread — treat the edge column as a talking point, not a signal.`}</div>
+      : `Projection is calibrated on ${esc(String(cal.fit_season||'—'))} (scale ${cal.scale}, HFA ${cal.hfa>0?'+':''}${cal.hfa}). Tested honestly over 2021–25 it ran about 52% against the closing spread at 2+ point edges, 54% at 3+ — barely past the 52.4% break-even, and almost all of that came from the injury adjustment, not the ratings. Treat the edge as a flag to look closer, not a bet.`}</div>
   </div></div>`;
 
   if(!games.length){

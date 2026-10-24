@@ -27,7 +27,13 @@ from power_ratings import load_pbp, build_ratings, CONFIG
 
 
 def build_export(season, week):
-    pbp = load_pbp([season])
+    # this season plus last season's plays (last season at CONFIG's
+    # prior_season_weight) -- the same inputs export_games.py gives the Sides
+    # projection, so the Power table and the Sides numbers agree
+    try:
+        pbp = load_pbp([season - 1, season])
+    except Exception:
+        pbp = load_pbp([season])
     r = build_ratings(pbp, season, week, CONFIG)
 
     cols = ['rating', 'offense', 'defense', 'off_pass', 'off_rush',
