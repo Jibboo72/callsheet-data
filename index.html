@@ -1889,7 +1889,8 @@ function nflPoints(g){
 function cfbMatchup(g,e,upsetsOnly,input){
   const played=g.hs!=null;
   const L=cfbLine(g);
-  const hot=e&&e.edge>=7?'var(--hl-qb)':(e&&e.edge>=3?'rgba(95,227,154,.45)':'transparent');
+  // no green for big edges -- 2021-25 they tested worst; 7+ gets a caution tint
+  const hot=e&&e.edge>=7?'rgba(255,138,31,.30)':'transparent';
   const wpFav=g.home_wp>=0.5?g.home:g.away, wpv=Math.max(g.home_wp,1-g.home_wp);
   return `        <div class="note" style="margin:0 0 6px">${esc(cfbKick(g))}${g.conf_game?' · conference':''}${g.notes?' · '+esc(g.notes):''}</div>
         <div class="stats" style="grid-template-columns:1fr 1fr 70px">
@@ -1924,8 +1925,10 @@ function cfbBoard(d,upsetsOnly){
       return modelFav&&modelFav!==lineFav;
     });
   }
-  list.sort((a,b)=>(b.e?b.e.edge:-1)-(a.e?a.e.edge:-1)
-    || String(a.g.date+a.g.kick).localeCompare(String(b.g.date+b.g.kick)));
+  // by kickoff, not by edge: 2021-25 the biggest edges did the WORST
+  // (model side 48.6% at 2+ pts, 45.3% at 7+), so a biggest-edge-first list
+  // put the weakest plays on top
+  list.sort((a,b)=>String(a.g.date+a.g.kick).localeCompare(String(b.g.date+b.g.kick)));
   const withLine=rows.filter(r=>r.e).length;
   const bt=d.backtest&&d.backtest.test, tr=d.backtest&&d.backtest.train;
   let html=`<div style="display:grid;grid-template-columns:44px 1fr 44px;gap:6px;align-items:center;margin-bottom:10px">
@@ -1934,8 +1937,8 @@ function cfbBoard(d,upsetsOnly){
       <button class="btn ghost" data-cfbwk="${wk+1}" ${wk>=maxWk?'disabled':''} style="padding:7px 0">›</button>
     </div>`+cfbConfSelect(d,'All conferences');
   html+=`<div class="note" style="margin:0 0 10px">${upsetsOnly
-    ?`Line underdogs the model projects to win outright. ${withLine?'':'No lines yet for this week — type them on the Board tab.'}`
-    :`Ranked by EDGE: the points between the model's spread and the line. ${d.lines_source?`Lines: ${esc(d.lines_source)}. `:''}${withLine<rows.length?`${rows.length-withLine} game${rows.length-withLine===1?'':'s'} without a line — type the home team's number to get an edge.`:''}`}</div>`;
+    ?`Line underdogs the model projects to win outright. 2021–25 these dogs won 43.8% of the time against the 42.2% their spreads implied — about even before the vig, a loser after it. ${withLine?'':'No lines yet for this week — type them on the Board tab.'}`
+    :`In kickoff order. EDGE is the points between the model's spread and the line. 2021–25 the model's side covered 48.6% at 2+ points and 45.3% at 7+ — the bigger the gap, the more likely the market knows something a scores-only model can't see (injuries, QB changes, transfers). ${d.lines_source?`Lines: ${esc(d.lines_source)}. `:''}${withLine<rows.length?`${rows.length-withLine} game${rows.length-withLine===1?'':'s'} without a line — type the home team's number to get an edge.`:''}`}</div>`;
   if(tr&&bt) html+=`<div class="flag" style="margin:0 0 12px;border-color:var(--ink-soft);color:var(--ink-soft);background:transparent">Backtest, honestly: ${bt.label} the model missed by ${bt.mae_model} pts a game vs the closing line's ${bt.mae_line}. Edges of 7+ went ${tr.ats[4].w}-${tr.ats[4].n-tr.ats[4].w} (${(tr.ats[4].pct*100).toFixed(0)}%) in ${tr.label} and ${bt.ats[4].w}-${bt.ats[4].n-bt.ats[4].w} in ${bt.label.split(' ')[0]}. A big edge usually means the model is missing something the market knows — injuries, QB changes. Read it as a flag to look closer, not a bet.</div>`;
   if(!list.length){
     html+=`<div class="pblock"><div class="pbody"><div class="empty">${upsetsOnly?'No upset picks this week.':'No games this week.'}</div></div></div>`;
@@ -1944,7 +1947,8 @@ function cfbBoard(d,upsetsOnly){
   list.forEach(({g,e})=>{
     const played=g.hs!=null;
     const L=cfbLine(g);
-    const hot=e&&e.edge>=7?'var(--hl-qb)':(e&&e.edge>=3?'rgba(95,227,154,.45)':'transparent');
+    // no green for big edges any more -- they tested worst; 7+ gets a caution tint
+    const hot=e&&e.edge>=7?'rgba(255,138,31,.30)':'transparent';
     const wpFav=g.home_wp>=0.5?g.home:g.away, wpv=Math.max(g.home_wp,1-g.home_wp);
     html+=`<div class="cat" style="margin-bottom:12px">
       <div class="band" style="cursor:default;background:var(--stock-2)">
@@ -2946,7 +2950,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-24 01:50 UTC';
+const BUILD_STAMP='2026-10-24 02:20 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
