@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 import cfb_ratings as cr
+import cfb_pbp
 
 N_SIMS = 10_000
 TEAM_SHOCK_SD = 4.0     # how unsure we are of a team's TRUE rating, in points
@@ -310,6 +311,17 @@ def build(season):
     T = cur["teams"].set_index("team")
     fbs = T[T["div"] == "fbs"].copy()
 
+    # play-by-play layer (cfb_pbp.py): success rate + fumble luck on top of
+    # the scores model for FBS-vs-FBS game projections. Any failure -> the
+    # scores-only projection, exactly as before.
+    layer = None
+    try:
+        os.environ.setdefault("CFB_PBP_FRESH", str(season))
+        layer = cfb_pbp.PbpLayer(season, sched, cr.load_schedule(season - 1))
+        print(f"pbp layer: {len(layer.cur)} {season} snaps", file=sys.stderr)
+    except Exception as e:
+        print(f"pbp layer unavailable ({e}); scores-only projections", file=sys.stderr)
+
     conf_of, div_of = {}, {}
     for _, r in sched.iterrows():
         for side in ("home", "away"):
@@ -340,6 +352,15 @@ def build(season):
                  home_wp=round(p["home_wp"], 3) if fbs2 else (FCS_WIN if r.home_division == "fbs" else 1 - FCS_WIN))
         if isinstance(r.notes, str) and r.notes:
             g["notes"] = r.notes
+        if layer is not None and fbs2:
+            try:
+                wk_eff = int(r.wk) if r.played else max(int(r.wk), next_wk)
+                mg = layer.margin(h, a, bool(r.neutral), wk_eff, p["margin"], cfg["hfa"])
+                g["pem_score"] = g["pem"]                     # scores-only, for reference
+                g["pem"] = round(-mg, 1)
+                g["home_wp"] = round(0.5 * (1 + math.erf(mg / (cfg["sd_margin"] * math.sqrt(2)))), 3)
+            except Exception as e:
+                print(f"pbp layer failed for game {r.game_id} ({e})", file=sys.stderr)
         L = lmap.get(int(r.game_id))
         if L is not None and not pd.isna(L.line_spread):
             g["line"] = round(float(L.line_spread), 1)
