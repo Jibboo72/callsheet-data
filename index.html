@@ -539,7 +539,8 @@ async function load(){
   if(!S.lastRefresh || !S.odds || Date.now()-S.lastRefresh > 30*60*1000){
     refreshAllData().catch(()=>{}).then(()=>autoGradeBets());
   } else setTimeout(autoGradeBets,2500);
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden)autoGradeBets(); });
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ autoGradeBets(); pullMergeSync(); } });
+  setTimeout(pullMergeSync,1500);
   setInterval(autoGradeBets,5*60*1000);
   setInterval(()=>{ try{ takePropSnaps(); if(gradePropLog())save(); }catch(e){} },5*60*1000);
 }
@@ -3046,7 +3047,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-24 15:40 UTC';
+const BUILD_STAMP='2026-10-24 15:55 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -5343,7 +5344,11 @@ document.getElementById('bankList').addEventListener('click',e=>{
   const d=e.target.closest('[data-bdel]');
   if(d){
     const b=BANKKEY(); const i=b.bets.findIndex(y=>y.id===d.dataset.bdel);
-    if(i>=0){b.bets.splice(i,1);save();renderBank();renderLedger();}
+    if(i>=0){
+      // remember the delete, so a sync merge (below) doesn't bring it back
+      b.deleted=(b.deleted||[]).concat([b.bets[i].id]).slice(-1000);
+      b.bets.splice(i,1);save();renderBank();renderLedger();
+    }
   }
 });
 document.getElementById('moveBets').addEventListener('change',e=>{
@@ -5970,14 +5975,56 @@ async function remoteSync(tok){
   let data=null; try{ data=JSON.parse(unb64(j.content||'')); }catch(e){}
   return {sha:j.sha,data};
 }
+/* Merge GitHub's copy of the bets into this one, by bet id. Added
+   2026-10-24 after a second open copy of the app (an older tab or icon,
+   still holding 341 bets) saved over both GitHub and this phone's storage
+   and four new bets vanished. Now nothing that exists on either side is
+   dropped: bets missing here are added, a bet graded on one side and open
+   on the other takes the grade, and only bets you deleted (remembered in
+   bank.deleted, on both sides) stay gone. Returns how many bets changed. */
+function mergeRemoteBets(data){
+  if(!data||!data.bank||!Array.isArray(data.bank.bets))return 0;
+  const b=BANKKEY();
+  const gone=new Set([...(b.deleted||[]),...(data.bank.deleted||[])]);
+  const byId=new Map(b.bets.map(x=>[x.id,x]));
+  let n=0;
+  data.bank.bets.forEach(r=>{
+    if(!r||!r.id||gone.has(r.id))return;
+    const l=byId.get(r.id);
+    if(!l){ b.bets.push(r); byId.set(r.id,r); n++; }
+    else if(!l.result&&r.result){ l.result=r.result; if(r.auto)l.auto=r.auto; n++; }
+  });
+  const before=b.bets.length;
+  b.bets=b.bets.filter(x=>!gone.has(x.id));
+  n+=before-b.bets.length;
+  b.deleted=[...gone].slice(-1000);
+  return n;
+}
+async function pullMergeSync(){
+  const tok=syncTok(); if(!tok)return;
+  try{
+    const {data}=await remoteSync(tok);
+    const n=mergeRemoteBets(data);
+    if(n){ save(); renderBank(); renderLedger(); toast(`${n} bet${n===1?'':'s'} brought in from your other copy`); }
+  }catch(e){}
+}
 async function pushSync(force){
   const tok=syncTok(); if(!tok||_syncBusy)return;
   const core=JSON.parse(backupBlob()); delete core._backup;
-  const body=JSON.stringify(core), h=syncHash(body);
+  const body=JSON.stringify(core); let h=syncHash(body);
   if(!force&&localStorage.getItem(SYNC_HASH_KEY)===h)return;
   _syncBusy=true;
   try{
     let {sha,data}=await remoteSync(tok);
+    // never push a copy that is missing bets GitHub has: merge them in first
+    const merged=mergeRemoteBets(data);
+    if(merged){
+      const c2=JSON.parse(backupBlob()); delete c2._backup;
+      Object.keys(core).forEach(k=>delete core[k]); Object.assign(core,c2);
+      h=syncHash(JSON.stringify(core));
+      save(); renderBank(); renderLedger();
+      toast(`${merged} bet${merged===1?'':'s'} brought in from your other copy`);
+    }
     const mine=((core.bank||{}).bets||[]).length, theirs=data?((data.bank||{}).bets||[]).length:0;
     if(!force&&theirs>5&&mine<theirs/2){ syncMsg(`Not synced: this copy has ${mine} bets, GitHub has ${theirs}. Open your main Call Sheet icon, or tap Load from GitHub here.`,true); return; }
     core._sync={at:new Date().toISOString(),app:'callsheet',v:1};
