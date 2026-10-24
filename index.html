@@ -1120,7 +1120,7 @@ function takeSnaps(){
     if(S.cfbr&&Array.isArray(S.cfbr.games)) S.cfbr.games.forEach(g=>{
       if(g.fcs||g.hs!=null||g.pem==null)return;
       if(g.tt_home==null&&g.tt_away==null&&g.line_total==null&&g.line==null)return;
-      put('cfb:'+g.id,{pem:g.pem,pt:g.pem_total,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date);
+      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date);
     });
     if(S.games&&Array.isArray(S.games.games)) S.games.games.forEach(g=>{
       if(('margin' in g)||g.ptot==null||g.proj==null)return;
@@ -1203,6 +1203,12 @@ function scoreMae(rows,km,kb){
    points above the book's, fade it (bet the Under); 5+ below, bet the Over.
    Games the app never loaded before kickoff are left out, not back-filled. */
 const FADE_START='2026-10-17', FADE_GAP=5;
+/* 2026-10-24: the 2021-25 walk-forward said the opposite for the NFL -- the
+   model's own side went 111-97 (53%) at 5+ points, so fading it would have
+   been 47%. The NFL rule is now FOLLOW the model, restarted from that date so
+   it is still a forward test. College game totals backtested at 47% for the
+   model at 5+ (fade 53%), so college keeps the fade from its original date. */
+const TOT_RULE={nfl:{follow:true,start:'2026-10-24'},cfb:{follow:false,start:FADE_START}};
 function fadeRows(lg){
   const out={done:[],open:[]}; if(!S.snap)return out;
   const pre=lg+':';
@@ -1215,10 +1221,12 @@ function fadeRows(lg){
   Object.keys(S.snap).forEach(k=>{
     if(!k.startsWith(pre))return;
     const sn=S.snap[k], id=k.slice(pre.length);
-    if(!sn||sn.pt==null||sn.lt==null||String(sn.d||'')<FADE_START)return;
+    const rule=TOT_RULE[lg]||TOT_RULE.cfb;
+    if(!sn||sn.pt==null||sn.lt==null||String(sn.d||'')<rule.start)return;
     const gap=sn.pt-sn.lt; if(Math.abs(gap)<FADE_GAP)return;
-    const r={id,date:sn.d,name:names[id]||id,model:sn.pt,book:sn.lt,bet:gap>0?'Under':'Over'};
-    if(res[id]!=null){ const a=res[id]; r.actual=a; r.res=a===sn.lt?'P':((gap>0)===(a<sn.lt)?'W':'L'); out.done.push(r); }
+    const over=rule.follow?gap>0:gap<0;
+    const r={id,date:sn.d,name:names[id]||id,model:sn.pt,book:sn.lt,bet:over?'Over':'Under'};
+    if(res[id]!=null){ const a=res[id]; r.actual=a; r.res=a===sn.lt?'P':(over===(a>sn.lt)?'W':'L'); out.done.push(r); }
     else out.open.push(r);
   });
   out.done.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
@@ -1231,8 +1239,11 @@ function fadeBlock(lg){
   const n=w+l, pc=n?w/n:null;
   const col=pc==null||n<30?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
   const mark=r=>r==='W'?'<span style="color:var(--win);font-weight:700">W</span>':(r==='L'?'<span style="color:var(--loss);font-weight:700">L</span>':'<span style="color:var(--ink-soft)">P</span>');
-  let h=`<div class="pblock"><div class="pbh">Fade tracker · total, ${FADE_GAP}+ pts from the book</div><div class="pbody">
-    <div class="note" style="margin:0 0 8px">Test of one idea, fixed in advance: when the model's total is ${FADE_GAP}+ points off the book's, bet the other way. Counts games from ${FADE_START} on, using numbers saved before kickoff. The backtest's 56.7% for this idea is one small sample picked after the fact — it needs about 100 games above 53% before it means anything.</div>
+  const rule=TOT_RULE[lg]||TOT_RULE.cfb;
+  let h=`<div class="pblock"><div class="pbh">${rule.follow?'Totals tracker · follow the model':'Fade tracker'} · total, ${FADE_GAP}+ pts from the book</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">${rule.follow
+      ?`Fixed in advance: when the model's total is ${FADE_GAP}+ points off the book's, bet the model's side. 2021–25 that went 111-97 (53%), 56–58% in each of the last three seasons — the earlier "fade it" idea came from a few 2026 weeks and would have lost over five years. Counts games from ${rule.start} on, using numbers saved before kickoff.`
+      :`Fixed in advance: when the model's total is ${FADE_GAP}+ points off the book's, bet the other way (2021–25 the model's own side hit 47% there). Counts games from ${rule.start} on, using numbers saved before kickoff.`} The backtest's 56.7% for this idea is one small sample picked after the fact — it needs about 100 games above 53% before it means anything.</div>
     <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
       <div class="stat"><div class="n">${w}-${l}${p?'-'+p:''}</div><div class="l">W-L-P</div></div>
       <div class="stat"><div class="n" style="color:${col}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</div><div class="l">Win %</div></div>
@@ -1273,6 +1284,7 @@ function renderScorecard(host){
       ${tm?`<div class="note" style="margin:8px 0 0">Average miss on the total: model <b>${tm.m.toFixed(2)}</b> · book <b>${tm.b.toFixed(2)}</b> (${tm.n} games).</div>`:''}</div></div>`;
   } else html+=`<div class="pblock"><div class="pbh">Total</div><div class="pbody"><div class="note" style="margin:0">${lg==='nfl'?'No NFL totals graded yet — the model total arrives with the next data rebuild (Roster › Refresh all data).':'No totals graded yet.'}</div></div></div>`;
   html+=fadeBlock(lg);
+  if(lg==='cfb') html+=cfbTTFadeBlock();
   // team totals
   const ttAll=[]; rows.forEach(r=>(r.tt||[]).forEach(t=>ttAll.push(t)));
   const nSnap=S.snap?Object.keys(S.snap).length:0;
@@ -1650,6 +1662,78 @@ function cfbLine(g){
   const m=S.cfbLines&&S.cfbLines[g.id];
   return (m!=null&&m!=='')?{v:Number(m),src:'you'}:null;
 }
+/* College team totals: FADE the model when it's 5+ points off the book.
+   2021-25 walk-forward (scores model vs the team total implied by spread and
+   total): the model's side went 447-555 (44.6%) at 5+ and 147-194 at 7+,
+   under 50% in all five seasons -- so the other side went 55% / 57%. Found by
+   looking back, so it gets a forward tracker from TTF_START before it earns
+   real stakes. Uses the scores-only margin (what was tested), the book's team
+   total when SportsGameOdds has one, else the implied number. */
+const TTF_START='2026-10-24', TTF_GAP=5;
+function cfbTTPicks(g,sn){
+  const pem=sn?(sn.ps!=null?sn.ps:sn.pem):(g.pem_score!=null?g.pem_score:g.pem);
+  const pt=sn?sn.pt:g.pem_total, L=sn?sn.l:g.line, LT=sn?sn.lt:g.line_total;
+  if(pem==null||pt==null)return [];
+  const mh=(pt-pem)/2, ma=(pt+pem)/2;
+  let bh=sn?sn.th:g.tt_home, ba=sn?sn.ta:g.tt_away, imp=false;
+  if((bh==null||ba==null)&&L!=null&&LT!=null){ bh=(LT-L)/2; ba=(LT+L)/2; imp=true; }
+  const out=[];
+  [[g.home,mh,bh,'h'],[g.away,ma,ba,'a']].forEach(([t,m,b,sd])=>{
+    if(b==null)return; const gap=m-b; if(Math.abs(gap)<TTF_GAP)return;
+    out.push({team:t,sd,model:m,book:b,gap,bet:gap>0?'Under':'Over',imp});
+  });
+  return out;
+}
+function cfbTTFadeList(games){
+  const rows=[];
+  const today=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  games.forEach(g=>{ if(g.hs!=null||g.fcs)return; if(gameDay(g,'cfb')<today)return; cfbTTPicks(g,null).forEach(p=>rows.push(Object.assign({g},p))); });
+  rows.sort((a,b)=>Math.abs(b.gap)-Math.abs(a.gap));
+  let h=`<div class="pblock" style="margin-bottom:12px"><div class="pbh">Team-total fades · ${rows.length}</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">When the model's team total is ${TTF_GAP}+ points off the book, bet the <b>other</b> side. 2021–25 the model's side hit only 44.6% there (7+: 43%), under 50% every season — so the fade went about 55%. Found looking back: tracked from ${TTF_START} on (Power › Scorecard › College) before it earns full stakes. Book team totals where posted, otherwise the number implied by the spread and total.</div>`;
+  if(!rows.length) return h+`<div class="note" style="margin:0">Nothing this week.</div></div></div>`;
+  rows.forEach(r=>{
+    h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed rgba(22,21,15,.3)">
+      <div style="font-family:Oswald,sans-serif;font-weight:700;font-size:15px">${esc(r.team)} team total ${r.bet} ${r.book.toFixed(1)}${r.imp?' <span style="font-weight:400;font-size:11px">(implied — check your book)</span>':''}</div>
+      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} ${esc(r.g.kick||'')} · model ${r.model.toFixed(1)} (${r.gap>0?'+':''}${r.gap.toFixed(1)}) — fading it</div>
+    </div>`;
+  });
+  return h+`</div></div>`;
+}
+function cfbTTFadeTracker(){
+  const out={done:[],open:[]}; if(!S.snap||!S.cfbr)return out;
+  const G={}; (S.cfbr.games||[]).forEach(g=>G[String(g.id)]=g);
+  Object.keys(S.snap).forEach(k=>{
+    if(!k.startsWith('cfb:'))return;
+    const sn=S.snap[k], id=k.slice(4), g=G[id]; if(!g||!sn||String(sn.d||'')<TTF_START)return;
+    cfbTTPicks(g,sn).forEach(p=>{
+      const r=Object.assign({id,date:sn.d,name:cfbAb(g.away)+' @ '+cfbAb(g.home)},p);
+      if(g.hs!=null&&g.as_!=null){ const a=p.sd==='h'?g.hs:g.as_; r.actual=a; r.res=a===p.book?'P':((p.bet==='Over')===(a>p.book)?'W':'L'); out.done.push(r); }
+      else out.open.push(r);
+    });
+  });
+  out.done.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  return out;
+}
+function cfbTTFadeBlock(){
+  const f=cfbTTFadeTracker();
+  const w=f.done.filter(x=>x.res==='W').length, l=f.done.filter(x=>x.res==='L').length, p=f.done.filter(x=>x.res==='P').length;
+  const n=w+l, pc=n?w/n:null;
+  const col=pc==null||n<30?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+  let h=`<div class="pblock"><div class="pbh">Team-total fade tracker · ${TTF_GAP}+ pts</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Fixed in advance: when the model's college team total is ${TTF_GAP}+ points off the book, bet the other side. Backtest 2021–25 about 55%; graded here from ${TTF_START} on with numbers saved before kickoff. Needs 100+ graded before it means much.</div>
+    <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
+      <div class="stat"><div class="n">${w}-${l}${p?'-'+p:''}</div><div class="l">W-L-P</div></div>
+      <div class="stat"><div class="n" style="color:${col}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</div><div class="l">Win %</div></div>
+      <div class="stat"><div class="n">${n}<span style="font-size:11px;color:var(--ink-soft)"> / 100</span></div><div class="l">Graded</div></div>
+    </div>`;
+  if(f.done.length){
+    h+=`<div class="lab" style="margin:10px 0 4px">Graded</div>`;
+    f.done.slice(0,15).forEach(r=>{ const m=r.res==='W'?'<span style="color:var(--win);font-weight:700">W</span>':(r.res==='L'?'<span style="color:var(--loss);font-weight:700">L</span>':'P');
+      h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(r.team)} ${r.bet} ${r.book.toFixed(1)}</b><br><span style="color:var(--ink-soft);font-size:11px">${esc(r.name)} · model ${r.model.toFixed(1)} · scored ${r.actual}</span></span><span class="v">${m}</span></div>`; });
+  } else h+=`<div class="note" style="margin:8px 0 0">${f.open.length?`${f.open.length} flagged and waiting on results.`:'Nothing graded yet.'}</div>`;
+  return h+`</div></div>`;
+}
 /* "#12" for an FBS team, "FCS #5" for an FCS team, from the power ratings */
 let _cfbRk=null,_cfbRkKey='';
 function cfbRankOf(t){
@@ -1951,6 +2035,7 @@ function cfbBoard(d,upsetsOnly){
     ?`Line underdogs the model projects to win outright. 2021–25 these dogs won 43.8% of the time against the 42.2% their spreads implied — about even before the vig, a loser after it. ${withLine?'':'No lines yet for this week — type them on the Board tab.'}`
     :`In kickoff order. EDGE is the points between the model's spread and the line. 2021–25 the model's side covered 48.6% at 2+ points and 45.3% at 7+ — the bigger the gap, the more likely the market knows something a scores-only model can't see (injuries, QB changes, transfers). ${d.lines_source?`Lines: ${esc(d.lines_source)}. `:''}${withLine<rows.length?`${rows.length-withLine} game${rows.length-withLine===1?'':'s'} without a line — type the home team's number to get an edge.`:''}`}</div>`;
   if(tr&&bt) html+=`<div class="flag" style="margin:0 0 12px;border-color:var(--ink-soft);color:var(--ink-soft);background:transparent">Backtest, honestly: ${bt.label} the model missed by ${bt.mae_model} pts a game vs the closing line's ${bt.mae_line}. Edges of 7+ went ${tr.ats[4].w}-${tr.ats[4].n-tr.ats[4].w} (${(tr.ats[4].pct*100).toFixed(0)}%) in ${tr.label} and ${bt.ats[4].w}-${bt.ats[4].n-bt.ats[4].w} in ${bt.label.split(' ')[0]}. A big edge usually means the model is missing something the market knows — injuries, QB changes. Read it as a flag to look closer, not a bet.</div>`;
+  if(!upsetsOnly) html+=cfbTTFadeList(gs);
   if(!list.length){
     html+=`<div class="pblock"><div class="pbody"><div class="empty">${upsetsOnly?'No upset picks this week.':'No games this week.'}</div></div></div>`;
     return html;
@@ -2961,7 +3046,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-24 15:05 UTC';
+const BUILD_STAMP='2026-10-24 15:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3993,7 +4078,7 @@ async function autoGradeBets(){
    2021-25 walk-forward: model side covered ~52% at 2+, ~54% at 3+, barely
    past the 52.4% break-even -- a short list to look at, not a lock list. */
 function nflQualifiers(games,wk){
-  if(+wk<=4) return `<div class="pblock"><div class="pbh">This week's qualifiers</div><div class="pbody"><div class="note" style="margin:0">None in weeks 1–4 — early-season edges tested worse than a coin flip. Qualifiers start in week 5.</div></div></div>`;
+  if(+wk<=4) return `<div class="pblock"><div class="pbh">This week's qualifiers</div><div class="pbody"><div class="note" style="margin:0">No side qualifiers in weeks 1–4 — early-season edges tested worse than a coin flip. They start in week 5.</div>${nflTotalQualifiers(games)}</div></div>`;
   const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
   const rows=[];
   games.forEach(g=>{
@@ -4017,6 +4102,7 @@ function nflQualifiers(games,wk){
   let h=`<div class="pblock"><div class="pbh">This week's qualifiers · ${rows.length}</div><div class="pbody">
     <div class="note" style="margin:0 0 8px">Model 2+ points off the line, injuries not pushing the other way, flat stakes. Tested 2021–25 at about 52% (2+) and 54% (3+), barely past break-even — shop every book for a better number before betting, and re-check after Thursday's and Sunday morning's injury updates.</div>`;
   if(!rows.length) h+=`<div class="note" style="margin:0">Nothing qualifies right now.</div>`;
+  if(rows.length) h+=`<div class="lab" style="margin:4px 0 2px">Sides</div>`;
   rows.forEach(r=>{
     const injTxt=r.injAgree==null?'no injury report yet':(r.injAgree===1?`injuries agree (${Math.abs(r.ia).toFixed(1)} pts)`:'injuries neutral');
     h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed rgba(22,21,15,.3)">
@@ -4024,7 +4110,45 @@ function nflQualifiers(games,wk){
       <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} · edge ${r.edge.toFixed(1)} · ${injTxt}</div>
     </div>`;
   });
-  return h+`</div></div>`;
+  return h+nflTotalQualifiers(games)+`</div></div>`;
+}
+/* Totals that pass the tested rules (2021-25 walk-forward, NFL):
+     - outdoor wind 15+ mph forecast: under, 53-34 (61%); same flag as the
+       Weather unders block (58.5% since 2016)
+     - model total 5+ off the book's: 111-97 (53%) on the model's side, its
+       unders better than its overs (25-18 vs 86-79) -- unders 1 unit, overs
+       a half-unit lean
+   Team totals against the model tested flat (50-51%) and aren't listed. */
+function nflTotalQualifiers(games){
+  const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  const rows=[];
+  games.forEach(g=>{
+    if(('margin' in g)||g.mine||String(g.date||'')<todayIso)return;
+    const ln=nflLines(g), tl=ln&&ln.total;
+    const book=(tl&&tl.line!=null)?+tl.line:(g.total!=null?+g.total:null); if(book==null)return;
+    const w=S.wx&&S.wx.nfl?wxFor('nfl',g.id):null;
+    const windy=!!(w&&w.flags&&w.flags.length);
+    const gap=g.ptot!=null?g.ptot-book:null;
+    const big=gap!=null&&Math.abs(gap)>=5;
+    if(!windy&&!big)return;
+    let side,units,why=[];
+    if(windy){ side='Under'; units=1; why.push('weather: '+wxTag(w)); if(big&&gap<0)why.push(`model ${g.ptot.toFixed(1)}`); }
+    else if(gap<0){ side='Under'; units=1; why.push(`model ${g.ptot.toFixed(1)} vs ${book}`); }
+    else { side='Over'; units=0.5; why.push(`model ${g.ptot.toFixed(1)} vs ${book} · lean`); }
+    if(windy&&big&&gap>0)why.push(`model says over (${g.ptot.toFixed(1)}) — weather rule wins`);
+    const price=tl?(side==='Under'?tl.under:tl.over):null;
+    rows.push({g,side,book,price,units,why:why.join(' · '),src:tl&&tl.line!=null?'DK':'consensus',k:(windy?10:0)+Math.abs(gap||0)});
+  });
+  rows.sort((a,b)=>b.k-a.k);
+  let h=`<div class="lab" style="margin:10px 0 2px">Totals</div>`;
+  if(!rows.length) return h+`<div class="note" style="margin:0">No totals qualify right now (outdoor wind 15+ mph, or the model total 5+ off the book).</div>`;
+  rows.forEach(r=>{
+    h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed rgba(22,21,15,.3)">
+      <div style="font-family:Oswald,sans-serif;font-weight:700;font-size:15px">${r.side} ${r.book}${r.price?` <span style="font-weight:400;font-size:12px">${esc(String(r.price))} ${r.src}</span>`:` <span style="font-weight:400;font-size:12px">${r.src}</span>`} · <span style="color:var(--win)">${r.units} unit${r.units===1?'':'s'}</span></div>
+      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} · ${esc(r.why)}</div>
+    </div>`;
+  });
+  return h;
 }
 
 /* ---------------- closing line value (Bank) ----------------
