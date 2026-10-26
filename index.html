@@ -443,7 +443,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx','props'];
+const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx','props','experts'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -1975,6 +1975,110 @@ function nflSideNote(g){
   }
   return `<div class="note" style="margin:6px 0 0">${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}</div>${early}`;
 }
+/* ---- Expert crowd (data/experts-2026.json, built from the Expert ATS Ledger) ----
+   Each game carries how many published experts (CBS, Bleacher Report, Yahoo,
+   Athlon, NFL.com, ESPN, RotoWire, SI and others — spread picks plus score
+   predictions turned into a side) took the home and away side. Computer models
+   are left out so this is the human crowd only.
+   Context, not a rating input: through week 7 of 2026 the crowd's side went
+   40-61 ATS and following the hottest experts didn't help either. The tracker
+   below records whether your model does better with or against the crowd
+   before it earns any weight. */
+const CROWD_HEAVY=0.70;   // share of experts on one side that counts as a "heavy" crowd
+function crowdFor(g){
+  const x=S.experts&&S.experts.games&&S.experts.games[g.id];
+  if(!x||!x.n)return null;
+  const side=x.home>x.away?'home':(x.away>x.home?'away':null);
+  const share=side?Math.max(x.home,x.away)/x.n:0.5;
+  return {n:x.n,home:x.home,away:x.away,side,team:side?g[side]:null,share,heavy:!!side&&share>=CROWD_HEAVY};
+}
+function modelSideOf(g){
+  if(g.proj==null||g.spread==null)return null;
+  const e=g.proj-g.spread;                       // spread: + = home favored
+  return Math.abs(e)<0.05?null:(e>0?'home':'away');
+}
+function atsResult(g,side){                      // vs the stored book spread
+  if(!('margin' in g)||g.spread==null||!side)return null;
+  const m=g.margin-g.spread;
+  if(m===0)return 'P';
+  return (side==='home')===(m>0)?'W':'L';
+}
+function crowdNote(g){
+  const c=crowdFor(g); if(!c)return '';
+  const ms=modelSideOf(g);
+  const split=`${esc(g.away)} ${c.away} · ${esc(g.home)} ${c.home}`;
+  const lead=c.side?`<b>${Math.round(c.share*100)}% on ${esc(c.team)}</b>`:'<b>Experts split evenly</b>';
+  let flag='';
+  if(c.heavy&&ms){
+    flag=ms!==c.side
+      ? ` · <b style="color:var(--win)">Model fades the crowd</b>`
+      : ` · <span style="color:var(--ink-soft)">Model is with the crowd</span>`;
+  }
+  return `<div class="note" style="margin:4px 0 0">Experts (${c.n}): ${lead} — ${split}${flag}</div>`;
+}
+/* Short tag for the qualifier rows: does this qualifier side go against a heavy crowd? */
+function crowdTag(g,side){
+  const c=crowdFor(g); if(!c||!c.side)return '';
+  const pct=Math.round(c.share*100);
+  if(!c.heavy)return ` · crowd ${pct}% ${esc(c.team)}`;
+  return side===c.side?` · with a ${pct}% crowd`:` · <b>fades a ${pct}% crowd</b>`;
+}
+/* Season tracker: every NFL game that's final, has a book spread, a model
+   projection and expert picks. Graded against the same stored spread the
+   Sides board shows. Also splits your own logged NFL side bets. */
+function crowdTracker(){
+  if(!S.experts||!S.experts.games)return `<div class="pblock"><div class="pbh">Model vs the expert crowd</div><div class="pbody"><div class="note" style="margin:0">No expert picks loaded. Tap <b>Refresh all data</b> on the Roster tab to load <code>experts-2026.json</code>.</div></div></div>`;
+  const rec=()=>({W:0,L:0,P:0});
+  const R={crowd:rec(),fade:rec(),dog:rec(),model:rec(),mWith:rec(),mVsAny:rec(),mVsHeavy:rec(),heavyCrowd:rec()};
+  const add=(r,x)=>{ if(x)r[x]++; };
+  ((S.games&&S.games.games)||[]).forEach(g=>{
+    if(!('margin' in g)||g.spread==null)return;
+    const c=crowdFor(g); if(!c||!c.side)return;
+    const opp=c.side==='home'?'away':'home';
+    add(R.crowd,atsResult(g,c.side)); add(R.fade,atsResult(g,opp));
+    if(c.heavy) add(R.heavyCrowd,atsResult(g,c.side));
+    if(g.spread!==0) add(R.dog,atsResult(g,g.spread>0?'away':'home'));
+    const ms=modelSideOf(g); if(!ms)return;
+    const r=atsResult(g,ms);
+    add(R.model,r);
+    if(ms===c.side) add(R.mWith,r);
+    else { add(R.mVsAny,r); if(c.heavy) add(R.mVsHeavy,r); }
+  });
+  // your logged straight NFL side bets that point at a game with expert data
+  const B={with:rec(),vs:rec(),vsHeavy:rec()};
+  (S.bank&&S.bank.bets||[]).forEach(b=>{
+    if(b.kind!=='side'||b.market!=='side'||!b.game||!b.result||b.result==='OPEN')return;
+    const g=gameById(b.game); if(!g)return;
+    const c=crowdFor(g); if(!c||!c.side)return;
+    const d=' '+String(b.desc||'').toUpperCase().replace(/[^A-Z0-9+\-. ]/g,' ')+' ';
+    const onHome=d.includes(' '+g.home+' '), onAway=d.includes(' '+g.away+' ');
+    if(onHome===onAway)return;                    // can't tell which side it was
+    const side=onHome?'home':'away';
+    if(side===c.side) add(B.with,b.result); else { add(B.vs,b.result); if(c.heavy) add(B.vsHeavy,b.result); }
+  });
+  const fmt=r=>{ const n=r.W+r.L; return n?`${r.W}-${r.L}${r.P?'-'+r.P:''} <span style="color:var(--ink-soft)">(${(r.W/n*100).toFixed(1)}%)</span>`:'<span style="color:var(--ink-soft)">—</span>'; };
+  const row=(k,r,strong)=>`<div class="tline"><span class="k" style="text-transform:none;letter-spacing:0;font-size:12px;color:var(--ink)">${strong?`<b>${k}</b>`:k}</span><span>${fmt(r)}</span></div>`;
+  const anyBets=B.with.W+B.with.L+B.vs.W+B.vs.L>0;
+  const ex=S.experts;
+  return `<details class="pblock" style="margin-bottom:14px"><summary class="pbh" style="cursor:pointer">Model vs the expert crowd · ${fmt(R.mVsHeavy).replace(/ <span.*$/,'')} fading 70%+</summary><div class="pbody">
+    <div class="note" style="margin:0 0 8px">${ex.n_experts} published experts through week ${ex.through_week}, graded ATS against the board's spread. Tracking only — break-even is 52.4%, and a few dozen games can't prove anything yet.</div>
+    <div class="lab" style="margin:2px 0">Your model's side</div>
+    ${row('All model sides',R.model)}
+    ${row('With the crowd',R.mWith)}
+    ${row('Against the crowd',R.mVsAny)}
+    ${row('Against a 70%+ crowd',R.mVsHeavy,true)}
+    <div class="lab" style="margin:10px 0 2px">Baselines</div>
+    ${row('Crowd side',R.crowd)}
+    ${row('Fade the crowd',R.fade)}
+    ${row('Crowd at 70%+',R.heavyCrowd)}
+    ${row('Every underdog',R.dog)}
+    ${anyBets?`<div class="lab" style="margin:10px 0 2px">Your NFL side bets</div>
+    ${row('With the crowd',B.with)}
+    ${row('Against the crowd',B.vs)}
+    ${row('Against a 70%+ crowd',B.vsHeavy,true)}`:''}
+    <div class="note" style="margin:8px 0 0">If "fade the crowd" only matches "every underdog," the experts add nothing beyond their lean toward favorites.</div>
+  </div></details>`;
+}
 function nflPoints(g){
   if(g.ptot==null||g.proj==null)return '';
   return pointsTable(esc(g.away),esc(g.home),g.ptot,(g.ptot-g.proj)/2,(g.ptot+g.proj)/2,nflBook(g),nflGrades(g));
@@ -2201,6 +2305,12 @@ function mergeImport(raw){
     impSay(`Weather forecast ${String(data.generated||'').slice(5,16).replace('T',' ')} UTC: ${nf} NFL game${nf===1?'':'s'} flagged for the weather under.`);
     return;
   }
+  if(data&&data.kind==='experts'){
+    S.experts=data; save(); renderAll();
+    const ng=Object.keys(data.games||{}).length;
+    impSay(`Expert picks through week ${data.through_week}: ${data.n_experts} experts across ${ng} games.`);
+    return;
+  }
   if(data&&data.kind==='fcs_ratings'){
     S.fcsr=data; save(); renderAll();
     const nl=(data.games||[]).filter(g=>g.line!=null).length;
@@ -2334,6 +2444,7 @@ const REFRESH_FILES=[
   ['College ratings',  `cfb-ratings-${DATA_SEASON}.json`],
   ['FCS ratings',      `fcs-ratings-${DATA_SEASON}.json`],
   ['Weather',          `weather-${DATA_SEASON}.json`],
+  ['Expert picks',     `experts-${DATA_SEASON}.json`],
   ['Last season\'s logs', `receivers-${+DATA_SEASON-1}.json`],
   ['Receiver logs',  `receivers-${DATA_SEASON}.json`],
   ['Roster',         `roster-${DATA_SEASON}.json`]
@@ -3047,7 +3158,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-24 15:55 UTC';
+const BUILD_STAMP='2026-10-26 02:44 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4108,7 +4219,7 @@ function nflQualifiers(games,wk){
     const injTxt=r.injAgree==null?'no injury report yet':(r.injAgree===1?`injuries agree (${Math.abs(r.ia).toFixed(1)} pts)`:'injuries neutral');
     h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed rgba(22,21,15,.3)">
       <div style="font-family:Oswald,sans-serif;font-weight:700;font-size:15px">${esc(r.team)} ${r.num>0?'+':''}${r.num.toFixed(1)}${r.price?` <span style="font-weight:400;font-size:12px">${esc(String(r.price))} ${r.src}</span>`:` <span style="font-weight:400;font-size:12px">${r.src}</span>`} · <span style="color:var(--win)">${r.units} unit${r.units===1?'':'s'}</span></div>
-      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} · edge ${r.edge.toFixed(1)} · ${injTxt}</div>
+      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} · edge ${r.edge.toFixed(1)} · ${injTxt}${crowdTag(r.g,r.team===r.g.home?'home':'away')}</div>
     </div>`;
   });
   return h+nflTotalQualifiers(games)+`</div></div>`;
@@ -4381,7 +4492,7 @@ function renderSides(){
     host.innerHTML=html; return;
   }
 
-  if(!cfb && !q) html+=weatherUndersBlock(games)+nflQualifiers(games,wk);
+  if(!cfb && !q) html+=weatherUndersBlock(games)+nflQualifiers(games,wk)+crowdTracker();
   let markedFinal=false;
   games.forEach(g=>{
     const played0=!q&&gameDay(g,cfb?'cfb':'nfl')<todayIso;
@@ -4428,7 +4539,7 @@ function renderSides(){
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
           <div class="stat"><div class="n" style="font-size:17px;${nflGrade?gradeStyle(nflGrade):''}">${edge==null?'—':esc(edge>=0?g.home:g.away)+' +'+Math.abs(edge).toFixed(1)}</div><div class="l">Model edge</div></div>
-        </div>${(!cfb&&!g.mine)?nflSideNote(g)+nflPoints(g)+propsBlock(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
+        </div>${(!cfb&&!g.mine)?nflSideNote(g)+crowdNote(g)+nflPoints(g)+propsBlock(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${sTm(g.away)} @ ${sTm(g.home)}</span>
