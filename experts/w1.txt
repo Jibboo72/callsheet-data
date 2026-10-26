@@ -1,0 +1,405 @@
+# Week 1 2026. SF-LAR in Melbourne, LAR designated home. Scores from CBS grid.
+game NE-SEA 2026-09-09 10 13
+game SF-LAR 2026-09-11 27 7
+game ATL-PIT 2026-09-13 13 20
+game BAL-IND 2026-09-13 41 23
+game BUF-HOU 2026-09-13 36 31
+game CHI-CAR 2026-09-13 59 37
+game CLE-JAX 2026-09-13 10 34
+game NO-DET 2026-09-13 30 31
+game NYJ-TEN 2026-09-13 23 10
+game TB-CIN 2026-09-13 27 33
+game ARI-LAC 2026-09-13 26 14
+game GB-MIN 2026-09-13 22 39
+game MIA-LV 2026-09-13 13 27
+game WAS-PHI 2026-09-13 22 24
+game DAL-NYG 2026-09-13 20 28
+game DEN-KC 2026-09-14 10 31
+
+# CBS grid (Prisco, Dubin, Wilson, Breech, Sullivan, Richard, Eisenberg)
+grp NE-SEA SEA -3.5 | pete-prisco:SEA jared-dubin:SEA ryan-wilson:SEA john-breech:SEA tyler-sullivan:SEA dave-richard:NE jamey-eisenberg:NE
+grp SF-LAR LAR -3.5 | pete-prisco:SF jared-dubin:LAR ryan-wilson:LAR john-breech:LAR tyler-sullivan:SF dave-richard:SF jamey-eisenberg:LAR
+grp ATL-PIT PIT -3 | pete-prisco:PIT jared-dubin:PIT ryan-wilson:PIT john-breech:PIT tyler-sullivan:PIT dave-richard:PIT jamey-eisenberg:PIT
+grp BAL-IND BAL -3.5 | pete-prisco:BAL jared-dubin:BAL ryan-wilson:BAL john-breech:BAL tyler-sullivan:IND dave-richard:IND jamey-eisenberg:IND
+grp BUF-HOU BUF -1.5 | pete-prisco:BUF jared-dubin:HOU ryan-wilson:BUF john-breech:HOU tyler-sullivan:HOU dave-richard:HOU jamey-eisenberg:BUF
+grp CHI-CAR CHI -2.5 | pete-prisco:CHI jared-dubin:CHI ryan-wilson:CHI john-breech:CHI tyler-sullivan:CHI dave-richard:CAR jamey-eisenberg:CHI
+grp CLE-JAX JAX -7.5 | pete-prisco:JAX jared-dubin:JAX ryan-wilson:CLE john-breech:CLE tyler-sullivan:JAX dave-richard:JAX jamey-eisenberg:JAX
+grp NO-DET DET -7 | pete-prisco:DET jared-dubin:DET ryan-wilson:NO john-breech:DET tyler-sullivan:DET dave-richard:NO jamey-eisenberg:NO
+grp NYJ-TEN TEN -1.5 | pete-prisco:NYJ jared-dubin:TEN ryan-wilson:TEN john-breech:TEN tyler-sullivan:NYJ dave-richard:NYJ jamey-eisenberg:NYJ
+grp TB-CIN CIN -3.5 | pete-prisco:TB jared-dubin:TB ryan-wilson:TB john-breech:CIN tyler-sullivan:CIN dave-richard:CIN jamey-eisenberg:TB
+grp ARI-LAC LAC -10.5 | pete-prisco:LAC jared-dubin:LAC ryan-wilson:ARI john-breech:ARI tyler-sullivan:ARI dave-richard:ARI jamey-eisenberg:ARI
+grp GB-MIN MIN -1.5 | pete-prisco:GB jared-dubin:GB ryan-wilson:MIN john-breech:GB tyler-sullivan:MIN dave-richard:MIN jamey-eisenberg:MIN
+grp MIA-LV LV -3.5 | pete-prisco:LV jared-dubin:LV ryan-wilson:LV john-breech:LV tyler-sullivan:MIA dave-richard:LV jamey-eisenberg:MIA
+grp WAS-PHI PHI -4.5 | pete-prisco:PHI jared-dubin:PHI ryan-wilson:PHI john-breech:PHI tyler-sullivan:PHI dave-richard:WAS jamey-eisenberg:PHI
+grp DAL-NYG DAL -2.5 | pete-prisco:DAL jared-dubin:DAL ryan-wilson:NYG john-breech:DAL tyler-sullivan:NYG dave-richard:DAL jamey-eisenberg:DAL
+grp DEN-KC KC -2.5 | pete-prisco:KC jared-dubin:DEN ryan-wilson:DEN john-breech:DEN tyler-sullivan:DEN dave-richard:DEN jamey-eisenberg:DEN
+
+# Bleacher Report (Davenport GB-MIN: write-up backs GB)
+grp NE-SEA SEA -3.5 | moe-moton:NE gary-davenport:SEA brad-gagnon:SEA ian-hanford:SEA kris-knox:SEA brent-sobleski:SEA wes-odonnell:SEA
+grp SF-LAR LAR -3.5 | moe-moton:SF gary-davenport:LAR brad-gagnon:SF ian-hanford:LAR kris-knox:LAR brent-sobleski:LAR wes-odonnell:SF
+grp BUF-HOU BUF -1.5 | moe-moton:HOU gary-davenport:BUF brad-gagnon:HOU ian-hanford:HOU kris-knox:HOU brent-sobleski:HOU wes-odonnell:HOU
+grp CHI-CAR CHI -2.5 | moe-moton:CHI gary-davenport:CHI brad-gagnon:CHI ian-hanford:CHI kris-knox:CHI brent-sobleski:CHI wes-odonnell:CHI
+grp CLE-JAX JAX -7.5 | moe-moton:JAX gary-davenport:JAX brad-gagnon:JAX ian-hanford:CLE kris-knox:CLE brent-sobleski:CLE wes-odonnell:JAX
+grp ATL-PIT PIT -3.5 | moe-moton:PIT gary-davenport:PIT brad-gagnon:ATL ian-hanford:PIT kris-knox:PIT brent-sobleski:PIT wes-odonnell:PIT
+grp NYJ-TEN TEN -1.5 | moe-moton:TEN gary-davenport:NYJ brad-gagnon:TEN ian-hanford:TEN kris-knox:TEN brent-sobleski:TEN wes-odonnell:TEN
+grp NO-DET DET -7 | moe-moton:NO gary-davenport:DET brad-gagnon:DET ian-hanford:NO kris-knox:NO brent-sobleski:NO wes-odonnell:DET
+grp TB-CIN CIN -3.5 | moe-moton:CIN gary-davenport:CIN brad-gagnon:CIN ian-hanford:TB kris-knox:TB brent-sobleski:CIN wes-odonnell:TB
+grp BAL-IND BAL -3.5 | moe-moton:BAL gary-davenport:BAL brad-gagnon:BAL ian-hanford:BAL kris-knox:IND brent-sobleski:IND wes-odonnell:IND
+grp WAS-PHI PHI -5.5 | moe-moton:WAS gary-davenport:PHI brad-gagnon:WAS ian-hanford:PHI kris-knox:WAS brent-sobleski:WAS wes-odonnell:WAS
+grp GB-MIN MIN -1.5 | moe-moton:GB gary-davenport:GB brad-gagnon:MIN ian-hanford:GB kris-knox:GB brent-sobleski:MIN wes-odonnell:GB
+grp MIA-LV LV -3.5 | moe-moton:LV gary-davenport:LV brad-gagnon:LV ian-hanford:MIA kris-knox:LV brent-sobleski:LV wes-odonnell:MIA
+grp ARI-LAC LAC -9.5 | moe-moton:LAC gary-davenport:ARI brad-gagnon:LAC ian-hanford:ARI kris-knox:LAC brent-sobleski:LAC wes-odonnell:LAC
+grp DAL-NYG DAL -2.5 | moe-moton:DAL gary-davenport:DAL brad-gagnon:NYG ian-hanford:NYG kris-knox:DAL brent-sobleski:DAL wes-odonnell:NYG
+grp DEN-KC KC -2.5 | moe-moton:DEN gary-davenport:DEN brad-gagnon:DEN ian-hanford:KC kris-knox:DEN brent-sobleski:DEN wes-odonnell:KC
+
+# Yahoo - Schwab
+pick frank-schwab BUF-HOU HOU 1
+pick frank-schwab NE-SEA SEA -3.5
+pick frank-schwab SF-LAR SF 3.5
+pick frank-schwab NYJ-TEN TEN -1.5
+pick frank-schwab CHI-CAR CAR 3
+pick frank-schwab NO-DET NO 7
+pick frank-schwab BAL-IND IND 3.5
+pick frank-schwab ATL-PIT PIT -3.5
+pick frank-schwab TB-CIN TB 3.5
+pick frank-schwab CLE-JAX CLE 8.5
+pick frank-schwab WAS-PHI WAS 5.5
+pick frank-schwab MIA-LV LV -3.5
+pick frank-schwab ARI-LAC ARI 10
+pick frank-schwab GB-MIN MIN -1.5
+pick frank-schwab DAL-NYG DAL -3
+pick frank-schwab DEN-KC DEN 2.5
+
+# Athlon
+grp NE-SEA NE 3 | cory-bonini:NE luke-easterling:SEA craig-ellenport:SEA doug-farrar:SEA
+grp SF-LAR SF 3.5 | cory-bonini:LAR luke-easterling:LAR craig-ellenport:LAR doug-farrar:LAR
+grp CLE-JAX CLE 8.5 | cory-bonini:JAX luke-easterling:JAX craig-ellenport:JAX doug-farrar:JAX
+grp TB-CIN TB 3.5 | luke-easterling:TB cory-bonini:CIN craig-ellenport:CIN doug-farrar:CIN
+grp BAL-IND BAL -3.5 | cory-bonini:BAL luke-easterling:BAL craig-ellenport:BAL doug-farrar:BAL
+grp ATL-PIT ATL 3.5 | craig-ellenport:ATL cory-bonini:PIT luke-easterling:PIT doug-farrar:PIT
+grp BUF-HOU BUF -1.5 | cory-bonini:BUF luke-easterling:HOU craig-ellenport:HOU doug-farrar:HOU
+grp CHI-CAR CHI -3 | luke-easterling:CHI craig-ellenport:CHI doug-farrar:CHI cory-bonini:CAR
+grp NYJ-TEN NYJ 1.5 | cory-bonini:NYJ luke-easterling:NYJ craig-ellenport:NYJ doug-farrar:TEN
+grp NO-DET NO 7 | cory-bonini:NO luke-easterling:DET craig-ellenport:DET doug-farrar:DET
+grp ARI-LAC ARI 9.5 | cory-bonini:LAC luke-easterling:LAC craig-ellenport:LAC doug-farrar:LAC
+grp MIA-LV MIA 3.5 | luke-easterling:MIA cory-bonini:LV craig-ellenport:LV doug-farrar:LV
+grp WAS-PHI WAS 5.5 | cory-bonini:PHI luke-easterling:PHI craig-ellenport:PHI doug-farrar:PHI
+grp GB-MIN GB 1.5 | luke-easterling:GB doug-farrar:GB cory-bonini:MIN craig-ellenport:MIN
+grp DAL-NYG DAL -3 | luke-easterling:DAL doug-farrar:DAL cory-bonini:NYG craig-ellenport:NYG
+grp DEN-KC DEN 2.5 | cory-bonini:DEN luke-easterling:DEN craig-ellenport:DEN doug-farrar:DEN
+
+# Covers - Vasile
+pick chris-vasile NE-SEA SEA -3.5
+pick chris-vasile SF-LAR SF 3.5
+pick chris-vasile TB-CIN TB 3.5
+pick chris-vasile NO-DET DET -6.5
+pick chris-vasile NYJ-TEN NYJ 1.5
+pick chris-vasile BAL-IND BAL -3.5
+pick chris-vasile ATL-PIT PIT -3.5
+pick chris-vasile CHI-CAR CHI -3.5
+pick chris-vasile CLE-JAX JAX -9.5
+pick chris-vasile BUF-HOU HOU 1.5
+pick chris-vasile MIA-LV MIA 3.5
+pick chris-vasile GB-MIN MIN -1.5
+pick chris-vasile WAS-PHI WAS 5.5
+pick chris-vasile ARI-LAC ARI 9.5
+pick chris-vasile DAL-NYG NYG 2.5
+pick chris-vasile DEN-KC DEN 2.5
+
+# RotoWire - Whalen
+line NE-SEA SEA -3.5
+line SF-LAR LAR -3.5
+line CLE-JAX JAX -8
+line TB-CIN CIN -3.5
+line NO-DET DET -6.5
+line NYJ-TEN TEN -1.5
+line BAL-IND BAL -3
+line ATL-PIT PIT -3
+line CHI-CAR CHI -3
+line BUF-HOU BUF -1.5
+line GB-MIN MIN -1.5
+line MIA-LV LV -3.5
+line WAS-PHI PHI -4.5
+line ARI-LAC LAC -10.5
+line DAL-NYG DAL -2.5
+line DEN-KC KC -3
+score nick-whalen NE-SEA SEA 24 21
+score nick-whalen SF-LAR LAR 26 20
+score nick-whalen CLE-JAX JAX 23 13
+score nick-whalen TB-CIN TB 24 23
+score nick-whalen NO-DET DET 31 23
+score nick-whalen NYJ-TEN NYJ 17 14
+score nick-whalen BAL-IND BAL 27 23
+score nick-whalen ATL-PIT PIT 21 17
+score nick-whalen CHI-CAR CHI 28 24
+score nick-whalen BUF-HOU HOU 21 20
+score nick-whalen GB-MIN MIN 24 20
+score nick-whalen MIA-LV LV 20 17
+score nick-whalen WAS-PHI PHI 27 17
+score nick-whalen ARI-LAC LAC 27 19
+score nick-whalen DAL-NYG DAL 26 23
+score nick-whalen DEN-KC DEN 23 21
+
+# SBD model
+pick sbd-model NE-SEA NE 3.5
+pick sbd-model SF-LAR LAR -3.5
+pick sbd-model CHI-CAR CHI -2.5
+pick sbd-model BAL-IND IND 3.5
+pick sbd-model ATL-PIT PIT -3
+pick sbd-model CLE-JAX JAX -7.5
+pick sbd-model TB-CIN TB 3.5
+pick sbd-model NYJ-TEN NYJ 1.5
+pick sbd-model NO-DET DET -7
+pick sbd-model BUF-HOU BUF -1
+pick sbd-model ARI-LAC ARI 10.5
+pick sbd-model GB-MIN GB 1.5
+pick sbd-model MIA-LV MIA 3.5
+pick sbd-model WAS-PHI PHI -5.5
+pick sbd-model DAL-NYG DAL -3
+pick sbd-model DEN-KC DEN 2.5
+
+# Fantasy Alarm - Derr
+pick bryan-derr NE-SEA SEA -3
+pick bryan-derr SF-LAR LAR -3.5
+pick bryan-derr BAL-IND IND 3.5
+pick bryan-derr BUF-HOU HOU 1.5
+pick bryan-derr CHI-CAR CHI -3
+pick bryan-derr ATL-PIT PIT -3.5
+pick bryan-derr CLE-JAX JAX -8.5
+pick bryan-derr NO-DET NO 7
+pick bryan-derr NYJ-TEN TEN -1.5
+pick bryan-derr TB-CIN TB 3.5
+pick bryan-derr ARI-LAC LAC -9.5
+pick bryan-derr GB-MIN MIN -1.5
+pick bryan-derr MIA-LV LV -3.5
+pick bryan-derr WAS-PHI PHI -5.5
+pick bryan-derr DAL-NYG DAL -3
+pick bryan-derr DEN-KC DEN 2.5
+
+# PFT - Florio
+score mike-florio NE-SEA NE 24 21
+score mike-florio SF-LAR LAR 24 13
+score mike-florio BUF-HOU HOU 20 16
+score mike-florio TB-CIN CIN 27 24
+score mike-florio CHI-CAR CHI 24 17
+score mike-florio NO-DET DET 34 24
+score mike-florio BAL-IND BAL 24 20
+score mike-florio ATL-PIT PIT 21 10
+score mike-florio NYJ-TEN TEN 20 17
+score mike-florio CLE-JAX JAX 28 14
+score mike-florio WAS-PHI PHI 27 14
+score mike-florio GB-MIN MIN 30 20
+score mike-florio ARI-LAC LAC 27 10
+score mike-florio MIA-LV MIA 13 10
+score mike-florio DAL-NYG NYG 23 21
+score mike-florio DEN-KC KC 20 17
+
+# NFL.com
+score bobby-kownack DEN-KC DEN 22 21
+score brooke-cersosimo DEN-KC KC 23 20
+score dan-parr DEN-KC DEN 23 21
+score gennaro-filice DEN-KC KC 19 17
+score jeremy-bergman DEN-KC DEN 23 16
+score bobby-kownack CHI-CAR CHI 24 20
+score brooke-cersosimo CHI-CAR CAR 23 21
+score dan-parr CHI-CAR CHI 28 24
+score gennaro-filice CHI-CAR CHI 27 26
+score jeremy-bergman CHI-CAR CAR 24 23
+score bobby-kownack TB-CIN CIN 35 31
+score brooke-cersosimo TB-CIN CIN 25 22
+score dan-parr TB-CIN CIN 27 24
+score gennaro-filice TB-CIN TB 24 22
+score jeremy-bergman TB-CIN CIN 38 34
+score bobby-kownack NO-DET DET 31 19
+score brooke-cersosimo NO-DET DET 32 22
+score dan-parr NO-DET DET 34 23
+score gennaro-filice NO-DET DET 42 24
+score jeremy-bergman NO-DET DET 30 16
+score bobby-kownack BUF-HOU BUF 23 20
+score brooke-cersosimo BUF-HOU HOU 24 21
+score dan-parr BUF-HOU HOU 23 21
+score gennaro-filice BUF-HOU HOU 21 17
+score jeremy-bergman BUF-HOU HOU 24 19
+score bobby-kownack BAL-IND BAL 27 21
+score brooke-cersosimo BAL-IND BAL 24 20
+score dan-parr BAL-IND BAL 28 24
+score gennaro-filice BAL-IND IND 21 20
+score jeremy-bergman BAL-IND BAL 16 12
+score bobby-kownack CLE-JAX JAX 21 10
+score brooke-cersosimo CLE-JAX JAX 27 17
+score dan-parr CLE-JAX JAX 28 10
+score gennaro-filice CLE-JAX JAX 28 13
+score jeremy-bergman CLE-JAX JAX 30 13
+score bobby-kownack ATL-PIT PIT 20 17
+score brooke-cersosimo ATL-PIT PIT 20 17
+score dan-parr ATL-PIT PIT 23 17
+score gennaro-filice ATL-PIT PIT 23 14
+score jeremy-bergman ATL-PIT PIT 24 13
+score bobby-kownack NYJ-TEN NYJ 21 17
+score brooke-cersosimo NYJ-TEN NYJ 19 15
+score dan-parr NYJ-TEN NYJ 21 20
+score gennaro-filice NYJ-TEN NYJ 22 19
+score jeremy-bergman NYJ-TEN NYJ 23 17
+score bobby-kownack ARI-LAC LAC 30 17
+score brooke-cersosimo ARI-LAC LAC 27 16
+score dan-parr ARI-LAC LAC 28 17
+score gennaro-filice ARI-LAC LAC 28 21
+score jeremy-bergman ARI-LAC LAC 34 20
+score bobby-kownack MIA-LV MIA 16 14
+score brooke-cersosimo MIA-LV LV 22 13
+score dan-parr MIA-LV LV 26 16
+score gennaro-filice MIA-LV LV 26 19
+score jeremy-bergman MIA-LV LV 19 16
+score bobby-kownack GB-MIN MIN 27 26
+score brooke-cersosimo GB-MIN MIN 28 24
+score dan-parr GB-MIN MIN 23 21
+score gennaro-filice GB-MIN GB 27 20
+score jeremy-bergman GB-MIN MIN 21 20
+score bobby-kownack WAS-PHI PHI 28 20
+score brooke-cersosimo WAS-PHI PHI 23 20
+score dan-parr WAS-PHI PHI 30 20
+score gennaro-filice WAS-PHI PHI 30 13
+score jeremy-bergman WAS-PHI PHI 17 16
+score bobby-kownack DAL-NYG DAL 30 23
+score brooke-cersosimo DAL-NYG NYG 24 23
+score dan-parr DAL-NYG DAL 31 28
+score gennaro-filice DAL-NYG DAL 33 23
+score jeremy-bergman DAL-NYG DAL 21 17
+score bobby-kownack NE-SEA SEA 27 21
+score brooke-cersosimo NE-SEA SEA 24 20
+score dan-parr NE-SEA SEA 24 21
+score gennaro-filice NE-SEA SEA 26 13
+score jeremy-bergman NE-SEA SEA 31 24
+score bobby-kownack SF-LAR SF 26 23
+score brooke-cersosimo SF-LAR SF 26 24
+score dan-parr SF-LAR LAR 27 21
+score gennaro-filice SF-LAR LAR 27 20
+score jeremy-bergman SF-LAR LAR 20 16
+
+# --- new 12 experts (added Oct 25) ---
+grp NE-SEA SEA -3 | jeff-erickson:SEA scott-pianowski:SEA jim-coventry:NE ian-hartitz:SEA
+grp SF-LAR LAR -3.5 | jeff-erickson:LAR scott-pianowski:SF jim-coventry:LAR ian-hartitz:SF
+grp TB-CIN CIN -3.5 | jeff-erickson:CIN scott-pianowski:TB jim-coventry:TB ian-hartitz:CIN
+grp BAL-IND BAL -3.5 | jeff-erickson:IND scott-pianowski:BAL jim-coventry:BAL ian-hartitz:BAL
+grp BUF-HOU BUF -1 | jeff-erickson:HOU scott-pianowski:HOU jim-coventry:HOU ian-hartitz:BUF
+grp NO-DET DET -7 | jeff-erickson:NO scott-pianowski:DET jim-coventry:DET ian-hartitz:NO
+grp CLE-JAX JAX -8.5 | jeff-erickson:CLE scott-pianowski:JAX jim-coventry:JAX ian-hartitz:JAX
+grp NYJ-TEN TEN -1.5 | jeff-erickson:TEN scott-pianowski:TEN jim-coventry:NYJ ian-hartitz:NYJ
+grp ATL-PIT PIT -3.5 | jeff-erickson:PIT scott-pianowski:PIT jim-coventry:PIT ian-hartitz:PIT
+grp CHI-CAR CHI -3 | jeff-erickson:CAR scott-pianowski:CHI jim-coventry:CHI ian-hartitz:CHI
+grp GB-MIN MIN -1.5 | jeff-erickson:MIN scott-pianowski:GB jim-coventry:MIN ian-hartitz:GB
+grp WAS-PHI PHI -5.5 | jeff-erickson:PHI scott-pianowski:PHI jim-coventry:PHI ian-hartitz:PHI
+grp ARI-LAC LAC -9.5 | jeff-erickson:LAC scott-pianowski:LAC jim-coventry:ARI ian-hartitz:LAC
+grp MIA-LV LV -3.5 | jeff-erickson:MIA scott-pianowski:MIA jim-coventry:MIA ian-hartitz:MIA
+grp DAL-NYG DAL -3 | jeff-erickson:DAL scott-pianowski:DAL jim-coventry:DAL ian-hartitz:DAL
+grp DEN-KC KC -2.5 | jeff-erickson:DEN scott-pianowski:DEN jim-coventry:DEN ian-hartitz:DEN
+pick iain-macmillan SF-LAR SF 3.5
+pick iain-macmillan BUF-HOU BUF -1.5
+pick iain-macmillan CHI-CAR CAR 3
+pick iain-macmillan CLE-JAX JAX -8.5
+pick iain-macmillan ATL-PIT ATL 3.5
+pick iain-macmillan NYJ-TEN TEN -1.5
+pick iain-macmillan NO-DET DET -6.5
+pick iain-macmillan BAL-IND IND 3.5
+pick iain-macmillan TB-CIN TB 3.5
+pick iain-macmillan WAS-PHI WAS 5.5
+pick iain-macmillan GB-MIN GB 1.5
+pick iain-macmillan MIA-LV LV -3
+pick iain-macmillan ARI-LAC ARI 9.5
+pick iain-macmillan DAL-NYG DAL -2.5
+pick cody-williams NE-SEA NE 3.5
+pick cody-williams SF-LAR LAR -3.5
+pick cody-williams BUF-HOU HOU 1.5
+pick cody-williams CHI-CAR CHI -3
+pick cody-williams CLE-JAX JAX -8.5
+pick cody-williams ATL-PIT PIT -3.5
+pick cody-williams NYJ-TEN NYJ 1.5
+pick cody-williams NO-DET NO 6.5
+pick cody-williams TB-CIN CIN -3.5
+pick cody-williams BAL-IND BAL -3.5
+pick cody-williams WAS-PHI PHI -5.5
+pick cody-williams GB-MIN MIN -1.5
+pick cody-williams MIA-LV LV -3.5
+pick cody-williams ARI-LAC LAC -9.5
+pick cody-williams DAL-NYG DAL -2.5
+pick cody-williams DEN-KC KC -2.5
+pick gary-pearson CLE-JAX JAX -8.5
+pick gary-pearson NO-DET DET -6.5
+pick gary-pearson GB-MIN MIN -1.5
+pick gary-pearson NE-SEA SEA -3
+pick gary-pearson MIA-LV MIA 3.5
+pick gary-pearson SF-LAR SF 3.5
+pick gary-pearson ARI-LAC LAC -9.5
+pick gary-pearson DAL-NYG DAL -2.5
+pick gary-pearson CHI-CAR CHI -3
+pick gary-pearson NYJ-TEN TEN -1.5
+pick gary-pearson BAL-IND BAL -3.5
+pick gary-pearson ATL-PIT PIT -3.5
+pick gary-pearson BUF-HOU HOU 1.5
+pick gary-pearson TB-CIN TB 3.5
+pick gary-pearson WAS-PHI PHI -5
+pick gary-pearson DEN-KC DEN 2.5
+pick jimmy-kempski NE-SEA SEA -3
+pick jimmy-kempski SF-LAR LAR -3.5
+pick jimmy-kempski BAL-IND IND 3.5
+pick jimmy-kempski CHI-CAR CHI -2.5
+pick jimmy-kempski WAS-PHI PHI -4.5
+pick jimmy-kempski GB-MIN GB 1.5
+pick jimmy-kempski DAL-NYG DAL -2.5
+pick jimmy-kempski DEN-KC DEN 3
+score pamela-maldonado BUF-HOU HOU 20 17
+score eric-moody BUF-HOU HOU 23 20
+score seth-walder BUF-HOU BUF 24 17
+score espn-fpi BUF-HOU BUF 1.0 0
+score pamela-maldonado BAL-IND BAL 27 21
+score eric-moody BAL-IND BAL 30 20
+score seth-walder BAL-IND BAL 21 14
+score espn-fpi BAL-IND BAL 2.4 0
+score pamela-maldonado TB-CIN CIN 24 17
+score eric-moody TB-CIN CIN 26 19
+score seth-walder TB-CIN TB 27 23
+score espn-fpi TB-CIN CIN 3.1 0
+score pamela-maldonado NO-DET DET 31 17
+score eric-moody NO-DET DET 33 20
+score seth-walder NO-DET DET 27 13
+score espn-fpi NO-DET DET 6.7 0
+score pamela-maldonado CHI-CAR CHI 27 17
+score eric-moody CHI-CAR CHI 24 21
+score seth-walder CHI-CAR CHI 21 20
+score espn-fpi CHI-CAR CHI 2.8 0
+score pamela-maldonado ATL-PIT PIT 20 13
+score eric-moody ATL-PIT PIT 27 20
+score seth-walder ATL-PIT PIT 19 16
+score espn-fpi ATL-PIT PIT 2.5 0
+score pamela-maldonado CLE-JAX JAX 26 13
+score eric-moody CLE-JAX JAX 26 16
+score seth-walder CLE-JAX JAX 20 10
+score espn-fpi CLE-JAX JAX 7.7 0
+score pamela-maldonado NYJ-TEN NYJ 17 13
+score eric-moody NYJ-TEN NYJ 16 13
+score seth-walder NYJ-TEN NYJ 26 20
+score espn-fpi NYJ-TEN TEN 2.4 0
+score pamela-maldonado GB-MIN MIN 24 17
+score eric-moody GB-MIN GB 23 19
+score seth-walder GB-MIN GB 27 24
+score espn-fpi GB-MIN GB 1.8 0
+score pamela-maldonado WAS-PHI PHI 24 23
+score eric-moody WAS-PHI PHI 28 21
+score seth-walder WAS-PHI PHI 21 13
+score espn-fpi WAS-PHI PHI 4.8 0
+score pamela-maldonado ARI-LAC LAC 20 13
+score eric-moody ARI-LAC LAC 38 20
+score seth-walder ARI-LAC LAC 42 10
+score espn-fpi ARI-LAC LAC 9.6 0
+score pamela-maldonado MIA-LV LV 23 16
+score eric-moody MIA-LV LV 23 13
+score seth-walder MIA-LV MIA 20 19
+score espn-fpi MIA-LV LV 2.8 0
+score pamela-maldonado DAL-NYG DAL 30 20
+score eric-moody DAL-NYG DAL 33 26
+score seth-walder DAL-NYG DAL 23 22
+score espn-fpi DAL-NYG DAL 2.0 0
+score pamela-maldonado DEN-KC DEN 16 13
+score eric-moody DEN-KC DEN 26 21
+score seth-walder DEN-KC KC 23 20
+score espn-fpi DEN-KC KC 2.5 0
