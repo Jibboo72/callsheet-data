@@ -328,16 +328,22 @@ def build(season, cache_dir=None, prev_path=None):
         discount = pd.DataFrame(columns=["season", "week", "team_abbr", "discount"])
     disc_idx = discount.set_index(["season", "week", "team_abbr"])["discount"]
 
-    # the week about to be played: nflverse has nothing yet, so use ESPN's
-    # live report for teams it doesn't cover (see the module docstring)
+    # each team's NEXT unplayed game: nflverse has nothing for it yet, so use
+    # ESPN's live report (which always describes a team's next game). Keyed
+    # per team rather than one league-wide week, so a Monday-night game still
+    # pending doesn't hold back every other team's next-week report.
     unplayed = g[g.home_score.isna()]
     next_wk = int(unplayed.week.min()) if len(unplayed) else None
+    next_by_team = {}
+    for _, u in unplayed.sort_values("week").iterrows():
+        next_by_team.setdefault(u.home_team, int(u.week))
+        next_by_team.setdefault(u.away_team, int(u.week))
+    have = {t for t, w in next_by_team.items() if (season, w, t) in disc_idx.index}
     live = {}
-    if next_wk is not None:
-        have = set(t for (s_, w_, t) in disc_idx.index if s_ == season and w_ == next_wk)
-        if len(have) < 20:
-            live = espn_discounts(season, next_wk)
-            live = {t: v for t, v in live.items() if t not in have}
+    if next_by_team and len(have) < 20:
+        # snap shares from every game played so far (unplayed games have none)
+        live = espn_discounts(season, max(next_by_team.values()))
+        live = {t: v for t, v in live.items() if t not in have}
 
     def _injury_discount(wk, team):
         """(discount, source)"""
@@ -345,10 +351,8 @@ def build(season, cache_dir=None, prev_path=None):
             return float(disc_idx.loc[(season, wk, team)]), "nflverse"
         except KeyError:
             pass
-        if wk == next_wk and team in live:
-            return float(live[team]), "espn"
-        if wk == next_wk and live:
-            return 0.0, "espn"          # on ESPN's feed, nobody listed
+        if live and next_by_team.get(team) == wk:
+            return float(live.get(team, 0.0)), "espn"   # 0 = on ESPN's feed, nobody listed
         return 0.0, None
 
     # --- previous copy of this file: pre-kickoff numbers to freeze ------
