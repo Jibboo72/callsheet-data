@@ -69,6 +69,14 @@ def pull(key, days=DAYS):
 
     out, no_lines = [], 0
     for ev in events:
+        # skip anything that has already kicked off: its lines are live
+        # in-game numbers, not a pregame line (2026-10-26 fix)
+        try:
+            st = datetime.fromisoformat(str((ev.get("status") or {}).get("startsAt")).replace("Z", "+00:00"))
+            if st <= now:
+                continue
+        except Exception:
+            pass
         ln = parse_game_lines(ev)
         if not ln:
             no_lines += 1

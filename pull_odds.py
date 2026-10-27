@@ -139,9 +139,16 @@ def pull(season, key, days=8, league="NFL"):
         events = d.get("data", d if isinstance(d, list) else [])
         # belt and braces: drop anything already kicked off, whatever the
         # API did with the date params
-        cutoff = now.isoformat()
-        events = [e for e in events
-                  if str((e.get("status") or {}).get("startsAt") or "") >= cutoff[:10]]
+        # Compare the full timestamp, not just the date: a game that kicked
+        # off earlier today (or last night, UTC) carries LIVE in-game lines,
+        # which used to leak into the app's team totals and snapshots.
+        def _started(e):
+            try:
+                st = datetime.fromisoformat(str((e.get("status") or {}).get("startsAt")).replace("Z", "+00:00"))
+                return st <= now
+            except Exception:
+                return False
+        events = [e for e in events if not _started(e)]
     except Exception as e:
         raise SystemExit(f"events call failed: {e}")
 

@@ -605,6 +605,10 @@ def fit_phase(d, teams, target, alpha, weights, min_rows=200):
     off = d["posteam"].map(idx).to_numpy()
     dfn = d["defteam"].map(idx).to_numpy()
     home = (d["posteam"].values == d["home_team"].values).astype(float)
+    # neutral-site games (international series etc.) give nobody home field;
+    # play-by-play carries location = "Neutral" for them (2026-10-26 fix)
+    if "location" in d.columns:
+        home = home * (d["location"].values != "Neutral")
     y = d[target].astype(float).to_numpy()
     w = np.asarray(weights, dtype=float)
 

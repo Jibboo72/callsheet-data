@@ -247,6 +247,10 @@ def fit_scale_hfa(season):
         for _, x in g[g.week == w].iterrows():
             if x.home_team not in r.index or x.away_team not in r.index:
                 continue
+            # neutral-site games (London, Germany, Brazil...) have no home
+            # field, so they'd only muddy the home-field fit
+            if str(x.get("location", "Home")) == "Neutral":
+                continue
             raw.append(float(r.loc[x.home_team, "rating"] -
                              r.loc[x.away_team, "rating"]))
             act.append(float(x.home_score - x.away_score))
@@ -379,13 +383,17 @@ def build(season, cache_dir=None, prev_path=None):
         ptot = None
         inj_home = inj_away = inj_adj = inj_src = None
         R = wk_ratings.get(int(x.week), ratings)
+        # neutral site (international games etc.): no home-field points.
+        # Before 2026-10-26 every game got them, including PIT-NO in Week 7.
+        neutral = str(x.get("location", "Home")) == "Neutral"
+        hfa_g = 0.0 if neutral else hfa
         if h in R.index and a in R.index:
             diff = float(R.loc[h, "rating"] - R.loc[a, "rating"])
             inj_home, s1 = _injury_discount(int(x.week), h)
             inj_away, s2 = _injury_discount(int(x.week), a)
             inj_src = s1 or s2
             diff_adj = diff + CONFIG["injury_weight"] * (inj_away - inj_home)
-            proj = round(scale * diff_adj + hfa, 2)
+            proj = round(scale * diff_adj + hfa_g, 2)
             inj_adj = scale * CONFIG["injury_weight"] * (inj_away - inj_home)
             if pts_coef:
                 # the model's own game total: both teams' projected points,
@@ -393,7 +401,7 @@ def build(season, cache_dir=None, prev_path=None):
                 # season, walk-forward). Team points are then this total split
                 # by the margin above: home = (total + proj)/2.
                 c0, co, cd, ch = pts_coef
-                hp = c0 + co * float(R.loc[h, "offense"]) + cd * float(R.loc[a, "defense"]) + ch
+                hp = c0 + co * float(R.loc[h, "offense"]) + cd * float(R.loc[a, "defense"]) + (0.0 if neutral else ch)
                 ap = c0 + co * float(R.loc[a, "offense"]) + cd * float(R.loc[h, "defense"])
                 ptot = round(hp + ap, 1)
 
@@ -412,6 +420,7 @@ def build(season, cache_dir=None, prev_path=None):
             "wind": _n(x.wind, 0),
             "temp": _n(x.temp, 0),
             "div": bool(x.div_game) if not pd.isna(x.div_game) else None,
+            "neutral": neutral,
             "proj": proj,
             "ptot": ptot,
             # raw (unweighted) starter-availability discount, higher =

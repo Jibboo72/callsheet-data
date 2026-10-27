@@ -1113,20 +1113,39 @@ function renderRoster(){
    freezes each game's numbers (S.snap) every time it loads data before
    kickoff, and team totals are graded from those — tracking starts the day
    you first load them. Break-even at -110 is 52.4%. */
+/* kickoff time for the snapshot rule: NFL from the odds pull's start stamp,
+   college from the ratings file's date + Eastern kick time */
+function kickMs(lg,g){
+  try{
+    if(lg==='nfl'){
+      const od=S.odds&&S.odds.games; if(!od)return null;
+      const t0=new Date(g.date+'T12:00:00').getTime();
+      const o=od.find(x=>x.league==='NFL'&&x.home===g.home&&x.away===g.away&&x.start&&Math.abs(new Date(x.start).getTime()-t0)<=60*3600e3);
+      return o?Date.parse(o.start):null;
+    }
+    if(!g.date||!g.kick||!/^\d{1,2}:\d{2}$/.test(g.kick))return null;
+    const tz=new Date(g.date+'T16:00:00Z').toLocaleString('en-US',{timeZone:'America/New_York',timeZoneName:'short'});
+    const off=/EDT/.test(tz)?'-04:00':'-05:00';
+    return Date.parse(g.date+'T'+g.kick.padStart(5,'0')+':00'+off);
+  }catch(e){ return null; }
+}
 function takeSnaps(){
   try{
     const iso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
     S.snap=S.snap||{};
-    const put=(k,o,date)=>{ if(date&&String(date)<iso&&S.snap[k])return; S.snap[k]=Object.assign({d:date},o); };
+    const now=Date.now();
+    // never re-save once a game has kicked off: lines pulled after kickoff are
+    // live in-game numbers (2026-10-26 fix -- PIT-NO in London got one)
+    const put=(k,o,date,ko)=>{ if(date&&String(date)<iso&&S.snap[k])return; if(ko!=null&&ko<=now&&S.snap[k])return; if(ko!=null&&ko<=now)return; S.snap[k]=Object.assign({d:date},o); };
     if(S.cfbr&&Array.isArray(S.cfbr.games)) S.cfbr.games.forEach(g=>{
       if(g.fcs||g.hs!=null||g.pem==null)return;
       if(g.tt_home==null&&g.tt_away==null&&g.line_total==null&&g.line==null)return;
-      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date);
+      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date,kickMs('cfb',g));
     });
     if(S.games&&Array.isArray(S.games.games)) S.games.games.forEach(g=>{
       if(('margin' in g)||g.ptot==null||g.proj==null)return;
       const ln=nflLines(g), tt=ln&&ln.team_total;
-      put('nfl:'+g.id,{pem:g.proj,pt:g.ptot,l:g.spread,lt:g.total,th:tt&&tt.home?tt.home.line:null,ta:tt&&tt.away?tt.away.line:null},g.date);
+      put('nfl:'+g.id,{pem:g.proj,pt:g.ptot,l:g.spread,lt:g.total,th:tt&&tt.home?tt.home.line:null,ta:tt&&tt.away?tt.away.line:null},g.date,kickMs('nfl',g));
     });
     const keys=Object.keys(S.snap); if(keys.length>2500){ keys.sort((a,b)=>String(S.snap[a].d).localeCompare(String(S.snap[b].d))).slice(0,keys.length-2500).forEach(k=>delete S.snap[k]); }
   }catch(e){}
@@ -1937,6 +1956,9 @@ function nflBook(g){
   const bt=g.total!=null?g.total:(ln&&ln.total&&ln.total.line!=null?ln.total.line:null);
   let bh=tt&&tt.home?tt.home.line:null, ba=tt&&tt.away?tt.away.line:null, implied=false;
   const sn=S.snap&&S.snap['nfl:'+g.id];
+  // a finished game is graded on the team totals saved BEFORE kickoff; the
+  // odds file can hold live in-game numbers for a game pulled after it started
+  if(('margin' in g)&&sn&&sn.th!=null&&sn.ta!=null){ bh=sn.th; ba=sn.ta; }
   if((bh==null||ba==null)&&sn&&sn.th!=null&&sn.ta!=null){ bh=sn.th; ba=sn.ta; }
   if((bh==null||ba==null)&&bt!=null&&g.spread!=null){ bh=(bt+g.spread)/2; ba=(bt-g.spread)/2; implied=true; }   // spread: + = home favored
   return {t:bt,h:bh,a:ba,implied};
@@ -3158,7 +3180,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-26 02:44 UTC';
+const BUILD_STAMP='2026-10-27 02:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4225,8 +4247,8 @@ function nflQualifiers(games,wk){
   return h+nflTotalQualifiers(games)+`</div></div>`;
 }
 /* Totals that pass the tested rules (2021-25 walk-forward, NFL):
-     - outdoor wind 15+ mph forecast: under, 53-34 (61%); same flag as the
-       Weather unders block (58.5% since 2016)
+     - the Weather unders flag (outdoor, rain/snow or 15+ mph wind): under.
+       190-135 (58.5%) since 2016; wind 15+ alone went 53-34 (61%) 2021-25
      - model total 5+ off the book's: 111-97 (53%) on the model's side, its
        unders better than its overs (25-18 vs 86-79) -- unders 1 unit, overs
        a half-unit lean
@@ -4253,7 +4275,7 @@ function nflTotalQualifiers(games){
   });
   rows.sort((a,b)=>b.k-a.k);
   let h=`<div class="lab" style="margin:10px 0 2px">Totals</div>`;
-  if(!rows.length) return h+`<div class="note" style="margin:0">No totals qualify right now (outdoor wind 15+ mph, or the model total 5+ off the book).</div>`;
+  if(!rows.length) return h+`<div class="note" style="margin:0">No totals qualify right now (an outdoor weather flag — rain/snow or 15+ mph wind — or the model total 5+ off the book).</div>`;
   rows.forEach(r=>{
     h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed rgba(22,21,15,.3)">
       <div style="font-family:Oswald,sans-serif;font-weight:700;font-size:15px">${r.side} ${r.book}${r.price?` <span style="font-weight:400;font-size:12px">${esc(String(r.price))} ${r.src}</span>`:` <span style="font-weight:400;font-size:12px">${r.src}</span>`} · <span style="color:var(--win)">${r.units} unit${r.units===1?'':'s'}</span></div>
