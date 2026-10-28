@@ -1,0 +1,82 @@
+# Week 8 2026. Partial load Wed Oct 28 (sources posted so far: RotoWire staff, Covers, SBD model, FanSided).
+# Friday run: add the remaining sources below; for PHI-WAS the quoted lines conflict (PHI -5.5 at RotoWire/FanSided,
+# WAS -3.5/-4.5 at Covers/SBD) so sides are kept without quoted lines and the board's number is used.
+game CAR-GB 2026-10-29
+game BAL-BUF 2026-11-01
+game TEN-CIN 2026-11-01
+game ARI-DAL 2026-11-01
+game MIN-DET 2026-11-01
+game IND-JAX 2026-11-01
+game LV-NYJ 2026-11-01
+game CLE-PIT 2026-11-01
+game ATL-TB 2026-11-01
+game LAC-LAR 2026-11-01
+game KC-DEN 2026-11-01
+game NE-MIA 2026-11-01
+game PHI-WAS 2026-11-01
+game CHI-SEA 2026-11-02
+line PHI-WAS WAS -3.5
+
+# RotoWire staff picks (BetMGM). Whalen's staff pick stands in for Beating the Book until that column posts.
+grp CAR-GB GB -4 | jeff-erickson:GB scott-pianowski:CAR nick-whalen:GB jim-coventry:CAR ian-hartitz:GB
+grp BAL-BUF BUF -3 | jeff-erickson:BAL scott-pianowski:BUF nick-whalen:BUF jim-coventry:BAL ian-hartitz:BUF
+grp TEN-CIN CIN -10.5 | jeff-erickson:TEN scott-pianowski:CIN nick-whalen:TEN jim-coventry:CIN ian-hartitz:CIN
+grp ARI-DAL DAL -7 | jeff-erickson:DAL scott-pianowski:ARI nick-whalen:ARI jim-coventry:ARI ian-hartitz:ARI
+grp MIN-DET DET -3 | jeff-erickson:DET scott-pianowski:MIN nick-whalen:DET jim-coventry:MIN ian-hartitz:MIN
+grp IND-JAX JAX -9.5 | jeff-erickson:JAX scott-pianowski:JAX nick-whalen:JAX jim-coventry:IND ian-hartitz:JAX
+grp LV-NYJ NYJ -1.5 | jeff-erickson:NYJ scott-pianowski:LV nick-whalen:LV jim-coventry:LV ian-hartitz:LV
+grp CLE-PIT PIT -3.5 | jeff-erickson:CLE scott-pianowski:CLE nick-whalen:CLE jim-coventry:CLE ian-hartitz:CLE
+grp ATL-TB TB -2.5 | jeff-erickson:TB scott-pianowski:ATL nick-whalen:ATL jim-coventry:ATL ian-hartitz:ATL
+grp LAC-LAR LAR -6.5 | jeff-erickson:LAR scott-pianowski:LAR nick-whalen:LAR jim-coventry:LAR ian-hartitz:LAR
+grp KC-DEN KC -1 | jeff-erickson:DEN scott-pianowski:DEN nick-whalen:KC jim-coventry:KC ian-hartitz:DEN
+grp NE-MIA NE -7 | jeff-erickson:MIA scott-pianowski:MIA nick-whalen:NE jim-coventry:NE ian-hartitz:NE
+grp PHI-WAS | jeff-erickson:PHI scott-pianowski:PHI nick-whalen:WAS jim-coventry:PHI ian-hartitz:WAS
+grp CHI-SEA SEA -3.5 | jeff-erickson:SEA scott-pianowski:SEA nick-whalen:CHI jim-coventry:CHI ian-hartitz:CHI
+
+# Covers - Chris Vasile
+pick chris-vasile CAR-GB CAR 3.5
+pick chris-vasile BAL-BUF BAL 3.5
+pick chris-vasile TEN-CIN CIN -10.5
+pick chris-vasile ARI-DAL ARI 6.5
+pick chris-vasile MIN-DET MIN 3.5
+pick chris-vasile IND-JAX JAX -7.5
+pick chris-vasile LV-NYJ NYJ 1.5
+pick chris-vasile CLE-PIT CLE 3.5
+pick chris-vasile ATL-TB ATL 2.5
+pick chris-vasile LAC-LAR LAR -6.5
+pick chris-vasile KC-DEN KC -1.5
+pick chris-vasile NE-MIA MIA 7.5
+pick chris-vasile PHI-WAS WAS
+pick chris-vasile CHI-SEA CHI 3.5
+
+# SBD model
+pick sbd-model CAR-GB CAR 4.5
+pick sbd-model IND-JAX JAX -7.5
+pick sbd-model TEN-CIN CIN -9.5
+pick sbd-model CLE-PIT PIT -3.5
+pick sbd-model MIN-DET MIN 3.5
+pick sbd-model ARI-DAL DAL -6.5
+pick sbd-model ATL-TB ATL 1.5
+pick sbd-model LV-NYJ LV 1.5
+pick sbd-model BAL-BUF BUF -3.5
+pick sbd-model LAC-LAR LAR -6.5
+pick sbd-model NE-MIA NE -7.5
+pick sbd-model KC-DEN KC -1.5
+pick sbd-model PHI-WAS WAS
+pick sbd-model CHI-SEA CHI 3.5
+
+# FanSided - Cody Williams (FanDuel)
+pick cody-williams CAR-GB CAR 3.5
+pick cody-williams TEN-CIN CIN -10.5
+pick cody-williams BAL-BUF BUF -3.5
+pick cody-williams ARI-DAL DAL -6.5
+pick cody-williams CLE-PIT PIT -3
+pick cody-williams IND-JAX JAX -8.5
+pick cody-williams MIN-DET MIN 3.5
+pick cody-williams ATL-TB ATL 2.5
+pick cody-williams LV-NYJ LV 1.5
+pick cody-williams LAC-LAR LAR -6.5
+pick cody-williams KC-DEN KC -1.5
+pick cody-williams NE-MIA NE -7
+pick cody-williams PHI-WAS WAS
+pick cody-williams CHI-SEA CHI 3

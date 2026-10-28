@@ -11,8 +11,8 @@ game CIN-BAL 2026-10-25 35 13
 game DEN-ARI 2026-10-25 30 16
 game LAR-LV 2026-10-25 35 21
 game GB-DET 2026-10-25 17 20
-game KC-SEA 2026-10-25
-game DAL-PHI 2026-10-26
+game KC-SEA 2026-10-25 3 20
+game DAL-PHI 2026-10-26 38 21
 
 # Yahoo - Frank Schwab
 pick frank-schwab KC-SEA SEA -2.5
