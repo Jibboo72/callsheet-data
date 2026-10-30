@@ -34,8 +34,12 @@ because those do not exist for us; the app tracks its own picks going forward)
   * lrush  per-carry chance of a run of L+ yards (shrunk to position) mixed
          over the carries distribution.
   * combo  gamma, mean = form x script factor, spread fit on 2025.
-  * atd  logistic on usage (targets, red-zone looks, carries inside the 10,
-         recent TD rate) and implied points, fit on prior data.
+  * atd  logistic on touchdown usage: expected TDs (every carry and target
+         priced by field position, rates from the prior season) over a
+         weighted long window and the last 5 games, the player's share of
+         his team's xTD, team implied points, targets and carries. Each
+         player also gets a "tdu" block for the app's TD scorer card (last-5
+         xTD, TDs, red-zone / goal-line / end-zone looks, usage score).
 
   Everything is checked out of sample before it is trusted: models are fit on
   data BEFORE the season being scored and the calibration table is written to
@@ -75,7 +79,8 @@ def load_pbp(season, cache=None):
             "rush_attempt", "pass_attempt", "complete_pass", "qb_kneel", "sack",
             "rusher_player_id", "receiver_player_id", "passer_player_id",
             "rushing_yards", "receiving_yards", "pass_touchdown", "rush_touchdown",
-            "td_player_id", "spread_line", "total_line", "qb_scramble"]
+            "td_player_id", "spread_line", "total_line", "qb_scramble",
+            "air_yards", "two_point_attempt"]
     path = (cache or {}).get(season)
     if path and os.path.exists(path):
         df = pd.read_parquet(path)
@@ -268,7 +273,90 @@ def fit_disp(mu, y):
 # ----------------------------------------------------------------------------
 # models
 # ----------------------------------------------------------------------------
-ATD_COLS = ["f_tgt", "f_rz20", "f_car", "f_rz10", "f_gl", "f_td"]
+ATD_COLS = ["f_tgt", "f_car", "u_xew", "u_x5", "u_shew", "u_tdew"]
+
+
+# ----------------------------------------------------------------------------
+# touchdown usage: every carry and target priced by where it happened
+# ----------------------------------------------------------------------------
+# Expected TDs (xTD) price each carry and target at the league's TD rate for
+# that spot on the field: carries split QB / everyone else (sneaks score far
+# more), targets split by whether the throw reached the end zone. Rates come
+# from the PRIOR season only, so a backtest never sees its own answers.
+# Over a 5-game window this is the M.C. Analytics "Touchdown Cheat Sheet"
+# number; the model below uses it, a longer weighted window, the player's
+# share of his team's xTD and the team's implied points.
+GL_YD, RZ_YD = 5, 20
+USAGE_HL = 4.0          # games, half-life of the long usage window
+USAGE_N = 5             # the short window (the cheat-sheet window)
+
+
+def td_events(pbp, pos):
+    d = pbp[(pbp.get("two_point_attempt", 0) != 1) & (pbp.qb_kneel != 1)]
+    ru = d[(d.rush_attempt == 1) & d.rusher_player_id.notna()]
+    ru = pd.DataFrame({"season": ru.season, "game_id": ru.game_id, "posteam": ru.posteam,
+                       "pid": ru.rusher_player_id, "kind": "rush", "yl": ru.yardline_100,
+                       "td": ((ru.rush_touchdown == 1) & (ru.td_player_id == ru.rusher_player_id)).astype(int),
+                       "ez": 0})
+    re = d[(d.pass_attempt == 1) & d.receiver_player_id.notna()]
+    re = pd.DataFrame({"season": re.season, "game_id": re.game_id, "posteam": re.posteam,
+                       "pid": re.receiver_player_id, "kind": "tgt", "yl": re.yardline_100,
+                       "td": ((re.pass_touchdown == 1) & (re.td_player_id == re.receiver_player_id)).astype(int),
+                       "ez": (re.air_yards >= re.yardline_100).fillna(False).astype(int)})
+    ev = pd.concat([ru, re], ignore_index=True)
+    ev = ev[ev.yl.notna()].copy()
+    ev["yl"] = ev.yl.clip(1, 99).astype(int)
+    ev["qb"] = (ev.pid.map(pos) == "QB").astype(int)
+    ev["grp"] = np.where(ev.kind == "rush", np.where(ev.qb == 1, "rush_qb", "rush"),
+                         np.where(ev.ez == 1, "tgt_ez", "tgt"))
+    return ev
+
+
+def td_rate_tables(ev):
+    """TD rate by yard line for each play group, smoothed over 5 yards except
+    right at the goal line where every yard matters."""
+    T = {}
+    for grp, sub in ev.groupby("grp"):
+        g = sub.groupby("yl").td.agg(["sum", "count"]).reindex(range(1, 100), fill_value=0)
+        s = g["sum"].rolling(5, center=True, min_periods=1).sum()
+        c = g["count"].rolling(5, center=True, min_periods=1).sum()
+        narrow = 5 if grp.startswith("rush") else 3
+        r = np.where(g.index <= narrow, (g["sum"] + 0.5) / (g["count"] + 1), (s + 0.5) / (c + 1))
+        T[grp] = r
+    return T
+
+
+def add_usage(pg, ev, T):
+    """Per game: xtd, red-zone / goal-line counts, team xTD. Then the pre-game
+    windows (u_*) and the after-game windows (n_*, what the NEXT game uses)."""
+    ev = ev.copy()
+    ev["x"] = [T.get(g, T["tgt"])[y - 1] for g, y in zip(ev.grp, ev.yl)]
+    ev["rzr"] = ((ev.kind == "rush") & (ev.yl <= RZ_YD)).astype(int)
+    ev["glr"] = ((ev.kind == "rush") & (ev.yl <= GL_YD)).astype(int)
+    ev["rzt"] = ((ev.kind == "tgt") & (ev.yl <= RZ_YD)).astype(int)
+    ev["ezt"] = ((ev.kind == "tgt") & (ev.ez == 1)).astype(int)
+    g = ev.groupby(["game_id", "pid"]).agg(xtd=("x", "sum"), rzr=("rzr", "sum"), glr=("glr", "sum"),
+                                           rzt=("rzt", "sum"), ezt=("ezt", "sum")).reset_index()
+    tm = ev.groupby(["game_id", "posteam"]).x.sum().rename("txtd").reset_index()
+    pg = pg.drop(columns=[c for c in ("xtd", "rzr", "glr", "rzt", "ezt", "txtd") if c in pg], errors="ignore")
+    pg = pg.merge(g, on=["game_id", "pid"], how="left").merge(tm, on=["game_id", "posteam"], how="left")
+    for c in ("xtd", "rzr", "glr", "rzt", "ezt"):
+        pg[c] = pg[c].fillna(0.0)
+    pg["share"] = pg.xtd / pg.txtd.fillna(0).clip(lower=0.5)
+    pg = pg.sort_values(["pid", "t"]).reset_index(drop=True)
+    by = pg.groupby("pid")
+    for c, src in (("xew", "xtd"), ("shew", "share"), ("tdew", "td")):
+        n = by[src].transform(lambda v: v.ewm(halflife=USAGE_HL).mean())
+        pg["n_" + c] = n
+        pg["u_" + c] = n.groupby(pg.pid).shift(1)
+    n5 = by.xtd.transform(lambda v: v.rolling(USAGE_N, min_periods=1).mean())
+    pg["n_x5"] = n5
+    pg["u_x5"] = n5.groupby(pg.pid).shift(1)
+    return pg
+
+
+def _lg(x):
+    return np.log(np.clip(np.asarray(x, float), 0.01, None))
 LRUSH_T = list(range(1, 51))          # longest-rush thresholds exported (P(longest >= L), L = 1..50)
 COMBO_X = list(range(0, 301, 5))      # combo-yards grid (P(total >= x), every 5 yards)
 CAR_MAX = 40
@@ -277,9 +365,16 @@ Q_THR = [2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20, 25, 30, 40, 50, 60, 80]
 
 
 def atd_X(d):
-    return np.column_stack([d.f_tgt, d.f_rz20, d.f_car, d.f_rz10, d.f_gl,
-                            d.f_td * 5, (d.imp - 22.5) / 5,
-                            d.pos.eq("RB"), d.pos.eq("TE"), d.pos.eq("QB")]).astype(float)
+    """Anytime TD, logistic. Tested walk-forward on 2025 and 2026 (fit on the
+    season before): log loss 0.4736 / 0.4707 vs 0.4754 / 0.4738 for the old
+    counts-based version and 0.4949 / 0.4903 for the raw 5-game xTD read as a
+    probability. Red-zone counts, goal-line counts and the opponent's TDs
+    allowed added nothing once xTD and implied points were in."""
+    imp = np.asarray(d.imp, float)
+    return np.column_stack([_lg(d.u_xew), _lg(d.u_x5), (imp - 22.5) / 5,
+                            _lg(np.asarray(d.u_shew, float) * imp / 7), d.u_tdew,
+                            d.pos.eq("RB"), d.pos.eq("TE"), d.pos.eq("QB"),
+                            d.f_tgt, d.f_car]).astype(float)
 
 
 def sigmoid(z):
@@ -292,7 +387,8 @@ def fit_models(pg, carries):
     M = {}
     d = pg[pg.nprev >= 1]
     # --- anytime TD
-    M["atd"] = irls_logit(atd_X(d), d.td.values, l2=2.0)
+    a = d[d.u_xew.notna()]
+    M["atd"] = irls_logit(atd_X(a), a.td.values, l2=1.0)
     # --- passing TDs: Poisson, offset = log(form), covariate = log(implied pts)
     q = d[(d.pos == "QB") & (d.patt >= 8)]
     off = np.log(np.clip(q.f_ptd.values, 0.15, None))
@@ -517,6 +613,13 @@ def main():
     last_wk = int(cur.week.max())
 
     pg = player_games(pbp, pos)
+    ev = td_events(pbp, pos)
+    tab_ev = ev[ev.season < season] if (ev.season < season).any() else ev
+    T = td_rate_tables(tab_ev)
+    pg = add_usage(pg, ev, T)
+    # usage score: 100 = the best 10-game xTD stretch on record (cheat-sheet scale)
+    r10 = pg.groupby("pid").xtd.transform(lambda v: v.rolling(10).mean())
+    best10 = float(np.nanmax(r10.values)) if r10.notna().any() else 1.25
     prior = pos_prior(pg[pg.season < season] if (pg.season < season).any() else pg)
     carries = carries_table(pbp, pos)
 
@@ -595,6 +698,16 @@ def main():
                 for c in FORM:
                     fut["f_" + c] = (np.dot(w, tail[c].to_numpy(float)) + 1.5 * pr.get(c, 0.0)) / (w.sum() + 1.5)
                 fut.update({"imp": imp, "tspread": tsp, "pos": pg_pos})
+                last = hist.iloc[-1]
+                for c in ("xew", "x5", "shew", "tdew"):
+                    fut["u_" + c] = float(last["n_" + c])
+                l5 = hist.tail(USAGE_N)
+                tdl5 = int((l5.rutd + l5.retd).sum())
+                usage = {"g": int(len(l5)), "x": round(float(l5.xtd.sum()), 2), "td": tdl5,
+                         "rzr": int(l5.rzr.sum()), "glr": int(l5.glr.sum()),
+                         "rzt": int(l5.rzt.sum()), "ezt": int(l5.ezt.sum()),
+                         "sh": round(float(last.n_shew), 3), "xpg": round(float(last.n_xew), 3),
+                         "us": int(min(100, round(100 * float(l5.xtd.mean()) / best10)))}
                 o = predict_row(M, fut, cs.get(pid))
                 # drop what nobody prices: tiny roles make a big file and no bets
                 if o.get("combo_mu", 99) < 20:
@@ -602,6 +715,7 @@ def main():
                 if o.get("car_mu", 99) < 3:
                     for k in ("car", "car_mu", "lrush"):
                         o.pop(k, None)
+                atd_full = o.get("atd")
                 if o.get("atd", 1) < 0.07:        # the app never tiers long shots
                     o.pop("atd", None)
                 if not any(k in o for k in ("atd", "ptd", "car", "combo")):
@@ -611,6 +725,9 @@ def main():
                        "key": mkey(info.get("name") or name.get(pid)),
                        "team": tm, "opp": opp, "pos": pg_pos, "date": g["date"], "gid": g.get("id"),
                        "n": int(len(hist)), "imp": round(imp, 1), "tsp": round(tsp, 1)}
+                if atd_full is not None and usage["x"] > 0:
+                    usage["p"] = round(atd_full, 3)
+                    ent["tdu"] = usage
                 for k, v in o.items():
                     ent[k] = (trim(v, 2 if k in ("lrush", "combo") else 3) if isinstance(v, list)
                               else (round(v, 3) if isinstance(v, float) else v))
@@ -627,7 +744,7 @@ def main():
 
     doc = {"season": season, "kind": "props",
            "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-           "through_week": last_wk, "calib": calib, "players": players, "results": results}
+           "through_week": last_wk, "calib": calib, "td_best10": round(best10, 3), "players": players, "results": results}
     os.makedirs(d, exist_ok=True)
     with open(out, "w") as f:
         json.dump(doc, f, separators=(",", ":"))

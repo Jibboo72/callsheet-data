@@ -1443,6 +1443,51 @@ const pctS=x=>Math.round(x*100)+'%';
 const evS=x=>(x>=0?'+':'')+Math.round(x*100)+'%';
 const tierChip=t=>t?`<span style="display:inline-block;min-width:18px;text-align:center;padding:0 5px;font-weight:700;font-size:11px;border:2px solid var(--ink);${t==='A'?'background:var(--win);color:#fff;border-color:var(--win)':'background:transparent'}">${t}</span>`:'';
 
+/* ---------- TD scorer card (inside each NFL game card) ----------
+   From the props file's touchdown usage block (export_props.py, "tdu"):
+   every carry and target in the last 5 games priced by where on the field it
+   happened (expected TDs), the red-zone and goal-line counts behind it, and
+   the model's anytime-TD chance for THIS game (usage over a longer window,
+   share of the team's xTD, team implied points). Usage score: 100 = the best
+   10-game stretch on record. Scoring more or fewer TDs than usage supports is
+   shown but not treated as a signal: in testing, players "due" for a score
+   scored no more often next game than anyone else with the same usage. */
+function tdPlayersFor(g){
+  if(!S.props||!Array.isArray(S.props.players))return [];
+  return S.props.players.filter(E=>E.tdu&&E.date===g.date&&((E.team===g.home&&E.opp===g.away)||(E.team===g.away&&E.opp===g.home)));
+}
+const fairAm=p=>p>=0.5?-Math.round(100*p/(1-p)):Math.round(100*(1-p)/p);
+function tdCard(g){
+  try{
+    const L=tdPlayersFor(g); if(!L.length)return '';
+    const priced={};
+    try{ propBoard().forEach(r=>{ if(r.mk==='td'&&r.side==='over'&&(!priced[r.E.pid]||r.ev>priced[r.E.pid].ev))priced[r.E.pid]=r; }); }catch(e){}
+    const team=t=>L.filter(E=>E.team===t).sort((a,b)=>b.tdu.p-a.tdu.p).slice(0,4);
+    const row=E=>{
+      const u=E.tdu, d=u.td-u.x, r=priced[E.pid];
+      const bar=`<span style="display:inline-block;width:46px;height:6px;border:1px solid var(--ink);vertical-align:middle;margin:0 4px 1px 0"><span style="display:block;height:100%;width:${u.us}%;background:var(--ink)"></span></span>`;
+      const opp=[u.rzr?`RZ rush ${u.rzr}`:'',u.glr?`GL ${u.glr}`:'',u.rzt?`RZ tgt ${u.rzt}`:'',u.ezt?`EZ tgt ${u.ezt}`:''].filter(Boolean).join(' · ');
+      return `<div style="margin-top:5px">
+        <div><b>${esc(E.name)}</b> <span style="color:var(--ink-soft)">${esc(E.pos||'')}</span> · <b>${pctS(u.p)}</b> <span style="color:var(--ink-soft)">fair ${fmtOdds(fairAm(u.p))}</span>${r?` · ${fmtOdds(r.price)} ${esc(bookName(r.book))} <b style="color:${r.ev>0.05?'var(--win)':'var(--ink-soft)'}">${evS(r.ev)}</b>`:''}</div>
+        <div style="color:var(--ink-soft)">${bar}${u.us} · ${u.x.toFixed(1)} xTD, ${u.td} TD in ${u.g}${Math.abs(d)>=1.5?` (${d>0?'+':''}${d.toFixed(1)})`:''}${opp?' · '+opp:''}</div></div>`;
+    };
+    const open=!!(S.tdOpen&&S.tdOpen[g.id||g.date+g.home]);
+    const top=L.slice().sort((a,b)=>b.tdu.p-a.tdu.p)[0];
+    return `<details data-tdc="${esc(g.id||g.date+g.home)}"${open?' open':''} class="note" style="margin:6px 0 0;border-top:1px dashed var(--ink-soft);padding-top:6px">
+      <summary style="cursor:pointer"><b>TD scorers</b> · ${esc(top.name)} ${pctS(top.tdu.p)}</summary>
+      ${[g.away,g.home].map(t=>{ const a=team(t); return a.length?`<div style="margin-top:6px"><b>${esc(t)}</b>${a.map(row).join('')}</div>`:''; }).join('')}
+      <div style="margin-top:6px;color:var(--ink-soft)">Last 5 games. xTD prices every carry and target by field position; bar = usage score (100 = best 10-game stretch on record). RZ inside the 20, GL inside the 5, EZ = thrown into the end zone. Chance is for this game.</div>
+    </details>`;
+  }catch(e){ return ''; }
+}
+function propsTdFor(p){
+  if(!p||!S.props||!Array.isArray(S.props.players))return null;
+  const k=mkey(p.name), today=new Date().toISOString().slice(0,10);
+  const c=S.props.players.filter(E=>E.tdu&&E.team===p.team&&(E.key===k||sfxStrip(E.key)===sfxStrip(k))&&String(E.date)>=today)
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  return c[0]||null;
+}
+
 /* the small block on each NFL game card */
 function propsBlock(g){
   try{
@@ -2496,6 +2541,8 @@ async function refreshAllData(){
   return !anyBad;
 }
 document.getElementById('refreshAll').addEventListener('click',refreshAllData);
+// TD scorer cards remember open/closed per game across re-renders
+document.addEventListener('toggle',e=>{ const d=e.target; if(!d||!d.dataset||!d.dataset.tdc)return; S.tdOpen=S.tdOpen||{}; if(d.open)S.tdOpen[d.dataset.tdc]=1; else delete S.tdOpen[d.dataset.tdc]; try{save();}catch(_){} },true);
 document.getElementById('rosterSearch').addEventListener('input',e=>{
   rosterQuery=e.target.value; renderRoster();
 });
@@ -2914,6 +2961,15 @@ function modelProb(pid,mkt,line,side,opts){
   if(L.length<3)return null;
   const key = mkt==='lng' ? (side==='under'?'und':'lng') : (mkt==='td' ? 'td' : 'rec');
   const M=MODEL[key]||MODEL.rec;
+  // anytime TD: the touchdown usage model from the props file wins when it has this player
+  if(mkt==='td'&&Math.abs(Number(line)-0.5)<0.01){
+    const E=propsTdFor(p);
+    if(E){
+      const u=E.tdu, pr=side==='under'?1-u.p:u.p;
+      return {prob:Math.max(0.02,Math.min(0.98,pr)),n:L.length,h:u.x,
+        parts:[{label:`TD model: ${u.x.toFixed(1)} xTD in last ${u.g} (usage ${u.us}), ${Math.round(u.sh*100)}% of team xTD, ${esc(E.team)} implied ${E.imp}`,v:pr}]};
+    }
+  }
   // xtd requires the newer data pipeline; older/unrebuilt player logs won't
   // have it, so fall back to the previous hit-rate approach rather than
   // silently treating every game as zero-opportunity
@@ -2965,7 +3021,7 @@ const SCREEN={
     gateAlways:true, minSnap:MIN_TD_SNAP,
     rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
     useDef:true,
-    note:'Fitted the same walk-forward way as the other markets — base rate 19.9%, shrunk toward it until a player earns enough games to move off it.'
+    note:'Uses the touchdown usage model from the props file when loaded: every carry and target priced by field position, his share of the team\'s expected TDs, and the team\'s implied points for this game. Without it, expected TDs shrunk toward a 19.9% base rate.'
   },
   tetd:{
     label:'TE anytime TD',
@@ -2978,7 +3034,7 @@ const SCREEN={
     gateAlways:true, minSnap:MIN_TD_SNAP,
     rate:p=>hitRate(p,'td',0.5,'over'), mkt:{f:'td',th:0.5,side:'over'},
     useDef:true,
-    note:'Same touchdown model as the main Anytime TD card, narrowed to tight ends. Same 19.9% base rate and shrinkage — nothing TE-specific in the model itself, just the player pool.'
+    note:'Same touchdown usage model as the main Anytime TD card, narrowed to tight ends — nothing TE-specific in the model itself, just the player pool.'
   },
   slot:{
     label:'3+ receptions',
@@ -3180,7 +3236,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-27 02:30 UTC';
+const BUILD_STAMP='2026-10-30 00:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4561,7 +4617,7 @@ function renderSides(){
           <div class="stat"><div class="n">${line}</div><div class="l">Spread</div></div>
           <div class="stat"><div class="n">${g.total!=null?g.total.toFixed(1):'—'}</div><div class="l">Total</div></div>
           <div class="stat"><div class="n" style="font-size:17px;${nflGrade?gradeStyle(nflGrade):''}">${edge==null?'—':esc(edge>=0?g.home:g.away)+' +'+Math.abs(edge).toFixed(1)}</div><div class="l">Model edge</div></div>
-        </div>${(!cfb&&!g.mine)?nflSideNote(g)+crowdNote(g)+nflPoints(g)+propsBlock(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
+        </div>${(!cfb&&!g.mine)?nflSideNote(g)+crowdNote(g)+nflPoints(g)+tdCard(g)+propsBlock(g):''}${(g.fcsOnly&&edge!=null&&Math.abs(edge)>=0.05)?`<div class="note" style="margin:4px 0 0">Model side: ${esc(edge>0?g.home:g.away)} ${(()=>{const n=edge>0?-g.spread:g.spread;return (n>0?'+':'')+n.toFixed(1);})()}</div>`:''}`;
     html+=`<div class="cat">
       <div class="band" style="background:${g.mine?'rgba(255,138,31,.22)':'var(--stock-2)'};cursor:default">
         <span class="tag">${sTm(g.away)} @ ${sTm(g.home)}</span>
