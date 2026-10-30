@@ -359,7 +359,15 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .note b{color:var(--ink)}
 code{font-family:var(--fm)}
 /* game strip (every tab): scroll sideways, tap a game to jump to it on Sides */
-.gstrip{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -14px 12px;padding:0 14px 2px;scroll-snap-type:x proximity}
+.gwrap{margin-bottom:12px}
+.gsbar{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.gseg{display:flex;border:1px solid var(--line);background:var(--stock-2);border-radius:999px;padding:3px;gap:2px;flex:none}
+.gseg button{border:0;background:transparent;color:var(--ink-soft);font-family:var(--fb);font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;cursor:pointer}
+.gseg button[aria-pressed="true"]{background:var(--acc);color:var(--on-acc)}
+#stripFilter{flex:1;min-width:0;width:auto;padding:7px 28px 7px 10px;font-size:12px;font-weight:700;border-radius:999px;background-color:var(--stock-2)}
+.gscount{font-size:11px;color:var(--ink-soft);white-space:nowrap}
+.gchip .rk{font-size:10px;font-weight:700;color:var(--ink-soft);margin-right:2px}
+.gstrip{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:0 14px 2px;scroll-snap-type:x proximity}
 .gstrip::-webkit-scrollbar{display:none}
 .gchip{flex:none;min-width:90px;border:1px solid var(--line);background:var(--stock-2);color:var(--ink);border-radius:14px;padding:8px 10px;text-align:left;font-family:var(--fb);cursor:pointer;scroll-snap-align:start}
 .gchip[aria-pressed="true"]{border-color:var(--acc);background:var(--acc-soft)}
@@ -430,7 +438,7 @@ code{font-family:var(--fm)}
 
 <div class="fresh" id="fresh"></div>
 
-<div class="gstrip" id="gameStrip" aria-label="This week's games"></div>
+<div id="gameStrip" class="gwrap" aria-label="This week's games"></div>
 
 <nav class="tabs" role="tablist">
   <button role="tab" id="tabCards" aria-selected="true">Props</button>
@@ -739,6 +747,7 @@ async function load(){
   if(S.importUrl) document.getElementById('impUrl').value=S.importUrl;
   try{ if(S.look)setLook(S.look); else S.look=lookNow(); }catch(e){}
   renderAll();
+  setTimeout(()=>{ try{ loadPolls(); }catch(e){} },1500);
   try{ takePropSnaps(); if(gradePropLog())save(); }catch(e){}
   syncSampleBtn();
   const bi=document.getElementById('buildInfo');
@@ -3458,7 +3467,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-30 12:30 UTC';
+const BUILD_STAMP='2026-10-30 13:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4757,17 +4766,14 @@ function nflTiles(g,line,nflGrade,fw){
     ${tdCard(g)}${propsBlock(g)}`;
 }
 
-/* ---------- game strip under the header (every tab) ---------- */
+/* ---------- game strip under the header (every tab) ----------
+   NFL: every game this week. College: one filter (AP / CFP / coaches Top 25
+   from ESPN, Top 25 in your ratings, games with a line, or a conference). */
 function stripGames(){
   const cfb=LG()==='cfb';
   let all=[]; try{ all=GM().map(g=>withFinal(cfb?'cfb':'nfl',g)); }catch(e){ all=((SRC()&&SRC().games)||[]); }
   const wk=Number(S.week);
-  let games=all.filter(g=>dateInWeek(g.date,wk));
-  if(cfb){
-    // college has dozens of games a week: show the ones with a line or a ranked team
-    games=games.filter(g=>g.spread!=null||g.proj!=null||g.line!=null).slice(0,40);
-  }
-  return {cfb,games};
+  return {cfb,games:all.filter(g=>dateInWeek(g.date,wk))};
 }
 function nflKick(g){
   const od=S.odds&&S.odds.games; let st=null;
@@ -4777,36 +4783,133 @@ function nflKick(g){
   if(!st||isNaN(st))return {d:new Date(g.date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short'}),t:null,ts:new Date(g.date+'T12:00:00').getTime()};
   return {d:st.toLocaleDateString(undefined,{weekday:'short'}),t:st.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}).replace(/\s?[AP]M$/i,''),ts:st.getTime()};
 }
+function cfbKickShort(g,c){
+  // the ratings file's kick is Eastern (what the cards show); the schedule
+  // file's kick is UTC, so it's converted to this phone's time
+  const d=new Date(g.date+'T12:00:00');
+  let st=null;
+  if(c&&c.kick){ const [h,m]=String(c.kick).split(':').map(Number); const base=Date.UTC(+g.date.slice(0,4),+g.date.slice(5,7)-1,+g.date.slice(8,10),h,m||0);
+    // Eastern = UTC-4 until the first Sunday of November, UTC-5 after
+    const y=+g.date.slice(0,4), nov1=new Date(Date.UTC(y,10,1)), dstEnd=Date.UTC(y,10,1+((7-nov1.getUTCDay())%7),6);
+    st=new Date(base+((base<dstEnd)?4:5)*3600e3); }
+  else if(g.kick){ const [h,m]=String(g.kick).split(':').map(Number); st=new Date(Date.UTC(+g.date.slice(0,4),+g.date.slice(5,7)-1,+g.date.slice(8,10),h,m||0)); }
+  if(!st||isNaN(st))return {d:d.toLocaleDateString(undefined,{weekday:'short'}),t:null,ts:d.getTime()};
+  return {d:st.toLocaleDateString(undefined,{weekday:'short'}),t:st.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}).replace(/\s?[AP]M$/i,''),ts:st.getTime()};
+}
+/* Top 25 polls from ESPN (AP, coaches, CFP once it's out). Pulled in the
+   browser like the live finals, cached for 6 hours. If ESPN can't be
+   reached the strip falls back to the Top 25 in your own ratings. */
+let _pollTry=0;
+async function loadPolls(force){
+  const P=S.polls;
+  if(!force&&P&&Date.now()-P.pulled<6*3600e3)return;
+  if(Date.now()-_pollTry<60000)return; _pollTry=Date.now();
+  try{
+    const j=await fetch('https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings').then(r=>r.ok?r.json():null);
+    if(!j||!Array.isArray(j.rankings))return;
+    const list=j.rankings.filter(r=>Array.isArray(r.ranks)&&r.ranks.length).map(r=>({
+      name:r.name||r.shortName||'Top 25', short:r.shortName||r.name||'',
+      teams:r.ranks.map(x=>{ const t=x.team||{}; return {rank:+x.current,
+        n:[t.location,t.nickname,t.displayName,t.shortDisplayName,t.name&&t.location?t.location+' '+t.name:null].filter(Boolean).map(finNorm),
+        ab:String(t.abbreviation||'').toUpperCase()}; }).filter(x=>x.rank>0)
+    }));
+    if(!list.length)return;
+    S.polls={pulled:Date.now(),list}; save(); renderStrip();
+  }catch(e){}
+}
+function pollRank(poll,team){
+  if(!poll)return null;
+  const n=finNorm(team), ab=(()=>{ try{ return String(cfbAb(team)).toUpperCase(); }catch(_){ return ''; } })();
+  const hit=poll.teams.find(x=>x.n.includes(n))||(ab?poll.teams.find(x=>x.ab===ab&&x.n.some(y=>y.startsWith(n.slice(0,4)))):null);
+  return hit?hit.rank:null;
+}
+function myRank(team){ const t=(S.cfbr&&S.cfbr.teams||[]).find(x=>x.team===team); return t&&t.rank!=null?t.rank:null; }
+function stripFilterOptions(games){
+  const polls=((S.polls&&S.polls.list)||[]);
+  const confs=[...new Set(games.flatMap(g=>[g.aconf,g.hconf]).filter(Boolean))].sort();
+  const o=[];
+  polls.forEach(pl=>o.push({v:'poll:'+pl.name,l:pl.name}));
+  if(S.cfbr&&S.cfbr.teams)o.push({v:'my25',l:'Top 25 · your ratings'});
+  o.push({v:'lined',l:'Every game with a line'});
+  confs.forEach(c=>o.push({v:'conf:'+c,l:c}));
+  return o;
+}
 function renderStrip(){
   const host=document.getElementById('gameStrip'); if(!host)return;
   try{
     const {cfb,games}=stripGames();
-    if(!games.length||cfb){ host.innerHTML=''; host.hidden=true; return; }
-    host.hidden=false;
-    const rows=games.map(g=>{ const k=nflKick(g); return {g,k}; }).sort((a,b)=>a.k.ts-b.k.ts);
-    const sel=S.stripSel&&rows.some(r=>r.g.id===S.stripSel)?S.stripSel:null;
-    host.innerHTML=rows.map(({g,k})=>{
-      const done='margin' in g;
-      const e=g.proj!=null&&g.spread!=null?g.proj-g.spread:null;
-      let sub;
-      if(done)sub=`${esc(g.away)} ${g.as} · ${esc(g.home)} ${g.hs}`;
-      else if(e!=null&&Math.abs(e)>=0.05){ const n=e>0?-g.spread:g.spread; sub=`${esc(e>0?g.home:g.away)} ${n>0?'+':''}${(+n).toFixed(1)}`; }
-      else sub=g.spread!=null?`${esc(g.spread>0?g.home:g.away)} −${Math.abs(g.spread).toFixed(1)}`:'no line';
-      return `<button class="gchip${done?' done':''}" data-jumpgame="${esc(g.id)}" aria-pressed="${sel===g.id}">
+    const seg=`<div class="gsbar"><div class="gseg" role="group" aria-label="League">
+        <button data-striplg="nfl" aria-pressed="${!cfb}">NFL</button><button data-striplg="cfb" aria-pressed="${cfb}">College</button></div>`;
+    let chips='', bar=seg;
+    if(!cfb){
+      const rows=games.map(g=>({g,k:nflKick(g)})).sort((a,b)=>a.k.ts-b.k.ts);
+      chips=rows.map(({g,k})=>{
+        const done='margin' in g;
+        const e=g.proj!=null&&g.spread!=null?g.proj-g.spread:null;
+        let sub;
+        if(done)sub=`${esc(g.away)} ${g.as} · ${esc(g.home)} ${g.hs}`;
+        else if(e!=null&&Math.abs(e)>=0.05){ const n=e>0?-g.spread:g.spread; sub=`${esc(e>0?g.home:g.away)} ${n>0?'+':''}${(+n).toFixed(1)}`; }
+        else sub=g.spread!=null?`${esc(g.spread>0?g.home:g.away)} −${Math.abs(g.spread).toFixed(1)}`:'no line';
+        return {g,k,done,m:`${esc(g.away)}·${esc(g.home)}`,sub};
+      });
+      bar+='</div>';
+    } else {
+      if(!S.polls||Date.now()-S.polls.pulled>6*3600e3)loadPolls();
+      const opts=stripFilterOptions(games);
+      const polls=(S.polls&&S.polls.list)||[];
+      const ap=polls.find(x=>/^AP/i.test(x.name))||polls[0];
+      let f=S.stripCfb&&opts.some(o=>o.v===S.stripCfb)?S.stripCfb:(ap?'poll:'+ap.name:(S.cfbr?'my25':'lined'));
+      const poll=f.startsWith('poll:')?polls.find(x=>'poll:'+x.name===f):ap;
+      const rk=t=>{ if(f==='my25'||!poll){ const r=myRank(t); return r!=null&&r<=25?r:null; } return pollRank(poll,t); };
+      const cg=g=>(S.cfbr&&S.cfbr.games||[]).find(x=>x.id===String(g.id));
+      let pick=games;
+      if(f.startsWith('poll:')||f==='my25')pick=games.filter(g=>rk(g.home)!=null||rk(g.away)!=null);
+      else if(f==='lined')pick=games.filter(g=>{ const c=cg(g); return (c&&c.line!=null)||g.spread!=null||g.line!=null; });
+      else if(f.startsWith('conf:')){ const c=f.slice(5); pick=games.filter(g=>g.aconf===c||g.hconf===c); }
+      bar+=`<select id="stripFilter" aria-label="Which college games">${opts.map(o=>`<option value="${esc(o.v)}"${o.v===f?' selected':''}>${esc(o.l)}</option>`).join('')}</select>
+        <span class="gscount">${pick.length} game${pick.length===1?'':'s'}</span></div>`;
+      chips=pick.map(g=>{
+        const c=cg(g), k=cfbKickShort(g,c), done=g.hs!=null||'margin' in g;
+        const ab=t=>{ try{ return esc(cfbAb(t)); }catch(_){ return esc(String(t).slice(0,4).toUpperCase()); } };
+        const rs=t=>{ const r=rk(t); return r!=null?`<span class="rk">${r}</span>`:''; };
+        let sub='';
+        const as=g.as!=null?g.as:g.as_;
+        if(done&&g.hs!=null)sub=`${ab(g.away)} ${as} · ${ab(g.home)} ${g.hs}`;
+        else{ const ce=c?cfbEdge(c):null;
+          if(ce&&ce.pickTeam)sub=`${ab(ce.pickTeam)} ${ce.num>0?'+':''}${(+ce.num).toFixed(1)}`;
+          else if(c&&c.line!=null)sub=`line ${c.line>0?'+':''}${c.line}`;
+          else sub=esc(g.hconf||'');
+        }
+        return {g,k,done,m:`${rs(g.away)}${ab(g.away)}·${rs(g.home)}${ab(g.home)}`,sub};
+      }).sort((a,b)=>a.k.ts-b.k.ts);
+    }
+    const sel=S.stripSel&&chips.some(r=>String(r.g.id)===String(S.stripSel))?String(S.stripSel):null;
+    host.innerHTML=bar+`<div class="gstrip">${chips.length?chips.map(({g,k,done,m,sub})=>`<button class="gchip${done?' done':''}" data-jumpgame="${esc(g.id)}" data-jlg="${cfb?'cfb':'nfl'}" aria-pressed="${sel===String(g.id)}">
         <div class="d">${esc(k.d)}${k.t?' '+esc(k.t):''}${done?' · final':''}</div>
-        <div class="m">${esc(g.away)}·${esc(g.home)}</div>
-        <div class="e">${sub}</div></button>`;
-    }).join('');
+        <div class="m">${m}</div>
+        <div class="e">${sub}</div></button>`).join(''):`<div class="note" style="margin:6px 0">No games match that this week.</div>`}</div>`;
   }catch(e){ host.innerHTML=''; }
 }
 document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-striplg]'); if(!b)return;
+  S.league=b.dataset.striplg; save(); renderSides(); renderStrip();
+});
+document.addEventListener('change',e=>{
+  if(e.target&&e.target.id==='stripFilter'){ S.stripCfb=e.target.value; save(); renderStrip(); }
+});
+document.addEventListener('click',e=>{
   const b=e.target.closest('[data-jumpgame]'); if(!b)return;
-  const id=b.dataset.jumpgame;
-  S.stripSel=id; save(); renderStrip();
-  if(LG()!=='nfl'){ S.league='nfl'; renderSides(); }
-  const q=document.getElementById('sidesSearch'); if(q&&q.value){ q.value=''; sidesQuery=''; try{renderSides();}catch(_){} }
+  const id=b.dataset.jumpgame, lg=b.dataset.jlg||'nfl';
+  S.stripSel=id; save();
+  if(LG()!==lg)S.league=lg;
+  const q=document.getElementById('sidesSearch'); if(q&&q.value){ q.value=''; sidesQuery=''; }
+  renderSides();
   showTab('Sides');
-  setTimeout(()=>{ const el=document.getElementById('g-'+id); if(el){ el.scrollIntoView({behavior:'smooth',block:'start'}); el.style.outline='2px solid var(--acc)'; setTimeout(()=>{el.style.outline='';},1600); } },30);
+  setTimeout(()=>{
+    let el=document.getElementById('g-'+id);
+    if(!el&&lg==='cfb'&&S.cfbDiv&&S.cfbDiv!=='all'){ S.cfbDiv='all'; renderSides(); el=document.getElementById('g-'+id); }
+    if(el){ el.scrollIntoView({behavior:'smooth',block:'start'}); el.style.outline='2px solid var(--acc)'; setTimeout(()=>{el.style.outline='';},1600); }
+  },30);
 });
 
 /* ---------- Look settings ---------- */
@@ -4991,6 +5094,7 @@ function renderSides(){
       </div></div>`;
   });
   host.innerHTML=html;
+  try{ renderStrip(); }catch(e){}
 }
 
 function renderBank(){
