@@ -48,7 +48,7 @@ renaming a file breaks every app that reads it.
 | `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals | `export_games.py` (build.yml) | Tue 11:00, Thu 20:00, Sun 14:00, Sat 13:00 | Call Sheet, SportsMF |
 | `ratings-2026.json` | NFL power ratings | `export_ratings.py` (build.yml) | build.yml | Call Sheet, SportsMF |
 | `matchup.json` | NFL matchup grades (pass/rush D) | `export_matchup.py` (build.yml) | build.yml | Call Sheet |
-| `props-2026.json` | Player prop distributions (ATD with `tdu` TD-usage block, pass TDs, carries, longest rush, rush+rec yds), backtest calib, recent results | `export_props.py` (build.yml) | build.yml | Call Sheet |
+| `props-2026.json` | Player prop distributions (ATD with `tdu` TD-usage block, pass TDs, carries, longest rush, rush+rec yds), backtest calib, recent results | `export_props.py` (build.yml) — also pulls nflverse depth charts and ffopportunity expected yards (both free, optional) | build.yml | Call Sheet |
 | `receivers-2026.json`, `receivers-2025.json` | Receiver game logs (incl. per-game `xtd`) | `build_receivers.py` (build.yml) | build.yml | Call Sheet |
 | `roster-2026.json` | Roster, status, injury report, snaps | `export_roster.py` (build.yml) | build.yml | Call Sheet |
 | `def_history.json` | Weekly defense ranks | `export_def_history.py` (build.yml) | build.yml | `build_receivers.py` only |
@@ -67,6 +67,19 @@ renaming a file breaks every app that reads it.
 
 Other folders: `experts/` (expert-pick pipeline, see its README), `research/cfbd/`
 (raw CFBD pulls, cfbd-research.yml, manual).
+
+## Outside data the workflows pull (all free, no keys unless noted)
+
+| Source | Files | Used by |
+|---|---|---|
+| nflverse (`github.com/nflverse/nflverse-data` releases) | play-by-play, schedules, players, rosters, weekly rosters, snap counts, injuries, depth charts | NFL ratings, props, rosters, weather backtest |
+| ffopportunity (`github.com/ffverse/ffopportunity`, `latest-data`) | `ep_weekly_{season}.parquet` (expected yards) | props (carries, rush+rec yards) |
+| ESPN | NFL injury report | `export_games.py` |
+| SportsGameOdds (`SGO_KEY`, credits) | odds + props | `pull_odds.py`, `pull_cfb_odds.py` |
+| CollegeFootballData (`CFBD_KEY`) | college games, ratings inputs | `export_cfb*.py` |
+| Open-Meteo | forecasts | `weather.py` |
+
+Tested and not used: FTN charting (box counts, blitz, play action, screens) added nothing to any prop in the 2025 and 2026 backtests.
 
 ## Live feeds the apps call from your phone (not from GitHub)
 

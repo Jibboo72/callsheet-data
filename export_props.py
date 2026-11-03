@@ -34,6 +34,17 @@ because those do not exist for us; the app tracks its own picks going forward)
   * lrush  per-carry chance of a run of L+ yards (shrunk to position) mixed
          over the carries distribution.
   * combo  gamma, mean = form x script factor, spread fit on 2025.
+  * Depth charts (nflverse, ESPN snapshots): each player's spot at his
+    position in the last snapshot BEFORE kickoff -- starter, 3rd string or
+    deeper, not listed, moved up or down since his last game. The model's
+    recent form only learns a role change a game or two late; this knows at
+    kickoff. Backtest (fit on the season before): carries error -1.6% (2025)
+    / -4.3% (2026), yardage -1.9% / -2.4%, and 6-24% on games where the
+    player's depth spot had changed.
+  * Expected yards (ffopportunity): the yards a player's targets and carries
+    were worth on average, weighted over recent games, against his actual
+    yards. Adds about 2% more on yardage. Both are optional: if either file
+    can't be reached the model fits without it.
   * atd  logistic on touchdown usage: expected TDs (every carry and target
          priced by field position, rates from the prior season) over a
          weighted long window and the last 5 games, the player's share of
@@ -61,6 +72,10 @@ import pandas as pd
 NV = "https://github.com/nflverse/nflverse-data/releases/download/"
 PBP = NV + "pbp/play_by_play_{season}.parquet"
 PLAYERS = NV + "players/players.parquet"
+DEPTH = NV + "depth_charts/depth_charts_{season}.parquet"
+SCHED = NV + "schedules/games.parquet"
+# expected yards per player-game, from nflverse's sister project ffopportunity
+FFOPP = "https://github.com/ffverse/ffopportunity/releases/download/latest-data/ep_weekly_{season}.parquet"
 
 HALF_LIFE = 3.0                  # games
 LOOKBACK = 10                    # most recent active games considered
@@ -355,6 +370,125 @@ def add_usage(pg, ev, T):
     return pg
 
 
+# ----------------------------------------------------------------------------
+# depth charts + expected yards (tested 2026-11: see docstring)
+# ----------------------------------------------------------------------------
+SKILL_DEPTH = {"QB", "RB", "WR", "TE", "FB", "HB"}
+
+
+def load_depth(seasons):
+    """Pre-game depth rank per (season, week, team, pid) and the latest
+    snapshot per (team, pid) for the coming games. Handles both nflverse
+    formats: weekly NFL charts (through 2024) and ESPN snapshots (2025+)."""
+    try:
+        sch = pd.read_parquet(SCHED)
+    except Exception as e:
+        print(f"  depth: no schedule ({e})", file=sys.stderr)
+        return None, {}
+    sch = sch[(sch.season.isin(seasons)) & (sch.game_type == "REG")]
+    sch = sch.assign(kick=pd.to_datetime(sch.gameday + " " + sch.gametime.fillna("13:00"))
+                     .dt.tz_localize("America/New_York").dt.tz_convert("UTC"))
+    rows, now = [], {}
+    for y in seasons:
+        try:
+            d = pd.read_parquet(DEPTH.format(season=y))
+        except Exception as e:
+            print(f"  depth {y}: unavailable ({e})", file=sys.stderr)
+            continue
+        if "dt" in d.columns:                                   # ESPN snapshots
+            d = d[d.pos_abb.isin(SKILL_DEPTH) & d.gsis_id.notna()].copy()
+            d["dt"] = pd.to_datetime(d.dt, utc=True)
+            d["pos_rank"] = pd.to_numeric(d.pos_rank, errors="coerce")
+            snaps = pd.DatetimeIndex(sorted(d.dt.unique()))
+            best = d.groupby(["dt", "team", "gsis_id"]).pos_rank.min().reset_index()
+            for _, g in sch[sch.season == y].iterrows():
+                i = snaps.searchsorted(g.kick) - 1              # last snapshot before kickoff
+                if i < 0:
+                    continue
+                t = snaps[i]
+                x = best[(best.dt == t) & best.team.isin([g.home_team, g.away_team])]
+                rows.append(pd.DataFrame({"season": y, "week": g.week, "posteam": x.team.values,
+                                          "pid": x.gsis_id.values, "depth": x.pos_rank.values}))
+            last = best[best.dt == snaps[-1]]
+            now.update({(t, p): float(r) for t, p, r in zip(last.team, last.gsis_id, last.pos_rank)})
+        else:                                                   # weekly NFL charts
+            d = d[(d.formation == "Offense") & d.depth_position.isin(SKILL_DEPTH) & (d.game_type == "REG")]
+            d = d.assign(depth=pd.to_numeric(d.depth_team, errors="coerce"))
+            x = d.groupby(["week", "club_code", "gsis_id"]).depth.min().reset_index()
+            rows.append(pd.DataFrame({"season": y, "week": x.week.values, "posteam": x.club_code.values,
+                                      "pid": x.gsis_id.values, "depth": x.depth.values}))
+    if not rows:
+        return None, now
+    dep = pd.concat(rows, ignore_index=True).drop_duplicates(["season", "week", "posteam", "pid"])
+    dep["week"] = dep.week.astype(int)
+    return dep, now
+
+
+def load_ffopp(seasons):
+    out = []
+    for y in seasons:
+        try:
+            f = pd.read_parquet(FFOPP.format(season=y))
+        except Exception as e:
+            print(f"  expected yards {y}: unavailable ({e})", file=sys.stderr)
+            continue
+        f = f.assign(ff_xyds=f.rush_yards_gained_exp.fillna(0) + f.rec_yards_gained_exp.fillna(0))
+        out.append(f.rename(columns={"player_id": "pid"})[["game_id", "pid", "ff_xyds"]])
+    return pd.concat(out).drop_duplicates(["game_id", "pid"]) if out else None
+
+
+def add_extras(pg, dep, ff):
+    """depth (pre-game), dep_prev (his depth at his previous game), and the
+    expected-yards windows u_ff_xyds (pre-game) / n_ff_xyds (for next game)."""
+    pg = pg.drop(columns=[c for c in ("depth", "ff_xyds") if c in pg], errors="ignore")
+    if dep is not None:
+        pg = pg.merge(dep, on=["season", "week", "posteam", "pid"], how="left")
+    else:
+        pg["depth"] = np.nan
+    if ff is not None:
+        pg = pg.merge(ff, on=["game_id", "pid"], how="left")
+    else:
+        pg["ff_xyds"] = np.nan
+    pg = pg.sort_values(["pid", "t"]).reset_index(drop=True)
+    pg["dep_prev"] = pg.groupby("pid").depth.shift(1)
+    if pg.ff_xyds.notna().any():
+        n = pg.groupby("pid").ff_xyds.transform(lambda v: v.fillna(0).ewm(halflife=USAGE_HL).mean())
+        n[pg.groupby("pid").ff_xyds.transform(lambda v: v.notna().cumsum()) == 0] = np.nan
+    else:
+        n = pd.Series(np.nan, index=pg.index)
+    pg["n_ff_xyds"] = n
+    pg["u_ff_xyds"] = n.groupby(pg.pid).shift(1)
+    return pg
+
+
+def _col(d, c):
+    return np.asarray(d[c], float) if c in d else np.full(len(d), np.nan)
+
+
+def depth_X(d):
+    dp, pv = _col(d, "depth"), _col(d, "dep_prev")
+    seen = ~np.isnan(pv)
+    with np.errstate(invalid="ignore"):
+        return np.column_stack([np.nan_to_num(dp == 1), np.nan_to_num(dp >= 3), np.isnan(dp),
+                                np.nan_to_num((dp < pv) & seen), np.nan_to_num((dp > pv) & seen)]).astype(float)
+
+
+def ffyds_X(d):
+    u, fc = _col(d, "u_ff_xyds"), np.clip(_col(d, "f_combo"), 1, None)
+    r = np.log((u + 5) / (fc + 5))
+    return np.nan_to_num(r)[:, None]                      # missing -> 0 (= no signal)
+
+
+def car_X(d):
+    return np.column_stack([np.asarray(d.tspread, float) / 7.0, np.asarray(d.pos.eq("QB"), float),
+                            np.log(np.asarray(d.f_car, float)), depth_X(d), ffyds_X(d)])
+
+
+def combo_X(d):
+    return np.column_stack([np.asarray(d.tspread, float) / 7.0, np.log(np.asarray(d.f_combo, float)),
+                            depth_X(d), ffyds_X(d)])
+
+
 def _lg(x):
     return np.log(np.clip(np.asarray(x, float), 0.01, None))
 LRUSH_T = list(range(1, 51))          # longest-rush thresholds exported (P(longest >= L), L = 1..50)
@@ -374,7 +508,7 @@ def atd_X(d):
     return np.column_stack([_lg(d.u_xew), _lg(d.u_x5), (imp - 22.5) / 5,
                             _lg(np.asarray(d.u_shew, float) * imp / 7), d.u_tdew,
                             d.pos.eq("RB"), d.pos.eq("TE"), d.pos.eq("QB"),
-                            d.f_tgt, d.f_car]).astype(float)
+                            d.f_tgt, d.f_car, depth_X(d)]).astype(float)
 
 
 def sigmoid(z):
@@ -398,8 +532,7 @@ def fit_models(pg, carries):
     r = d[(d.car >= 1) | (d.pos.isin(["RB", "QB"]))]
     r = r[r.f_car > 0.3]
     off = np.zeros(len(r))
-    X = np.column_stack([r.tspread.values / 7.0, r.pos.eq("QB").values.astype(float),
-                         np.log(r.f_car.values)])
+    X = car_X(r)
     M["car"] = irls_pois(X, r.car.values.astype(float), off)
     mu = np.exp(np.column_stack([np.ones(len(r)), X]) @ M["car"] + off)
     M["car_r"] = {}
@@ -410,7 +543,7 @@ def fit_models(pg, carries):
     # --- combo yards: log-link mean, gamma spread: var = a*mu + b*mu^2
     c = d[d.f_combo > 3]
     off = np.zeros(len(c))
-    X = np.column_stack([c.tspread.values / 7.0, np.log(c.f_combo.values)])
+    X = combo_X(c)
     M["combo"] = irls_pois(X, c.combo.clip(lower=0).values.astype(float), off)
     mu = np.exp(np.column_stack([np.ones(len(c)), X]) @ M["combo"] + off)
     res2 = (c.combo.values - mu) ** 2
@@ -450,9 +583,7 @@ def predict_row(M, row, car_stats=None):
     mu_car = None
     if row["f_car"] > 0.3 and (pos in ("RB", "QB") or row["f_car"] >= 1.0):
         beta = M["car"]
-        mu_car = math.exp(beta[0] + beta[1] * row["tspread"] / 7.0
-                          + beta[2] * (1.0 if pos == "QB" else 0.0)
-                          + beta[3] * math.log(row["f_car"]))
+        mu_car = float(math.exp(beta[0] + (car_X(pd.DataFrame([row])) @ beta[1:])[0]))
         r = M["car_r"].get(g) or M["car_r"].get("RB") or 20.0
         pm = nb_pmf(mu_car, r, CAR_MAX)
         out["car"] = [round(v, ROUND) for v in pm]
@@ -492,8 +623,7 @@ def predict_row(M, row, car_stats=None):
         out["lrush"] = surv
     # combo
     if row["f_combo"] > 3:
-        mu = math.exp(M["combo"][0] + M["combo"][1] * row["tspread"] / 7.0
-                      + M["combo"][2] * math.log(row["f_combo"]))
+        mu = float(math.exp(M["combo"][0] + (combo_X(pd.DataFrame([row])) @ M["combo"][1:])[0]))
         a, b = M["combo_var"]
         var = a * mu + b * mu * mu
         k = mu * mu / var
@@ -617,6 +747,10 @@ def main():
     tab_ev = ev[ev.season < season] if (ev.season < season).any() else ev
     T = td_rate_tables(tab_ev)
     pg = add_usage(pg, ev, T)
+    dep, dep_now = load_depth([season - 1, season])
+    ff = load_ffopp([season - 1, season])
+    pg = add_extras(pg, dep, ff)
+    print(f"  depth charts: {'yes' if dep is not None else 'no'} · expected yards: {'yes' if ff is not None else 'no'}", file=sys.stderr)
     # usage score: 100 = the best 10-game xTD stretch on record (cheat-sheet scale)
     r10 = pg.groupby("pid").xtd.transform(lambda v: v.rolling(10).mean())
     best10 = float(np.nanmax(r10.values)) if r10.notna().any() else 1.25
@@ -701,6 +835,10 @@ def main():
                 last = hist.iloc[-1]
                 for c in ("xew", "x5", "shew", "tdew"):
                     fut["u_" + c] = float(last["n_" + c])
+                # depth now (latest snapshot) vs his depth at his last game; expected-yards window
+                fut["depth"] = dep_now.get((tm, pid), np.nan) if dep_now else np.nan
+                fut["dep_prev"] = float(last["depth"]) if "depth" in last and pd.notna(last["depth"]) else np.nan
+                fut["u_ff_xyds"] = float(last["n_ff_xyds"]) if "n_ff_xyds" in last and pd.notna(last["n_ff_xyds"]) else np.nan
                 l5 = hist.tail(USAGE_N)
                 tdl5 = int((l5.rutd + l5.retd).sum())
                 usage = {"g": int(len(l5)), "x": round(float(l5.xtd.sum()), 2), "td": tdl5,
