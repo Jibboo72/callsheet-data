@@ -499,6 +499,7 @@ code{font-family:var(--fm)}
     </div>
     <div class="note" style="margin:8px 0 0">Saved on this device. The sun/moon button at the top flips dark and light any time.</div>
   </div></div>
+  <div id="schedPanel"></div>
   <div class="pblock" style="margin-bottom:16px"><div class="pbh">Budget</div><div class="pbody">
     <span class="lab">Weekly budget across all five slips</span><input id="setBudget" type="number" step="1" min="1" inputmode="decimal">
   </div></div>
@@ -669,7 +670,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx','props','experts'];
+const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx','props','experts','jobRuns','polls'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -3467,7 +3468,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-10-30 13:10 UTC';
+const BUILD_STAMP='2026-11-03 17:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -6060,27 +6061,150 @@ function freshAge(ms){
   if(h<48)return h+(h===1?' hr':' hrs')+' ago';
   return Math.round(h/24)+' days ago';
 }
+
+/* ---------------- Data schedule (Settings › Data schedule + the boxes up top) ----------------
+   Every automatic download: when it's supposed to run, when GitHub actually
+   ran it, and whether it worked. Schedules mirror the cron lines in
+   .github/workflows (UTC) and are shown in this phone's time zone. Run
+   history comes from GitHub's public Actions API (your sync token is used
+   if you've set one, which raises GitHub's rate limit). */
+const JOBS=[
+  {id:'build', file:'build.yml', name:'NFL + college data', what:'Games, power ratings, prop models, rosters, receiver logs, college schedule and ratings, weather',
+   crons:[['0 11 * * 2','after Monday night — new ratings'],['0 20 * * 4','injury reports in, before Thursday night'],['0 14 * * 0','final check before Sunday kickoffs'],['0 13 * * 6','college lines before noon kickoffs']]},
+  {id:'odds', file:'odds.yml', name:'NFL odds & props', what:'Lines, totals, team totals and player props (SportsGameOdds credits)',
+   crons:[['0 11 * * 3','opening numbers'],['0 22 * * 5','weekend prices']]},
+  {id:'cfbodds', file:'cfb-odds.yml', name:'College odds', what:'College lines, then college ratings and weather rebuilt on them',
+   crons:[['0 22 * * 5','Friday prices'],['15 12 * * 6','Saturday morning prices']]},
+  {id:'experts', file:null, name:'Expert picks', what:'Expert ATS picks loaded by the Claude scheduled task',
+   crons:[['35 1 * * 6','Friday evening (8:35 PM Eastern)']], tzNote:'Runs on Claude, not GitHub'}
+];
+const SCHED_REPO='Jibboo72/callsheet-data';
+function cronTimes(expr,fromMs,toMs){
+  const [mi,hr,,,dw]=expr.split(/\s+/); const out=[];
+  const d0=new Date(fromMs); d0.setUTCHours(0,0,0,0);
+  for(let t=d0.getTime()-864e5;t<=toMs+864e5;t+=864e5){
+    const d=new Date(t);
+    if(dw!=='*'&&!dw.split(',').map(Number).includes(d.getUTCDay()))continue;
+    const x=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),+hr,+mi);
+    if(x>=fromMs&&x<=toMs)out.push(x);
+  }
+  return out;
+}
+const fmtWhen=ms=>new Date(ms).toLocaleString([], {weekday:'short',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'});
+const fmtClock=ms=>new Date(ms).toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'});
+function lateTxt(ms){ const m=Math.round(ms/60000); if(m<20)return 'on time'; if(m<90)return `${m} min late`; return `${(m/60).toFixed(1)} hr late`; }
+let _schedBusy=false;
+async function loadJobRuns(force){
+  const J=S.jobRuns;
+  if(!force&&J&&Date.now()-J.at<20*60000)return;
+  if(_schedBusy)return; _schedBusy=true;
+  try{
+    const tok=(typeof syncTok==='function')?syncTok():'';
+    const hdr=tok?{Authorization:'Bearer '+tok,Accept:'application/vnd.github+json'}:{Accept:'application/vnd.github+json'};
+    const runs={};
+    await Promise.all(JOBS.filter(j=>j.file).map(async j=>{
+      const r=await fetch(`https://api.github.com/repos/${SCHED_REPO}/actions/workflows/${j.file}/runs?per_page=20`,{headers:hdr,cache:'no-store'});
+      if(!r.ok)throw new Error('GitHub said '+r.status);
+      const js=await r.json();
+      runs[j.id]=(js.workflow_runs||[]).map(x=>({ev:x.event,start:Date.parse(x.run_started_at||x.created_at),end:Date.parse(x.updated_at),st:x.status,res:x.conclusion,url:x.html_url}));
+    }));
+    S.jobRuns={at:Date.now(),runs,err:null};
+  }catch(e){ S.jobRuns=Object.assign({},S.jobRuns||{},{at:Date.now(),err:String(e.message||e)}); }
+  _schedBusy=false;
+  try{ save(); renderFresh(); renderSched(); }catch(e){}
+}
+/* each planned slot in the window, matched to the scheduled run GitHub actually started for it */
+function jobSlots(job,days){
+  const now=Date.now(), from=now-days*864e5;
+  const runs=((S.jobRuns&&S.jobRuns.runs&&S.jobRuns.runs[job.id])||[]).filter(r=>r.ev==='schedule').sort((a,b)=>a.start-b.start);
+  const slots=[];
+  job.crons.forEach(([c,why])=>cronTimes(c,from,now).forEach(t=>slots.push({t,why})));
+  slots.sort((a,b)=>a.t-b.t);
+  const used=new Set();
+  slots.forEach((s,i)=>{
+    const next=i+1<slots.length?slots[i+1].t:now+1;
+    const r=runs.find(x=>!used.has(x)&&x.start>=s.t-5*60000&&x.start<Math.min(s.t+14*3600e3,next));
+    if(r){ used.add(r); s.run=r; }
+  });
+  if(job.id==='experts'){
+    const g=Date.parse((S.experts&&S.experts.generated)||'');
+    slots.forEach((s,i)=>{ const nx=i+1<slots.length?slots[i+1].t:now+1; if(!isNaN(g)&&g>=s.t-3600e3&&g<nx)s.run={start:g,end:g,st:'completed',res:'success'}; });
+  }
+  return slots;
+}
+function nextSlot(job){
+  const now=Date.now(); let best=null;
+  job.crons.forEach(([c,why])=>cronTimes(c,now,now+8*864e5).forEach(t=>{ if(!best||t<best.t)best={t,why}; }));
+  return best;
+}
+function lastRun(job){
+  if(job.id==='experts'){ const g=Date.parse((S.experts&&S.experts.generated)||''); return isNaN(g)?null:{start:g,end:g,res:'success',ev:'task'}; }
+  const r=((S.jobRuns&&S.jobRuns.runs&&S.jobRuns.runs[job.id])||[]).slice().sort((a,b)=>b.start-a.start);
+  return r[0]||null;
+}
+const resIcon=r=>!r?'':r.st&&r.st!=='completed'?'<b style="color:var(--hl-long)">running</b>':r.res==='success'?'<b style="color:var(--win)">✓ worked</b>':`<b style="color:var(--loss)">✗ ${esc(r.res||'failed')}</b>`;
+/* one line for the boxes up top */
+function jobLine(id){
+  const j=JOBS.find(x=>x.id===id); if(!j)return '';
+  const n=nextSlot(j), l=lastRun(j);
+  const last=l?(l.res==='success'?'✓':l.st&&l.st!=='completed'?'…':'✗'):'';
+  return `<i style="display:block">next ${n?esc(fmtClock(n.t)):'—'}${last?` · last ${last}`:''}</i>`;
+}
+function renderSched(){
+  const host=document.getElementById('schedPanel'); if(!host)return;
+  const J=S.jobRuns;
+  const body=JOBS.map(j=>{
+    const slots=jobSlots(j,9).slice().reverse();
+    const n=nextSlot(j);
+    const plan=j.crons.map(([c,why])=>{ const t=cronTimes(c,Date.now(),Date.now()+8*864e5)[0]; return t?`<div>${esc(new Date(t).toLocaleString([], {weekday:'long',hour:'numeric',minute:'2-digit'}))} <span style="color:var(--ink-soft)">— ${esc(why)}</span></div>`:''; }).join('');
+    const manual=j.file?((J&&J.runs&&J.runs[j.id])||[]).filter(r=>r.ev!=='schedule').sort((a,b)=>b.start-a.start).slice(0,2):[];
+    const rows=slots.map(s=>{
+      const r=s.run, past=s.t<Date.now();
+      const have=!j.file||!!(J&&J.runs&&J.runs[j.id]);
+      const ran=r?fmtWhen(r.start):(!have?'<span style="color:var(--ink-soft)">—</span>':(past&&Date.now()-s.t>14*3600e3?'<b style="color:var(--loss)">didn\'t run</b>':''));
+      const late=r?lateTxt(r.start-s.t):'';
+      return `<tr><td>${esc(fmtWhen(s.t))}</td><td>${ran}${late?`<br><span style="color:${/hr late/.test(late)?'var(--hl-long)':'var(--ink-soft)'}">${late}</span>`:''}</td><td>${r?resIcon(r):(have&&Date.now()-s.t<14*3600e3&&j.file?'<span style="color:var(--ink-soft)">waiting</span>':'')}</td></tr>`;
+    }).join('');
+    return `<div style="margin:0 0 16px">
+      <div style="font-weight:800;font-size:14px">${esc(j.name)}</div>
+      <div class="note" style="margin:2px 0 6px">${esc(j.what)}${j.tzNote?` · ${esc(j.tzNote)}`:''}</div>
+      <div class="note" style="margin:0 0 6px;color:var(--ink)">${plan}</div>
+      ${rows?`<table class="logtbl" style="margin-top:4px"><thead><tr><th style="text-align:left">Supposed to run</th><th style="text-align:left">Actually ran</th><th style="text-align:left">Result</th></tr></thead><tbody>${rows}</tbody></table>`:''}
+      ${manual.length?`<div class="note" style="margin:6px 0 0">Run by hand: ${manual.map(r=>`${esc(fmtWhen(r.start))} ${resIcon(r)}`).join(' · ')}</div>`:''}
+    </div>`;
+  }).join('');
+  host.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Data schedule</div><div class="pbody">
+    <div class="note" style="margin:0 0 10px">Every automatic download, in your time zone: when it's supposed to run, when GitHub actually ran it (last 9 days), and whether it worked.${J&&J.at?` Checked ${esc(freshAge(Date.now()-J.at))}.`:''}${J&&J.err?` <b style="color:var(--loss)">Couldn't reach GitHub: ${esc(J.err)}</b>`:''}</div>
+    ${body}
+    <button class="btn ghost" id="schedRefresh">Check GitHub now</button>
+  </div></div>`;
+  const b=document.getElementById('schedRefresh'); if(b)b.onclick=()=>{ b.textContent='Checking…'; loadJobRuns(true); };
+}
+
 function renderFresh(){
   const el=document.getElementById('fresh'); if(!el)return;
   const now=Date.now();
   const when=ts=>{ if(!ts)return null; const t=Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(ts)?ts:ts+'Z'); return isNaN(t)?null:t; };
-  const chip=(label,t,okH,warnH,miss)=>{
-    if(t==null)return `<div class="fc none"><b>${label}</b><span>${miss||'not loaded'}</span></div>`;
+  const chip=(label,t,okH,warnH,miss,job)=>{
+    const jl=job?jobLine(job):'';
+    if(t==null)return `<div class="fc none"><b>${label}</b><span>${miss||'not loaded'}${jl}</span></div>`;
     const h=(now-t)/3600000, cls=h<=okH?'ok':h<=warnH?'warn':'bad';
     const d=new Date(t), txt=d.toLocaleString([], {weekday:'short',hour:'numeric',minute:'2-digit'});
-    return `<div class="fc ${cls}"><b>${label}</b><span>${txt}<br><i>${freshAge(now-t)}</i></span></div>`;
+    return `<div class="fc ${cls}"${job?` data-sched="1" style="cursor:pointer"`:''}><b>${label}</b><span>${txt}<br><i>${freshAge(now-t)}</i>${jl}</span></div>`;
   };
   const nflT=when(S.odds&&S.odds.pulled);
   const colT=when(S.cfbr&&S.cfbr.generated);
   const mdlT=when(S.props&&S.props.generated);
   el.innerHTML=
-    chip('NFL lines',nflT,30,80)+
-    chip('College lines',colT,30,80)+
-    chip('Prop models',mdlT,48,120)+
+    chip('NFL lines',nflT,30,80,null,'odds')+
+    chip('College lines',colT,30,80,null,'cfbodds')+
+    chip('Prop models',mdlT,48,120,null,'build')+
     chip('App refreshed',S.lastRefresh||null,2,12,'tap Refresh all');
 }
 renderFresh();
 setInterval(()=>{ try{ renderFresh(); }catch(e){} },60*1000);
+setTimeout(()=>{ try{ loadJobRuns(); }catch(e){} },2500);
+document.addEventListener('click',e=>{ if(!e.target.closest('[data-sched]'))return; showTab('Settings'); setTimeout(()=>{ const el=document.getElementById('schedPanel'); if(el)el.scrollIntoView({behavior:'smooth',block:'start'}); },50); });
 function renderAll(){try{renderFresh();}catch(e){}_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderPower();renderBank();renderLedger();try{renderStrip();}catch(e){}}
 
 /* Every tap inside Props or Sides (BET, grade, fold, add, unit buttons...)
@@ -6744,6 +6868,7 @@ let lastMainTab='Cards';
 function showTab(name){
   const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Power:'panePower',Bank:'paneBank',Ledger:'paneLedger',Settings:'paneSettings'};
   if(name!=='Settings') lastMainTab=name;
+  if(name==='Settings'){ try{ renderSched(); loadJobRuns(); }catch(e){} }
   Object.entries(map).forEach(([k,v])=>{
     document.getElementById(v).hidden=(k!==name);
     const t=document.getElementById('tab'+k); if(t)t.setAttribute('aria-selected',String(k===name));

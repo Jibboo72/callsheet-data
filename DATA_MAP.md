@@ -85,7 +85,7 @@ Tested and not used: FTN charting (box counts, blitz, play action, screens) adde
 
 | App | Feed |
 |---|---|
-| Call Sheet | ESPN scoreboard (NFL + college finals), ESPN NFL summary, ESPN college rankings (AP/coaches/CFP for the game strip) |
+| Call Sheet | ESPN scoreboard (NFL + college finals), ESPN NFL summary, ESPN college rankings (AP/coaches/CFP for the game strip), GitHub Actions API (run history for Settings › Data schedule — keep the job list in `index.html` `JOBS` in step with the workflow crons) |
 | SportsMF | ESPN site + standings APIs, MLB Stats API, ESPN logos |
 | Vault | MLB Stats API, Baseball Savant, Open-Meteo, plus Ballpark Pal and SportsGameOdds through its Netlify functions |
 
