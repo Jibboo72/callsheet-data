@@ -45,18 +45,18 @@ renaming a file breaks every app that reads it.
 
 | File | What's in it | Written by | When (UTC cron) | Read by |
 |---|---|---|---|---|
-| `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals | `export_games.py` (build.yml) | Tue 11:00, Thu 20:00, Sun 14:00, Sat 13:00 | Call Sheet, SportsMF |
+| `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals | `export_games.py` (build.yml) | Tue 10:17, Thu 18:37, Sat 09:23 + 12:41, Sun 09:17 + 12:47 | Call Sheet, SportsMF |
 | `ratings-2026.json` | NFL power ratings | `export_ratings.py` (build.yml) | build.yml | Call Sheet, SportsMF |
 | `matchup.json` | NFL matchup grades (pass/rush D) | `export_matchup.py` (build.yml) | build.yml | Call Sheet |
 | `props-2026.json` | Player prop distributions (ATD with `tdu` TD-usage block, pass TDs, carries, longest rush, rush+rec yds), backtest calib, recent results | `export_props.py` (build.yml) — also pulls nflverse depth charts and ffopportunity expected yards (both free, optional) | build.yml | Call Sheet |
 | `receivers-2026.json`, `receivers-2025.json` | Receiver game logs (incl. per-game `xtd`) | `build_receivers.py` (build.yml) | build.yml | Call Sheet |
 | `roster-2026.json` | Roster, status, injury report, snaps | `export_roster.py` (build.yml) | build.yml | Call Sheet |
 | `def_history.json` | Weekly defense ranks | `export_def_history.py` (build.yml) | build.yml | `build_receivers.py` only |
-| `odds-2026.json` | NFL odds + player props from SportsGameOdds (`lines`, `props`, `start`) | `pull_odds.py` (odds.yml) | Wed 11:00, Fri 22:00 | Call Sheet, SportsMF |
+| `odds-2026.json` | NFL odds + player props from SportsGameOdds (`lines`, `props`, `start`) | `pull_odds.py` (odds.yml) | Wed 10:13, Fri 19:53 | Call Sheet, SportsMF |
 | `cfb-2026.json` | College schedule + finals (`kick` is **UTC**) | `export_cfb.py` (build.yml) | build.yml | Call Sheet |
-| `cfb-ratings-2026.json` | College ratings, team colors/abbr/logos, game projections (`kick` is **Eastern**) | `export_cfb_ratings.py` (build.yml, cfb-odds.yml) | build.yml + Fri 22:00, Sat 12:15 | Call Sheet, SportsMF |
+| `cfb-ratings-2026.json` | College ratings, team colors/abbr/logos, game projections (`kick` is **Eastern**) | `export_cfb_ratings.py` (build.yml, cfb-odds.yml) | build.yml + Fri 19:43, Sat 10:07 | Call Sheet, SportsMF |
 | `fcs-ratings-2026.json` | FCS ratings + games | `export_cfb_ratings.py` | same | Call Sheet, SportsMF |
-| `cfb-odds-2026.json` | College odds from SportsGameOdds | `pull_cfb_odds.py` (cfb-odds.yml) | Fri 22:00, Sat 12:15 | `export_cfb_ratings.py` only |
+| `cfb-odds-2026.json` | College odds from SportsGameOdds | `pull_cfb_odds.py` (cfb-odds.yml) | Fri 19:43, Sat 10:07 | `export_cfb_ratings.py` only |
 | `weather-2026.json` | Game-day forecasts + "weather under" flags | `weather.py forecast` (build.yml, cfb-odds.yml) | same | Call Sheet, SportsMF |
 | `weather-hist.json`, `weather-backtest.json` | Historical weather + the backtest behind the flags | `weather.py backtest` (weather-backtest.yml, manual) | manual | research only |
 | `experts-2026.json` | Expert crowd per NFL game (home/away counts) | `experts/export_cs.py` — by hand or the Friday Claude scheduled task | Fridays | Call Sheet, SportsMF |
@@ -104,9 +104,13 @@ Never put a key in an `index.html` — anything there is public.
 
 ## Known gaps and gotchas
 
-- **Clock change:** build.yml crons are written for EDT. Since Nov 1 they fire an
-  hour earlier on the Eastern clock (comment in build.yml has the winter values).
-  odds.yml / cfb-odds.yml are the same.
+- **Schedules (since 2026-11-03):** crons are UTC set for Eastern *standard* time
+  (in summer they land an hour later on the ET clock), off the top of the hour
+  because GitHub started top-of-the-hour runs 3-6 hours late, with backup build
+  runs Saturday and Sunday mornings. Odds jobs get no backups (they spend SGO
+  credits). Every job re-syncs before pushing because the app commits
+  `sync.json` often. Settings › Data schedule shows planned vs actual runs;
+  its `JOBS` list in `index.html` must match these crons.
 - **Two kickoff clocks for college:** `cfb-2026.json` `kick` is UTC,
   `cfb-ratings-2026.json` `kick` is Eastern. The game strip uses the ratings one.
 - **`sportsmf/index.html` is an old copy of Call Sheet**, not SportsMF. The real

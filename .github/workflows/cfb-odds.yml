@@ -9,14 +9,15 @@ name: College odds pull
 # only fire when college lines are worth having.
 on:
   schedule:
-    # Friday 6pm ET -- most FCS lines are up by now; FBS has settled.
-    - cron: "0 22 * * 5"
-    # Saturday 8:15am ET -- last look before the noon kickoffs. Runs before
-    # the 9am data build so the two never push at the same moment.
-    - cron: "15 12 * * 6"
-    # Cron is UTC, written for EDT (UTC-4). After clocks fall back on Nov 1
-    # these land an hour earlier on the ET clock (5pm / 7:15am); use
-    # "0 23 * * 5" and "15 13 * * 6" to hold the same ET times in winter.
+    # Times are UTC, set for Eastern STANDARD time (Nov-Mar, UTC-5); in
+    # summer each lands an hour later on the ET clock. Off the hour on
+    # purpose: GitHub ran the top-of-the-hour versions 3-5 hours late.
+    # No backup runs -- every run spends SportsGameOdds credits.
+    # Friday 2:43pm ET -- most FCS lines are up; FBS has settled.
+    - cron: "43 19 * * 5"
+    # Saturday 5:07am ET -- last look, early enough to beat noon kickoffs
+    # even if GitHub is hours late.
+    - cron: "7 10 * * 6"
   workflow_dispatch:
     inputs:
       season:
@@ -76,6 +77,5 @@ jobs:
             echo "No change."
           else
             git commit -m "College lines $(date -u +%Y-%m-%d\ %H:%M)"
-            git pull --rebase --quiet || true
-            git push
+            for i in 1 2 3; do git pull --rebase --quiet && git push && break; sleep $((i*7)); done
           fi

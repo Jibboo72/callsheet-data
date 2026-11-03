@@ -2,24 +2,24 @@ name: Build receiver data
 
 on:
   schedule:
-    # Tuesday 7am ET — after Monday night games are final: new ratings.
-    - cron: "0 11 * * 2"
-    # Thursday 4pm ET — the week's injury reports are in (they start
-    # Wednesday), and it's still before Thursday night kicks off. Refreshes
-    # the injury adjustment on the Sides projections.
-    - cron: "0 20 * * 4"
-    # Sunday 10am ET — final status before the early window. Runs before
-    # any Sunday game is played, so the "next unplayed week" logic below
-    # still lands on the right week.
-    - cron: "0 14 * * 0"
-    # Saturday 9am ET — college lines. Books post most FCS numbers late in
-    # the week, so a Thursday pull often has FBS lines but not FCS. This
-    # catches them before the noon kickoffs.
-    - cron: "0 13 * * 6"
-    # Cron is UTC only, written for EDT (UTC-4). After clocks fall back on
-    # Nov 1 these run an hour earlier on the ET clock (6am / 3pm / 9am);
-    # use "0 12 * * 2", "0 21 * * 4" and "0 15 * * 0" to hold the same ET
-    # times through winter.
+    # Times are UTC, set for Eastern STANDARD time (Nov-Mar, UTC-5). In
+    # summer (EDT) each lands one hour later on the ET clock. Minutes are
+    # deliberately off the hour: GitHub queues top-of-the-hour jobs and
+    # started these 3-6 hours late in Oct 2026. Game days get an earlier
+    # run plus a backup so even a long delay lands before kickoff.
+    #
+    # Tuesday 5:17am ET -- after Monday night is final: new ratings.
+    - cron: "17 10 * * 2"
+    # Thursday 1:37pm ET -- injury reports are in; well before Thursday night.
+    - cron: "37 18 * * 4"
+    # Saturday 4:23am ET + backup 7:41am ET -- college lines before noon kickoffs.
+    - cron: "23 9 * * 6"
+    - cron: "41 12 * * 6"
+    # Sunday 4:17am ET + backup 7:47am ET -- final status before the early
+    # window. Both run before any Sunday game, so the "next unplayed week"
+    # logic below still lands on the right week.
+    - cron: "17 9 * * 0"
+    - cron: "47 12 * * 0"
   workflow_dispatch:
     inputs:
       season:
@@ -228,5 +228,6 @@ jobs:
             echo "No change this week."
           else
             git commit -m "Data through $(date -u +%Y-%m-%d)"
-            git push
+            # the Call Sheet app commits data/sync.json often; re-sync first
+            for i in 1 2 3; do git pull --rebase --quiet && git push && break; sleep $((i*7)); done
           fi

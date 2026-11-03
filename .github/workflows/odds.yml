@@ -4,14 +4,14 @@ name: Weekly odds pull
 # should never fire as a side effect of rebuilding stats.
 on:
   schedule:
-    # Wednesday 7am ET — books have posted the new week's lines and props.
-    # Friday 6pm ET — prices you can still act on before Sunday, after a
-    # week of line movement. Cron is UTC only: these are written for
-    # EDT (UTC-4). When clocks fall back on Nov 1 they run an hour
-    # earlier on the ET clock (6am / 5pm) — change to "0 12 * * 3" and
-    # "0 23 * * 5" if you want 7am / 6pm to hold through winter.
-    - cron: "0 11 * * 3"
-    - cron: "0 22 * * 5"
+    # Times are UTC, set for Eastern STANDARD time (Nov-Mar, UTC-5); in
+    # summer each lands an hour later on the ET clock. Off the hour on
+    # purpose: GitHub ran the top-of-the-hour versions 3-6 hours late.
+    # No backup runs here -- every run spends SportsGameOdds credits.
+    # Wednesday 5:13am ET -- books have posted the new week's lines and props.
+    - cron: "13 10 * * 3"
+    # Friday 2:53pm ET -- prices you can still act on before Sunday.
+    - cron: "53 19 * * 5"
   workflow_dispatch:
     inputs:
       season:
@@ -57,5 +57,5 @@ jobs:
             echo "No change."
           else
             git commit -m "Odds snapshot $(date -u +%Y-%m-%d\ %H:%M)"
-            git push
+            for i in 1 2 3; do git pull --rebase --quiet && git push && break; sleep $((i*7)); done
           fi

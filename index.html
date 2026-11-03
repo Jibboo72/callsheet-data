@@ -3468,7 +3468,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-03 17:30 UTC';
+const BUILD_STAMP='2026-11-03 18:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -6070,11 +6070,11 @@ function freshAge(ms){
    if you've set one, which raises GitHub's rate limit). */
 const JOBS=[
   {id:'build', file:'build.yml', name:'NFL + college data', what:'Games, power ratings, prop models, rosters, receiver logs, college schedule and ratings, weather',
-   crons:[['0 11 * * 2','after Monday night — new ratings'],['0 20 * * 4','injury reports in, before Thursday night'],['0 14 * * 0','final check before Sunday kickoffs'],['0 13 * * 6','college lines before noon kickoffs']]},
+   crons:[['17 10 * * 2','after Monday night — new ratings'],['37 18 * * 4','injury reports in, before Thursday night'],['23 9 * * 6','college lines before noon kickoffs'],['41 12 * * 6','Saturday backup'],['17 9 * * 0','final check before Sunday kickoffs'],['47 12 * * 0','Sunday backup']]},
   {id:'odds', file:'odds.yml', name:'NFL odds & props', what:'Lines, totals, team totals and player props (SportsGameOdds credits)',
-   crons:[['0 11 * * 3','opening numbers'],['0 22 * * 5','weekend prices']]},
+   crons:[['13 10 * * 3','opening numbers'],['53 19 * * 5','weekend prices']]},
   {id:'cfbodds', file:'cfb-odds.yml', name:'College odds', what:'College lines, then college ratings and weather rebuilt on them',
-   crons:[['0 22 * * 5','Friday prices'],['15 12 * * 6','Saturday morning prices']]},
+   crons:[['43 19 * * 5','Friday prices'],['7 10 * * 6','Saturday morning prices']]},
   {id:'experts', file:null, name:'Expert picks', what:'Expert ATS picks loaded by the Claude scheduled task',
    crons:[['35 1 * * 6','Friday evening (8:35 PM Eastern)']], tzNote:'Runs on Claude, not GitHub'}
 ];
@@ -6113,12 +6113,17 @@ async function loadJobRuns(force){
   _schedBusy=false;
   try{ save(); renderFresh(); renderSched(); }catch(e){}
 }
+/* schedules before 2026-11-03 18:00 UTC (the move off the hour) */
+const OLD_CRONS={build:[['0 11 * * 2','after Monday night — new ratings'],['0 20 * * 4','injury reports in'],['0 13 * * 6','college lines'],['0 14 * * 0','final check before Sunday']],
+  odds:[['0 11 * * 3','opening numbers'],['0 22 * * 5','weekend prices']],cfbodds:[['0 22 * * 5','Friday prices'],['15 12 * * 6','Saturday morning prices']]};
+const CRON_SWITCH=Date.UTC(2026,10,3,18,0);
 /* each planned slot in the window, matched to the scheduled run GitHub actually started for it */
 function jobSlots(job,days){
   const now=Date.now(), from=now-days*864e5;
   const runs=((S.jobRuns&&S.jobRuns.runs&&S.jobRuns.runs[job.id])||[]).filter(r=>r.ev==='schedule').sort((a,b)=>a.start-b.start);
   const slots=[];
-  job.crons.forEach(([c,why])=>cronTimes(c,from,now).forEach(t=>slots.push({t,why})));
+  job.crons.forEach(([c,why])=>cronTimes(c,Math.max(from,CRON_SWITCH),now).forEach(t=>slots.push({t,why})));
+  (OLD_CRONS[job.id]||[]).forEach(([c,why])=>cronTimes(c,from,Math.min(now,CRON_SWITCH)).forEach(t=>slots.push({t,why})));
   slots.sort((a,b)=>a.t-b.t);
   const used=new Set();
   slots.forEach((s,i)=>{
