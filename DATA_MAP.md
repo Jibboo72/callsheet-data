@@ -12,7 +12,7 @@ Last checked: 2026-11-03.
 |---|---|---|---|---|
 | **Call Sheet** | NFL + college football | `Jibboo72/callsheet-data` | GitHub Pages: `jibboo72.github.io/callsheet-data/` | `data/*.json` (this repo) |
 | **SportsMF** | All (scores, bets, fantasy) | `Jibboo72/sportsmf` | GitHub Pages: `jibboo72.github.io/sportsmf/sportsmf.html` | `data/mfl.json` |
-| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` |
+| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF) |
 | **Scoresheet** | NHL | `Jibboo72/scoresheet` | GitHub Pages from `docs/`: `jibboo72.github.io/scoresheet/` | `docs/data/*.json` |
 | **Vault** | MLB home runs | `Jibboo72/vault` (private) | Netlify (app + two key-holding functions) | nothing shared — browser storage only |
 | Expert ATS Ledger | NFL experts | Claude artifact `claude.ai/artifact/9Kcoigd7nydaf1Vrtg8Ab6` | claude.ai | feeds `data/experts-2026.json` here (see `experts/README.md`) |
@@ -29,10 +29,11 @@ Last checked: 2026-11-03.
                  │   └──── data/sync.json ◄─────────────┘  your bets/picks, pushed with a GitHub token
                  ▼
              SportsMF ◄──── scoresheet/docs/data/board.json  (NHL board)
+                 ▲   ◄──── Hoops-Props/docs/data/board.json (NBA board)
                  ▲
                  └──── sportsmf/data/mfl.json  (MyFantasyLeague, pulled by sportsmf's own workflow)
 
- Buckets (NBA) and Vault (MLB) stand alone — nothing else reads them yet.
+ Vault (MLB) stands alone — nothing else reads it yet.
 ```
 
 **Read pattern:** apps on `jibboo72.github.io` try the same-origin path first
@@ -97,7 +98,7 @@ Never put a key in an `index.html` — anything there is public.
   `cfb-ratings-2026.json` `kick` is Eastern. The game strip uses the ratings one.
 - **`sportsmf/index.html` is an old copy of Call Sheet**, not SportsMF. The real
   app is `sportsmf.html` (the manifest and service worker start there).
-- **Buckets (NBA) isn't wired into SportsMF** the way Scoresheet is; its
-  `docs/data/board.json` has the same shape as Scoresheet's, so it would be a small add.
+- **SportsMF reads both prop boards** (NBA from Hoops-Props, NHL from Scoresheet) — keep
+  their `board.json` paths and top-level keys stable.
 - **Vault keeps everything in the browser** — no shared file, so its picks can't
   show in SportsMF until it publishes or syncs something.
