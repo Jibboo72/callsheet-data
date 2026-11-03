@@ -12,7 +12,7 @@ Last checked: 2026-11-03.
 |---|---|---|---|---|
 | **Call Sheet** | NFL + college football | `Jibboo72/callsheet-data` | GitHub Pages: `jibboo72.github.io/callsheet-data/` | `data/*.json` (this repo) |
 | **SportsMF** | All (scores, bets, fantasy) | `Jibboo72/sportsmf` | GitHub Pages: `jibboo72.github.io/sportsmf/sportsmf.html` | `data/mfl.json` |
-| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF) |
+| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF; also `doubles.json`, `doubles_log.json`) |
 | **Scoresheet** | NHL | `Jibboo72/scoresheet` | GitHub Pages from `docs/`: `jibboo72.github.io/scoresheet/` | `docs/data/*.json` |
 | **Vault** | MLB home runs | `Jibboo72/vault` (private) | Netlify (app + two key-holding functions) | nothing shared — browser storage only |
 | Expert ATS Ledger | NFL experts | Claude artifact `claude.ai/artifact/9Kcoigd7nydaf1Vrtg8Ab6` | claude.ai | feeds `data/experts-2026.json` here (see `experts/README.md`) |
@@ -95,7 +95,7 @@ Tested and not used: FTN charting (box counts, blitz, play action, screens) adde
 |---|---|
 | callsheet-data | `SGO_KEY` (SportsGameOdds), `CFBD_KEY` (CollegeFootballData) |
 | sportsmf | `MFL_APIKEY` |
-| Hoops-Props | `ODDS_API_KEY` (The Odds API) |
+| Hoops-Props | `ODDS_API_KEY` (The Odds API), used only when the repo variable `USE_ODDS` is `true` (off since 2026-11-03) |
 | scoresheet | `ODDS_API_KEY` |
 | vault | Ballpark Pal + SportsGameOdds keys in Netlify function env |
 | Call Sheet / SportsMF on your phone | a GitHub fine-grained token (Contents read/write on callsheet-data; sportsmf for the MFL refresh), stored on the device only |
@@ -117,5 +117,8 @@ Never put a key in an `index.html` — anything there is public.
   app is `sportsmf.html` (the manifest and service worker start there).
 - **SportsMF reads both prop boards** (NBA from Hoops-Props, NHL from Scoresheet) — keep
   their `board.json` paths and top-level keys stable.
+- **Buckets odds are off (since 2026-11-03):** with `USE_ODDS` unset, Hoops-Props `board.json` has model-only
+  fair prices (no `price`, `book`, `ev`, `likely` on markets), so SportsMF's NBA Props tab shows fair odds only.
+  Players ruled Out on ESPN's injury report are dropped from `players[]`; others carry an optional `status`.
 - **Vault keeps everything in the browser** — no shared file, so its picks can't
   show in SportsMF until it publishes or syncs something.
