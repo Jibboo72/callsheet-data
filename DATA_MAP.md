@@ -12,7 +12,7 @@ Last checked: 2026-11-03.
 |---|---|---|---|---|
 | **Call Sheet** | NFL + college football | `Jibboo72/callsheet-data` | GitHub Pages: `jibboo72.github.io/callsheet-data/` | `data/*.json` (this repo) |
 | **SportsMF** | All (scores, bets, fantasy) | `Jibboo72/sportsmf` | GitHub Pages: `jibboo72.github.io/sportsmf/sportsmf.html` | `data/mfl.json` |
-| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF; also `doubles.json`, `doubles_log.json`; the page floors chances at 1%) |
+| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF; also `doubles.json`, `doubles_log.json`; the page floors chances at 1%; `backtest_live.json` = this-season-only backtest) |
 | **Scoresheet** | NHL | `Jibboo72/scoresheet` | GitHub Pages from `docs/`: `jibboo72.github.io/scoresheet/` | `docs/data/*.json` |
 | **Vault** | MLB home runs | `Jibboo72/vault` (private) | Netlify (app + two key-holding functions) | nothing shared — browser storage only |
 | Expert ATS Ledger | NFL experts | Claude artifact `claude.ai/artifact/9Kcoigd7nydaf1Vrtg8Ab6` | claude.ai | feeds `data/experts-2026.json` here (see `experts/README.md`) |
