@@ -52,8 +52,8 @@ CONFIG = dict(
 
     # --- recency ---
     half_life_weeks=8.0,    # in-season decay: a game 9 weeks ago counts half
-    prior_season_weight=0.45,  # last season's plays enter at 25% weight
-    prior_season_decay=0.35,   # season before that: 0.25*0.35
+    prior_season_weight=0.45,  # last season's plays enter at 45% weight (backtested 2026-11-04: best mid-season; less was worse)
+    prior_season_decay=0.35,   # season before that: 0.45*0.35 (about 16%)
 
     # --- shrinkage (the prior strength) ---
     alpha_pass=200.0,
