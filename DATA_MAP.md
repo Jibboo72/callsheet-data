@@ -121,5 +121,7 @@ Never put a key in an `index.html` — anything there is public.
 - **Buckets odds are off (since 2026-11-03):** with `USE_ODDS` unset, Hoops-Props `board.json` has model-only
   fair prices (no `price`, `book`, `ev`, `likely` on markets), so SportsMF's NBA Props tab shows fair odds only.
   Players ruled Out on ESPN's injury report are dropped from `players[]`; others carry an optional `status`.
+- **Buckets schedule (since 2026-11-05):** `tonight.yml` runs at 15:17, 18:43 and 21:47 UTC (the old 16/19/22:00 runs were
+  skipped or hours late). With odds off every run rebuilds the board; with odds on only the first run of the day does.
 - **Vault keeps everything in the browser** — no shared file, so its picks can't
   show in SportsMF until it publishes or syncs something.
