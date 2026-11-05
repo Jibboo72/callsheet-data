@@ -4,7 +4,7 @@ This is the master map. Each of the other repos has a short `DATA_MAP.md` that
 points back here. **Update this file in the same commit** whenever a data file,
 workflow schedule, or cross-app link changes.
 
-Last checked: 2026-11-03.
+Last checked: 2026-11-05.
 
 ## The apps
 
@@ -85,7 +85,7 @@ Tested and not used: FTN charting (box counts, blitz, play action, screens) adde
 
 | App | Feed |
 |---|---|
-| Call Sheet | ESPN scoreboard (NFL + college finals), ESPN NFL summary, ESPN college rankings (AP/coaches/CFP for the game strip), GitHub Actions API (run history for Settings › Data schedule — keep the job list in `index.html` `JOBS` in step with the workflow crons) |
+| Call Sheet | ESPN scoreboard (NFL + college finals), ESPN NFL summary, ESPN college rankings (AP/coaches/CFP for the game strip), GitHub Actions API (run history for Settings › Data schedule — keep the job list in `index.html` `JOBS` in step with the workflow crons), Anthropic Messages API (bet slip reader: 📷 buttons on Bank and each card send screenshots to Claude with your own key) |
 | SportsMF | ESPN site + standings APIs, MLB Stats API, ESPN logos |
 | Vault | MLB Stats API, Baseball Savant, Open-Meteo, plus Ballpark Pal and SportsGameOdds through its Netlify functions |
 
@@ -99,6 +99,7 @@ Tested and not used: FTN charting (box counts, blitz, play action, screens) adde
 | scoresheet | `ODDS_API_KEY` |
 | vault | Ballpark Pal + SportsGameOdds keys in Netlify function env |
 | Call Sheet / SportsMF on your phone | a GitHub fine-grained token (Contents read/write on callsheet-data; sportsmf for the MFL refresh), stored on the device only |
+| Call Sheet on your phone | an Anthropic API key for the bet slip reader (Settings › Bet slip reader), in its own localStorage slot `cs-anthropic-key` — never in `S`, so never in backups, `sync.json` or `shared.json` |
 
 Never put a key in an `index.html` — anything there is public.
 

@@ -415,6 +415,22 @@ code{font-family:var(--fm)}
 .tdrow .pc{text-align:right;flex:none}
 .tdrow .pc b{display:block;font-family:var(--fm);font-size:15px;color:var(--ink)}
 .tdrow .pc span{font-size:11px;color:var(--ink-soft)}
+
+/* bet slip reader */
+#shotSheet{position:fixed;inset:0;z-index:75;background:var(--stock);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 90px)}
+#shotSheet .shothead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+#shotSheet .shotleg{display:grid;grid-template-columns:1fr 1fr 76px;gap:6px;margin-bottom:8px}
+#shotSheet .shotleg .who{grid-column:1/-1}
+#shotSheet .shotleg.one .wide{grid-column:1/-1}
+#shotSheet .shotinc{border:1px solid var(--acc-line);background:var(--acc-soft);color:var(--acc-text);border-radius:999px;padding:4px 10px;font:600 12px var(--fb);cursor:pointer;white-space:nowrap}
+#shotSheet .shotbet.off .shotinc{background:transparent;border-color:var(--line);color:var(--ink-soft)}
+#shotSheet .shotleg .note{grid-column:1/-1}
+#shotSheet .shotgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(68px,1fr));gap:6px;margin-top:6px}
+#shotSheet .shotbet.off{opacity:.55}
+#shotSheet .shotfoot{position:fixed;left:0;right:0;bottom:0;padding:10px 14px calc(env(safe-area-inset-bottom) + 10px);background:var(--stock);border-top:1px solid var(--line)}
+#shotSheet .shotspin{width:34px;height:34px;margin:18px auto 10px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:shotspin 0.9s linear infinite}
+@keyframes shotspin{to{transform:rotate(360deg)}}
+.shotbtn{display:flex;align-items:center;justify-content:center;gap:6px}
 </style>
 </head>
 <body>
@@ -460,6 +476,7 @@ code{font-family:var(--fm)}
 </section>
 
 <section id="paneBank" hidden>
+  <button class="btn shotbtn" data-shot="" style="margin-bottom:14px">📷 Add bets from screenshots</button>
   <div id="bankSummary"></div>
   <input id="bankSearch" placeholder="Search bets — team, wager, league" style="margin:14px 0">
   <div id="bankList"></div>
@@ -507,6 +524,7 @@ code{font-family:var(--fm)}
     <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="setAutoGrade" style="width:auto;margin-top:3px">
       <span><b>Grade game bets automatically</b><br><span class="note" style="margin:0">When a game goes final, spread, total and moneyline bets on it are marked W, L or P for you, and SportsMF follows. Parlays grade once a leg loses or every leg wins. Anything it can't read, and anything you've already graded, is left alone.</span></span></label>
   </div></div>
+  <div id="shotPanel"></div>
   <div id="syncPanel"></div>
   <div id="moveBets"></div>
   <div id="csvImport"></div>
@@ -602,6 +620,8 @@ code{font-family:var(--fm)}
 <div id="player" data-open="0"></div>
 <input type="file" id="photoInput" accept="image/*" hidden>
 <div class="toast" id="toast"></div>
+<div id="shotSheet" hidden></div>
+<input type="file" id="shotInput" accept="image/*" multiple hidden>
 
 <script>
 const store={
@@ -1145,6 +1165,7 @@ function renderCards(){
       </div>
       <div${collapsed?' hidden':''}>
         <div class="blurb">${c.blurb}</div>
+        <button class="btn ghost shotbtn" data-shot="${c.id}" style="margin:0 0 10px">📷 Add from screenshot</button>
         ${rows}
         ${c.id==='gparlay'?'':`<div class="add">
           <input class="full" data-f="who" placeholder="${c.id==='ctd'?'Player — any name, no roster lookup':'Player'}" style="grid-column:1/-1"${c.id==='ctd'?'':' list="rosterNames"'}>
@@ -3468,7 +3489,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-03 18:10 UTC';
+const BUILD_STAMP='2026-11-05 21:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -6887,6 +6908,458 @@ document.getElementById('tabSettings').addEventListener('click',()=>{
 });
 document.getElementById('settingsBack').addEventListener('click',()=>showTab(lastMainTab));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&openPid)closePlayer();});
+
+
+/* ---------------- Add bets from a screenshot ----------------
+   Pick one or more bet-slip screenshots; Claude (vision, through Josh's own
+   Anthropic API key) reads them into structured bets; the app matches each
+   leg to this week's games and players and shows a review sheet. Nothing is
+   saved until "Add" is tapped. From a card's button the bets file to that
+   card (legs become picks, so grading and round-robin settlement work as if
+   typed); from the Bank button game bets go to the bankroll and props can be
+   pointed at a card on the review sheet.
+   The API key lives in its own localStorage slot on this device only — never
+   in S, so it never reaches backups, sync.json or the share file. */
+const SHOT_KEY='cs-anthropic-key', SHOT_MODEL_KEY='cs-shot-model';
+const SHOT_MODELS=[['claude-sonnet-5-5','Sonnet — most accurate (about 2¢ a screenshot)'],['claude-haiku-5-5','Haiku — cheaper (under 1¢), a little less careful']];
+const shotKey=()=>{ try{ return localStorage.getItem(SHOT_KEY)||''; }catch(e){ return ''; } };
+const shotModel=()=>{ try{ return localStorage.getItem(SHOT_MODEL_KEY)||SHOT_MODELS[0][0]; }catch(e){ return SHOT_MODELS[0][0]; } };
+let SHOT=null;          // {busy, msg, err, from (card id or ''), items:[...]}
+let SHOT_FROM='';
+
+const SHOT_PLABEL={pyd:'Passing yards'};
+function shotWhat(mkt,side,line){
+  const m=mktById(mkt), lab=m?m.label:SHOT_PLABEL[mkt];
+  if(!lab||line==null||line==='')return '';
+  if(side==='atleast')return `${line}+ ${lab.toLowerCase()}`;
+  return `${lab} ${side} ${line}`;
+}
+
+/* ---- settings block ---- */
+function renderShotSettings(){
+  const host=document.getElementById('shotPanel'); if(!host)return;
+  const k=shotKey(), m=shotModel();
+  host.innerHTML=`<div class="pblock" style="margin-bottom:16px"><div class="pbh">Bet slip reader</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Reads sportsbook screenshots into bets (the 📷 buttons on the Bank tab and each card). Uses your own Anthropic API key — billed by Anthropic, separate from your Claude plan. Get one at <b>console.anthropic.com</b> › API keys.</div>
+    <div class="note" style="margin:0 0 8px;font-weight:600">${k?`Key saved on this phone (…${esc(k.slice(-4))}).`:'No key saved yet.'} It stays on this device only — never in backups, sync or the share file.</div>
+    <span class="lab">API key</span>
+    <input id="shotKeyIn" type="password" autocomplete="off" placeholder="${k?'Paste a new key to replace it':'sk-ant-…'}">
+    <div style="height:6px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <button class="btn" id="shotKeySave">Save key</button>
+      <button class="btn ghost" id="shotKeyClear"${k?'':' disabled'}>Remove key</button>
+    </div>
+    <div style="height:10px"></div>
+    <span class="lab">Reader</span>
+    <select id="shotModelSel">${SHOT_MODELS.map(([v,l])=>`<option value="${v}"${v===m?' selected':''}>${esc(l)}</option>`).join('')}</select>
+  </div></div>`;
+}
+document.addEventListener('click',e=>{
+  if(e.target.closest('#shotKeySave')){
+    const v=(document.getElementById('shotKeyIn').value||'').trim();
+    if(!/^sk-ant-/.test(v)){ toast('That doesn’t look like an Anthropic key'); return; }
+    try{ localStorage.setItem(SHOT_KEY,v); }catch(_){}
+    renderShotSettings(); toast('Key saved on this phone'); return;
+  }
+  if(e.target.closest('#shotKeyClear')){
+    if(!confirm('Remove the API key from this phone?'))return;
+    try{ localStorage.removeItem(SHOT_KEY); }catch(_){}
+    renderShotSettings(); toast('Key removed'); return;
+  }
+});
+document.addEventListener('change',e=>{
+  if(e.target.id==='shotModelSel'){ try{ localStorage.setItem(SHOT_MODEL_KEY,e.target.value); }catch(_){} toast('Saved'); }
+});
+
+/* ---- start: any [data-shot] button ("" = Bank, else a card id) ---- */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-shot]'); if(!b)return;
+  e.stopPropagation();
+  if(!shotKey()){
+    if(confirm('The slip reader needs your Anthropic API key first. Open Settings to add it?')){ showTab('Settings'); setTimeout(()=>{ const el=document.getElementById('shotPanel'); el&&el.scrollIntoView({block:'start'}); },60); }
+    return;
+  }
+  SHOT_FROM=b.dataset.shot||'';
+  const inp=document.getElementById('shotInput'); inp.value=''; inp.click();
+},true);
+document.addEventListener('change',e=>{
+  if(e.target.id!=='shotInput')return;
+  const files=[...(e.target.files||[])].filter(f=>/^image\//.test(f.type)||/\.(heic|heif|png|jpe?g|webp)$/i.test(f.name));
+  if(files.length)shotRun(files,SHOT_FROM);
+});
+
+/* shrink to what the model actually looks at (~1.6 MP), JPEG */
+async function shotImg(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=new Image();
+    await new Promise((res,rej)=>{ img.onload=res; img.onerror=()=>rej(new Error('Could not open '+file.name)); img.src=url; });
+    const w=img.naturalWidth, h=img.naturalHeight;
+    const s=Math.min(1,Math.sqrt(1.6e6/(w*h)),2400/Math.max(w,h));
+    const c=document.createElement('canvas'); c.width=Math.round(w*s); c.height=Math.round(h*s);
+    const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(img,0,0,c.width,c.height);
+    return c.toDataURL('image/jpeg',0.86).split(',')[1];
+  } finally { URL.revokeObjectURL(url); }
+}
+
+const SHOT_TOOL={
+  name:'record_bets',
+  description:'Record every bet visible in the sportsbook screenshots.',
+  input_schema:{type:'object',required:['bets'],properties:{
+    bets:{type:'array',items:{type:'object',required:['type','legs'],properties:{
+      book:{type:'string',description:'Sportsbook, e.g. DraftKings, FanDuel, Bet365, BetMGM, Fanatics, Hard Rock, theScore, BetRivers, Caesars'},
+      bet_id:{type:'string',description:'The book’s bet/ticket/receipt ID exactly as shown, or empty'},
+      placed:{type:'string',description:'Date the bet was placed, YYYY-MM-DD, or empty'},
+      type:{type:'string',enum:['straight','parlay','sgp','round_robin','teaser','other']},
+      stake_total:{type:'number',description:'Total amount wagered on this ticket (for a round robin: all combos together)'},
+      stake_per_bet:{type:['number','null'],description:'Round robins only: wager per combo'},
+      rr_size:{type:['integer','null'],description:'Round robins only: legs per combo (2 for “by 2s”)'},
+      rr_count:{type:['integer','null'],description:'Round robins only: number of combos'},
+      odds:{type:'string',description:'American odds of the whole ticket as shown after any boost, e.g. "+265" or "-110"; empty for round robins'},
+      to_win:{type:['number','null']},
+      status:{type:'string',enum:['open','won','lost','push','void','cashed_out']},
+      payout:{type:['number','null'],description:'Total returned if settled or cashed out (stake included)'},
+      legs:{type:'array',items:{type:'object',required:['kind','text'],properties:{
+        text:{type:'string',description:'The leg exactly as the slip shows it'},
+        league:{type:'string',enum:['nfl','cfb','other']},
+        kind:{type:'string',enum:['spread','total','moneyline','team_total','player_prop','other']},
+        team:{type:'string',description:'Team picked (spread/ML/team total) or the player’s team. NFL: standard abbreviation (DET, KC, LA for the Rams, LAC, WAS…). College: school name.'},
+        away:{type:'string'},home:{type:'string'},
+        game_date:{type:'string',description:'YYYY-MM-DD if shown'},
+        player:{type:'string',description:'Full player name for props'},
+        prop:{type:'string',enum:['rec','yds','lng','tgt','td','ftd','ptd','pyd','ryd','car','lrush','cyd','other',''],description:'rec=receptions, yds=receiving yards, lng=longest reception, tgt=targets, td=anytime TD (2+ TDs is td with line 2), ftd=first TD, ptd=passing TDs, pyd=passing yards, ryd=rushing yards, car=rush attempts, lrush=longest rush, cyd=rush+rec yards'},
+        side:{type:'string',enum:['over','under','atleast','']},
+        line:{type:['number','null'],description:'Spread signed from the picked team’s side (-3.5); total/prop number; anytime TD = 1 with side atleast; "5+ receptions" = 5 with side atleast'},
+        odds:{type:'string',description:'This leg’s own American odds if shown, else empty'},
+        result:{type:'string',enum:['open','won','lost','push','void']}
+      }}},
+      unsure:{type:'array',items:{type:'string'},description:'Fields you could not read confidently, e.g. "stake", "leg 2 line"'}
+    }}}
+  }}
+};
+
+function shotContext(){
+  const today=new Date(), ymd=d=>d.toISOString().slice(0,10);
+  const lo=new Date(today-5*864e5), hi=new Date(+today+9*864e5);
+  const nfl=((S.games&&S.games.games)||[]).filter(g=>g.date&&g.date>=ymd(lo)&&g.date<=ymd(hi)).map(g=>`${g.away} @ ${g.home} ${g.date}`);
+  return `Today is ${ymd(today)}. NFL games around now (nflverse abbreviations — use these): ${nfl.join('; ')||'none loaded'}.`;
+}
+const SHOT_SYSTEM=`You read sportsbook bet-slip screenshots for a bettor's tracking app and call record_bets once.
+Rules:
+- One entry per real ticket. The same ticket can appear in more than one screenshot (or be cut across two) — record it once.
+- Use only what is visible. Never guess a stake, price or line you can't read; leave it empty/null and list it in "unsure".
+- Round robins: stake_total is the whole ticket; also give stake_per_bet, rr_size and rr_count when shown.
+- Same-game parlays are type "sgp".
+- Spreads: line is from the picked team's side. Totals: side over/under. Team totals: kind team_total with the team.
+- Odds as American strings with sign. Convert decimal/fractional if that's what the slip shows.
+- Leg results from checkmarks/X marks if shown.`;
+
+async function shotCall(imgs){
+  const body={model:shotModel(),max_tokens:6000,system:SHOT_SYSTEM,tools:[SHOT_TOOL],tool_choice:{type:'tool',name:'record_bets'},
+    messages:[{role:'user',content:[...imgs.map(d=>({type:'image',source:{type:'base64',media_type:'image/jpeg',data:d}})),
+      {type:'text',text:shotContext()+`\nThese are ${imgs.length} screenshot${imgs.length===1?'':'s'}. Record every bet.`}]}]};
+  let r;
+  try{
+    r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':shotKey(),
+      'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});
+  }catch(e){ throw new Error('Couldn’t reach Anthropic — check your connection and try again.'); }
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){
+    const m=(j.error&&j.error.message)||('HTTP '+r.status);
+    if(r.status===401)throw new Error('Anthropic rejected the API key. Check it in Settings › Bet slip reader.');
+    if(r.status===402||/credit|billing/i.test(m))throw new Error('Your Anthropic account is out of credit: '+m);
+    if(/model/i.test(m))throw new Error('Reader model problem ('+m+'). Try the other reader in Settings.');
+    throw new Error('Anthropic error: '+m);
+  }
+  const tu=(j.content||[]).find(c=>c.type==='tool_use');
+  return (tu&&tu.input&&tu.input.bets)||[];
+}
+
+/* ---- matching to the app's games and players ---- */
+const shotDate=s=>/^\d{4}-\d{2}-\d{2}$/.test(String(s||''))?String(s):'';
+function shotGame(lg,leg,wk){
+  const txt=_nrm([leg.team,leg.away,leg.home,leg.text].filter(Boolean).join(' '));
+  const pools=lg==='nfl'?[(S.games&&S.games.games)||[]]:[(S.cfbr&&S.cfbr.games)||[],(S.cfb&&S.cfb.games)||[],(S.fcsr&&S.fcsr.games)||[]];
+  const tryWk=w=>{
+    let best=null,bs=0;
+    pools.forEach(p=>p.forEach(g=>{
+      if(!g.date||!dateInWeek(String(g.date).slice(0,10),w))return;
+      const al=x=>gradeAliases(lg,x).some(a=>new RegExp('(^|[^a-z0-9])'+a.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![a-z0-9])').test(txt));
+      let sc=(al(g.home)?1:0)+(al(g.away)?1:0);
+      if(!sc&&lg==='cfb'){ sc=(shortHit(g.home,txt)?1:0)+(shortHit(g.away,txt)?1:0); sc*=0.9; }
+      if(sc>bs){bs=sc;best=g;}
+    }));
+    return best;
+  };
+  return tryWk(wk)||tryWk(wk+1)||tryWk(wk-1);
+}
+function shotPlayer(name){
+  if(!name)return null;
+  const k=pnorm(name), ki=pinit(name); let hit=null, init=[];
+  Object.entries(S.players||{}).forEach(([pid,p])=>{ if(!p||!p.name)return; if(pnorm(p.name)===k)hit={pid,p}; else if(pinit(p.name)===ki)init.push({pid,p}); });
+  return hit||(init.length===1?init[0]:null);
+}
+const shotTeamName=(lg,g,leg)=>{ if(!g)return leg.team||''; const sd=sideOfText(lg,g,_nrm(leg.team||leg.text||'')); return sd?sd.name:(leg.team||''); };
+function shotLeg(raw,wkDefault){
+  const lg=raw.league==='cfb'?'cfb':'nfl';
+  const L={raw, lg, odds:/^[+-]?\d+$/.test(String(raw.odds||'').replace(/\s/g,''))?parseInt(raw.odds,10):null, warn:[]};
+  const datedWk=weekForDate(shotDate(raw.game_date));
+  let wk=datedWk!=null?datedWk:wkDefault;
+  let g=raw.league==='other'?null:shotGame(lg,raw,wk);
+  if(!g&&raw.kind==='player_prop'&&lg==='nfl'){ const pl=shotPlayer(raw.player); if(pl&&pl.p.team)g=shotGame(lg,{team:pl.p.team,text:''},wk); }
+  if(g){ L.game=String(g.id); L.match=`${g.away} @ ${g.home}`; L.gdate=String(g.date||'').slice(0,10); const w=weekForDate(L.gdate); if(w!=null)wk=w; }
+  L.wk=wk;
+  const line=raw.line==null||raw.line===''?null:Number(raw.line);
+  const fmt=n=>n>0?'+'+n:(n===0?'pk':String(n));
+  if(raw.kind==='player_prop'){
+    L.type='prop';
+    const pl=lg==='nfl'?shotPlayer(raw.player):null;
+    L.who=pl?pl.p.name:(raw.player||'');
+    L.pid=lg==='nfl'?(pl?pl.pid:slug(L.who)):null;
+    L.pos=pl?pl.p.pos:'';
+    L.mkt=raw.prop&&raw.prop!=='other'?raw.prop:null;
+    L.side=raw.side||(L.mkt==='td'||L.mkt==='ftd'?'atleast':'over');
+    L.line=line!=null?line:((L.mkt==='td'||L.mkt==='ftd')?1:null);
+    L.what=(L.mkt&&shotWhat(L.mkt,L.side,L.line))||raw.text||'';
+    if(lg==='nfl'&&!pl&&L.who)L.warn.push(`${L.who} isn’t on your roster — it’ll still grade by name`);
+    if(!L.mkt)L.warn.push('market not recognized — grade it yourself');
+  } else if(raw.kind==='spread'||raw.kind==='moneyline'||raw.kind==='team_total'){
+    L.type='game';
+    const t=lg==='nfl'?(raw.team||''):shotTeamName(lg,g,raw);
+    if(raw.kind==='spread'){ L.market='side'; L.desc=line==null?(raw.text||''):`${t} ${fmt(line)}`; }
+    else if(raw.kind==='moneyline'){ L.market='ml'; L.desc=`${t} ML`; }
+    else { L.market='total'; L.desc=line==null?(raw.text||''):`${t} TT ${raw.side==='under'?'u':'o'}${line}`; }
+  } else if(raw.kind==='total'){
+    L.type='game'; L.market='total';
+    L.desc=line==null?(raw.text||''):`${L.match||((raw.away||'')+' @ '+(raw.home||''))} ${raw.side==='under'?'u':'o'}${line}`;
+  } else { L.type='other'; L.desc=raw.text||''; }
+  if(L.type==='game'&&!g&&raw.league!=='other')L.warn.push('couldn’t find this game in that week — it won’t auto-grade');
+  if(raw.league==='other')L.warn.push('not NFL or college football — saved as typed');
+  return L;
+}
+function shotGuessCard(it){
+  const props=it.legs.filter(l=>l.type==='prop'); if(!props.length||props.length<it.legs.length)return '';
+  if(props.every(l=>l.lg==='cfb'))return props.every(l=>l.mkt==='td')?'ctd':'';
+  const m=new Set(props.map(l=>l.mkt+(l.mkt==='lng'&&l.side==='under'?'-u':'')));
+  if(m.size!==1)return '';
+  const k=[...m][0];
+  if(k==='td')return props.every(l=>/^TE$/i.test(l.pos||''))?'tetd':'td';
+  return {rec:'slot',lng:'long','lng-u':'fade'}[k]||'';
+}
+function shotStatusResult(s){ return {won:'W',lost:'L',push:'P',void:'P'}[s]||null; }
+function shotItem(raw,from){
+  const placedWk=weekForDate(shotDate(raw.placed));
+  const wk0=placedWk!=null?placedWk:S.week;
+  const legs=(raw.legs||[]).map(l=>shotLeg(l,wk0));
+  const wk=legs.length&&legs[0].wk!=null?Math.max(...legs.map(l=>l.wk)):wk0;
+  const type=raw.type==='sgp'?'parlay':(raw.type==='teaser'||raw.type==='other'?'parlay':raw.type);
+  const it={raw, inc:true, wk, type, legs, book:raw.book||'', warn:[],
+    stake:raw.stake_total!=null?Number(raw.stake_total):null,
+    per:raw.stake_per_bet!=null?Number(raw.stake_per_bet):null,
+    size:raw.rr_size||null, count:raw.rr_count||null,
+    odds:/^[+-]?\d+$/.test(String(raw.odds||'').replace(/\s/g,''))?parseInt(raw.odds,10):null,
+    result:shotStatusResult(raw.status), payout:raw.payout!=null?Number(raw.payout):null, status:raw.status||'open'};
+  if(it.type==='straight'&&legs.length>1)it.type='parlay';
+  if(it.type==='straight'&&it.odds==null&&legs[0])it.odds=legs[0].odds;
+  if(it.type==='round_robin'){
+    if(it.per==null&&it.stake&&it.count)it.per=Math.round(it.stake/it.count*100)/100;
+    if(!it.size)it.size=2;
+  }
+  if(raw.status==='cashed_out'&&it.payout!=null&&it.stake)it.result=it.payout>=it.stake?'W':'L';
+  it.cid=from&&from!=='gparlay'?from:(it.type==='round_robin'||it.legs.every(l=>l.type==='prop')?shotGuessCard(it):'');
+  if(from==='gparlay')it.cid='';
+  it.key=(raw.book||'?').toLowerCase()+'|'+(raw.bet_id?String(raw.bet_id).replace(/\s/g,''):`${it.stake}|${it.odds}|${legs.map(l=>l.raw.text).join('/')}`);
+  if(BANKKEY().bets.some(b=>b.slipKey===it.key)){ it.dup=true; it.inc=false; }
+  (raw.unsure||[]).forEach(u=>it.warn.push('unsure: '+u));
+  return it;
+}
+
+async function shotRun(files,from){
+  SHOT={busy:true,msg:`Reading ${files.length} screenshot${files.length===1?'':'s'}…`,items:[],from,err:''};
+  renderShot();
+  try{
+    const imgs=[]; for(const f of files)imgs.push(await shotImg(f));
+    const raws=[];
+    for(let i=0;i<imgs.length;i+=5){
+      SHOT.msg=imgs.length>5?`Reading screenshots ${i+1}–${Math.min(i+5,imgs.length)} of ${imgs.length}…`:SHOT.msg; renderShot();
+      raws.push(...await shotCall(imgs.slice(i,i+5)));
+    }
+    SHOT.items=raws.map(r=>shotItem(r,from));
+    SHOT.busy=false;
+    if(!SHOT.items.length)SHOT.err='No bets found in those screenshots. A screenshot of the bet slip or the My Bets page works best.';
+  }catch(e){ SHOT.busy=false; SHOT.err=e.message||String(e); }
+  renderShot();
+}
+
+/* ---- review sheet ---- */
+function shotLegRow(i,j,l,one){
+  const warn=l.warn.length?`<div class="note" style="margin:2px 0 0;color:var(--hl-long)">${l.warn.map(esc).join(' · ')}</div>`:'';
+  const odds=one?'':`<input data-sl="${i}:${j}:odds" value="${l.odds!=null?fmtAm(l.odds):''}" placeholder="odds" inputmode="text">`;
+  if(l.type==='prop')return `<div class="shotleg${one?' one':''}">
+    <input class="who" data-sl="${i}:${j}:who" value="${esc(l.who)}" placeholder="Player">
+    <input class="wide" data-sl="${i}:${j}:what" value="${esc(l.what)}" placeholder="Receptions over 5.5"${one?'':' style="grid-column:1/3"'}>
+    ${odds}${warn}</div>`;
+  return `<div class="shotleg${one?' one':''}">
+    <input class="wide" data-sl="${i}:${j}:desc" value="${esc(l.desc)}"${one?'':' style="grid-column:1/3"'}>
+    ${odds}${warn}</div>`;
+}
+function renderShot(){
+  const el=document.getElementById('shotSheet'); if(!el)return;
+  if(!SHOT){ el.hidden=true; el.innerHTML=''; document.body.style.overflow=''; return; }
+  el.hidden=false; document.body.style.overflow='hidden';
+  const fromName=SHOT.from?(catById(SHOT.from)||{}).name:'';
+  const head=`<div class="shothead"><div><div style="font-weight:700;font-size:17px">Bets from screenshots</div>
+    <div class="note" style="margin:0">${fromName?`Filing to <b>${esc(fromName)}</b>`:'Bank'} · check each one, then add</div></div>
+    <button class="btn ghost" data-shotx style="width:auto;padding:6px 14px">Cancel</button></div>`;
+  if(SHOT.busy){ el.innerHTML=head+`<div class="pblock"><div class="pbody"><div class="shotspin"></div><div class="note" style="text-align:center">${esc(SHOT.msg)}</div></div></div>`; return; }
+  if(SHOT.err&&!SHOT.items.length){ el.innerHTML=head+`<div class="pblock"><div class="pbody"><div class="note" style="color:var(--loss);font-weight:600">${esc(SHOT.err)}</div>
+    <button class="btn" data-shot="${esc(SHOT.from)}" style="margin-top:10px">Try other screenshots</button></div></div>`; return; }
+  const cardOpts=(it)=>{
+    const ok=CATS.filter(c=>c.id!=='gparlay');
+    const none=it.type==='round_robin'?'':`<option value=""${!it.cid?' selected':''}>No card — just the Bank</option>`;
+    return none+ok.map(c=>`<option value="${c.id}"${it.cid===c.id?' selected':''}>${esc(c.name)}</option>`).join('');
+  };
+  const typeLab={straight:'Straight',parlay:'Parlay',round_robin:'Round robin'};
+  const rows=SHOT.items.map((it,i)=>{
+    const allProps=it.legs.length&&it.legs.every(l=>l.type==='prop');
+    const showCard=!SHOT.from&&(allProps||it.type==='round_robin');
+    const res=it.result?{W:'Won',L:'Lost',P:'Push'}[it.result]:'Open';
+    return `<div class="pblock shotbet${it.inc?'':' off'}" style="margin-bottom:12px"><div class="pbh" style="display:flex;align-items:center;gap:10px">
+      <button class="shotinc" data-shotinc="${i}">${it.inc?'✓ Adding':'Skipping'}</button>
+      <span style="flex:1">${esc(typeLab[it.type]||'Bet')}${it.type==='round_robin'?` · ${it.size}-pick`:''}${it.legs.length>1?` · ${it.legs.length} legs`:''}</span>
+      <span style="font-weight:500;opacity:.8">${esc(it.book||'')}</span></div><div class="pbody">
+      ${it.dup?`<div class="note" style="margin:0 0 8px;color:var(--loss);font-weight:600">Already in your Bank — left unticked so it isn’t added twice.</div>`:''}
+      ${it.warn.length?`<div class="note" style="margin:0 0 8px;color:var(--hl-long)">${it.warn.map(esc).join(' · ')}</div>`:''}
+      ${it.legs.map((l,j)=>shotLegRow(i,j,l,it.legs.length===1&&it.type!=='round_robin')).join('')}
+      <div class="shotgrid">
+        ${it.type==='round_robin'
+          ?`<div><span class="lab">Per bet</span><input data-si="${i}:per" value="${it.per!=null?it.per:''}" inputmode="decimal"></div>
+            <div><span class="lab">Bets</span><input data-si="${i}:count" value="${it.count!=null?it.count:''}" inputmode="numeric"></div>
+            <div><span class="lab">Size</span><input data-si="${i}:size" value="${it.size||2}" inputmode="numeric"></div>`
+          :`<div><span class="lab">Stake</span><input data-si="${i}:stake" value="${it.stake!=null?it.stake:''}" inputmode="decimal"></div>
+            <div><span class="lab">Odds</span><input data-si="${i}:odds" value="${it.odds!=null?fmtAm(it.odds):''}" inputmode="text"></div>`}
+        <div><span class="lab">Week</span><input data-si="${i}:wk" value="${it.wk}" inputmode="numeric"></div>
+      </div>
+      ${showCard?`<span class="lab" style="margin-top:8px">Card</span><select data-si="${i}:cid">${cardOpts(it)}</select>`:''}
+      <div class="note" style="margin:8px 0 0">Status on the slip: <b>${res}</b>${it.payout!=null&&it.result?` · returned ${money(it.payout)}`:''}</div>
+    </div></div>`;
+  }).join('');
+  const n=SHOT.items.filter(x=>x.inc).length;
+  el.innerHTML=head+(SHOT.err?`<div class="note" style="color:var(--loss)">${esc(SHOT.err)}</div>`:'')+rows+
+    `<div class="shotfoot"><button class="btn" data-shotadd${n?'':' disabled'}>Add ${n} bet${n===1?'':'s'}</button></div>`;
+}
+function shotSync(){
+  document.querySelectorAll('#shotSheet [data-si]').forEach(x=>{
+    const [i,f]=x.dataset.si.split(':'), it=SHOT.items[Number(i)]; if(!it)return;
+    if(f==='cid')it.cid=x.value;
+    else if(f==='odds'){ const v=parseInt(String(x.value).replace(/[^\d+-]/g,''),10); it.odds=isNaN(v)?null:v; }
+    else if(f==='wk'){ const v=parseInt(x.value,10); if(!isNaN(v))it.wk=v; }
+    else { const v=parseFloat(String(x.value).replace(/[^\d.]/g,'')); it[f]=isNaN(v)?null:v; }
+  });
+  document.querySelectorAll('#shotSheet [data-sl]').forEach(x=>{
+    const [i,j,f]=x.dataset.sl.split(':'), l=SHOT.items[Number(i)]&&SHOT.items[Number(i)].legs[Number(j)]; if(!l)return;
+    if(f==='odds'){ const v=parseInt(String(x.value).replace(/[^\d+-]/g,''),10); l.odds=isNaN(v)?null:v; return; }
+    if(f==='what'&&x.value!==l.what){ l.what=x.value; const p=readPropText(x.value); if(p){ l.mkt=p.mkt; l.side=p.side; l.line=p.line; } return; }
+    l[f]=x.value;
+  });
+}
+document.addEventListener('change',e=>{
+  if(!SHOT||!e.target.closest('#shotSheet'))return;
+  if(e.target.matches('[data-si$=":cid"]')){ shotSync(); renderShot(); }
+});
+document.addEventListener('click',e=>{
+  if(!SHOT||!e.target.closest('#shotSheet'))return;
+  if(e.target.closest('[data-shotx]')){ SHOT=null; renderShot(); return; }
+  const ti=e.target.closest('[data-shotinc]');
+  if(ti){ shotSync(); const it=SHOT.items[Number(ti.dataset.shotinc)]; it.inc=!it.inc; renderShot(); return; }
+  if(e.target.closest('[data-shotadd]')){ shotSync(); shotCommit(); }
+});
+
+/* ---- saving ---- */
+function shotCard(wk,cid){
+  S.cards[wk]=S.cards[wk]||{};
+  if(!S.cards[wk][cid]){ const d=catById(cid).def; S.cards[wk][cid]={picks:[],mode:d.mode,size:d.size,stake:d.stake}; }
+  return S.cards[wk][cid];
+}
+const shotLegResult=l=>shotStatusResult(l.raw.result);
+function shotPick(l,cid,it){
+  const p={who:l.who,what:l.what||shotWhat(l.mkt,l.side,l.line),mkt:l.mkt,side:l.side,line:l.line,odds:l.odds,book:it.book,game:l.match||''};
+  if(cid==='ctd'||l.lg==='cfb'){ p.pid=null; p.cfb=true; }
+  else { p.pid=l.pid; if(l.pid&&l.who)ensurePlayer(l.pid,l.who); }
+  return p;
+}
+function shotLegOut(l,wk){
+  if(l.type==='prop')return {desc:`${l.who} ${l.what}`.trim(),odds:l.odds,kind:'prop',market:'other',match:l.who,pickWho:l.who,pid:l.pid||null,game:l.game||'',wk};
+  if(l.type==='game')return {desc:l.desc,odds:l.odds,kind:l.lg==='cfb'?'cfb':'side',market:l.market,match:l.match||'',game:l.game||'',gdate:l.gdate||'',wk};
+  return {desc:l.desc,odds:l.odds,kind:'custom',market:'other',match:'',wk};
+}
+function shotCommit(){
+  const todo=SHOT.items.filter(x=>x.inc);
+  for(const it of todo){
+    if(it.type==='round_robin'){ if(!it.per||!it.count){ toast('A round robin needs its per-bet stake and number of bets'); return; } if(!it.cid){ toast('Pick a card for the round robin'); return; } }
+    else if(!it.stake){ toast('Every bet needs a stake'); return; }
+    else if(it.odds==null&&!(SHOT.from&&it.legs.every(l=>l.type==='prop')&&it.type==='straight')){ toast('Every bet needs its odds'); return; }
+  }
+  const b=BANKKEY(); let added=0; const graded=[];
+  const nid=()=>'b'+Date.now()+Math.random().toString(36).slice(2,6);
+  todo.forEach(it=>{
+    const wk=it.wk, base={slipKey:it.key,book:it.book,paper:!!b.paper,ts:Date.now(),wk,shot:true};
+    const cid=it.cid&&catById(it.cid)?it.cid:'';
+    const propsOnly=it.legs.length&&it.legs.every(l=>l.type==='prop');
+    if(cid&&propsOnly&&it.type==='straight'){
+      // one prop, one bet: a card pick with its bet, same as tapping BET on the card
+      const l=it.legs[0], cd=shotCard(wk,cid), p=shotPick(l,cid,it);
+      if(p.odds==null)p.odds=it.odds;
+      const k=cardBetKind(cid); const id=nid();
+      let mp=null; try{ mp=p.pid&&p.mkt?modelProb(p.pid,p.mkt,p.line,p.side):null; }catch(_){}
+      b.bets.push(Object.assign({id,kind:k.kind,market:k.market,desc:`${p.who} ${p.what}`,match:p.who,odds:it.odds!=null?it.odds:p.odds,stake:it.stake,
+        result:it.result,mprob:mp?mp.prob:null,card:cid,pickWho:p.who},base));
+      p.betId=id; cd.picks.push(p); added++;
+      const g=shotLegResult(l)||it.result; if(g)graded.push([wk,cid,p,g]);
+      return;
+    }
+    if(cid&&propsOnly&&(it.type==='round_robin'||it.type==='parlay')){
+      // a combo ticket on a card: legs become picks tied to one placed batch
+      const cd=shotCard(wk,cid), id=nid();
+      const mode=it.type==='parlay'?'parlay':'rr', per=it.type==='parlay'?it.stake:it.per;
+      const nb=it.type==='parlay'?1:(it.count||combosOf(it.legs,Math.max(2,it.size||2)).length);
+      const settled=it.result&&it.payout!=null;
+      b.bets.push(Object.assign({id,kind:'prop',card:cid,desc:`${catById(cid).name} · ${nb} bet${nb===1?'':'s'}, ${settled?'settled':'pending'}`,
+        odds:null,stake:Math.round(per*nb*100)/100,result:settled?(it.payout>=per*nb?'W':'L'):null,fixedReturn:settled?it.payout:null,
+        rrMode:mode,rrSize:mode==='rr'?(it.size||2):cd.size,rrStake:per,rrBoost:0},base));
+      it.legs.forEach(l=>{ const p=shotPick(l,cid,it); p.rrBatch=id; cd.picks.push(p); const g=shotLegResult(l); if(g&&!settled)graded.push([wk,cid,p,g]); });
+      added++;
+      return;
+    }
+    if(it.type==='round_robin'){
+      toast('Round robins with game legs aren’t supported yet — enter that one by hand'); return;
+    }
+    if(it.legs.length===1){
+      const l=it.legs[0], o=shotLegOut(l,wk);
+      if(l.type==='prop'){
+        const td=l.mkt==='td';
+        b.bets.push(Object.assign({id:nid(),kind:td?(l.lg==='cfb'?'cfb':'side'):'prop',market:td?'td':'side',desc:o.desc,match:l.who,pickWho:l.who,
+          odds:it.odds,stake:it.stake,result:it.result},base));
+      } else {
+        b.bets.push(Object.assign({id:nid(),kind:l.type==='other'?'custom':(l.lg==='cfb'?'cfb':'side'),market:l.type==='other'?'other':l.market,
+          desc:o.desc,odds:it.odds,stake:it.stake,result:it.result,game:o.game,match:o.match,gdate:o.gdate},base));
+      }
+      if(it.status==='cashed_out'&&it.payout!=null)b.bets[b.bets.length-1].fixedReturn=it.payout;
+      added++; return;
+    }
+    const legs=it.legs.map(l=>shotLegOut(l,wk));
+    const lgs=new Set(it.legs.map(l=>l.lg));
+    b.bets.push(Object.assign({id:nid(),kind:'parlay',league:lgs.size===1?[...lgs][0]:'mixed',legs,desc:legs.map(legName).join(' + '),
+      odds:it.odds,stake:it.stake,result:it.result,boost:0,match:`${legs.length}-leg parlay`},base,
+      it.status==='cashed_out'&&it.payout!=null?{fixedReturn:it.payout}:{}));
+    added++;
+  });
+  graded.forEach(([wk,cid,p,g])=>{ try{ applyPickGrade(wk,cid,p,g); }catch(_){} });
+  save(); SHOT=null; renderShot(); renderAll();
+  toast(`Added ${added} bet${added===1?'':'s'}`);
+  try{ if(S.autoGrade!==false){ autoGradeProps&&autoGradeProps(); } }catch(_){}
+}
+renderShotSettings();
 
 load();
 </script>
