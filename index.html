@@ -3489,7 +3489,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-05 21:30 UTC';
+const BUILD_STAMP='2026-11-05 21:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -7044,7 +7044,7 @@ function shotContext(){
   const nfl=((S.games&&S.games.games)||[]).filter(g=>g.date&&g.date>=ymd(lo)&&g.date<=ymd(hi)).map(g=>`${g.away} @ ${g.home} ${g.date}`);
   return `Today is ${ymd(today)}. NFL games around now (nflverse abbreviations — use these): ${nfl.join('; ')||'none loaded'}.`;
 }
-const SHOT_SYSTEM=`You read sportsbook bet-slip screenshots for a bettor's tracking app and call record_bets once.
+const SHOT_SYSTEM=`You read sportsbook bet-slip screenshots for a bettor's tracking app. Always respond by calling the record_bets tool exactly once (with an empty bets list if there are none) — no other reply.
 Rules:
 - One entry per real ticket. The same ticket can appear in more than one screenshot (or be cut across two) — record it once.
 - Use only what is visible. Never guess a stake, price or line you can't read; leave it empty/null and list it in "unsure".
@@ -7055,7 +7055,7 @@ Rules:
 - Leg results from checkmarks/X marks if shown.`;
 
 async function shotCall(imgs){
-  const body={model:shotModel(),max_tokens:6000,system:SHOT_SYSTEM,tools:[SHOT_TOOL],tool_choice:{type:'tool',name:'record_bets'},
+  const body={model:shotModel(),max_tokens:6000,system:SHOT_SYSTEM,tools:[SHOT_TOOL],tool_choice:{type:'auto'},
     messages:[{role:'user',content:[...imgs.map(d=>({type:'image',source:{type:'base64',media_type:'image/jpeg',data:d}})),
       {type:'text',text:shotContext()+`\nThese are ${imgs.length} screenshot${imgs.length===1?'':'s'}. Record every bet.`}]}]};
   let r;
@@ -7071,8 +7071,14 @@ async function shotCall(imgs){
     if(/model/i.test(m))throw new Error('Reader model problem ('+m+'). Try the other reader in Settings.');
     throw new Error('Anthropic error: '+m);
   }
-  const tu=(j.content||[]).find(c=>c.type==='tool_use');
-  return (tu&&tu.input&&tu.input.bets)||[];
+  const tu=(j.content||[]).find(c=>c.type==='tool_use'&&c.name==='record_bets');
+  if(tu&&tu.input&&Array.isArray(tu.input.bets))return tu.input.bets;
+  // fallback: the reply put the JSON in plain text instead of calling the tool
+  const txt=(j.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('\n');
+  const m=txt.match(/\{[\s\S]*"bets"[\s\S]*\}/);
+  if(m){ try{ const o=JSON.parse(m[0]); if(Array.isArray(o.bets))return o.bets; }catch(_){} }
+  if(/no bets|don.t see any bet|not a bet/i.test(txt))return [];
+  throw new Error('The reader answered but didn’t return any bets'+(txt?': '+txt.slice(0,160):'.'));
 }
 
 /* ---- matching to the app's games and players ---- */
