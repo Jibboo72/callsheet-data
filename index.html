@@ -3523,7 +3523,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-06 12:30 UTC';
+const BUILD_STAMP='2026-11-06 12:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3838,21 +3838,36 @@ function bankRows(){
     return (Number(y.wk)-Number(x.wk))||(y.ts-x.ts);
   });
 }
+/* Group parlays: 5+ legs, not a round robin. Bet for fun with friends, so
+   they move the bankroll balance (real money) but never count in records,
+   ROI, the ledger's breakdowns, model checks or any rating of the picks. */
+function legCount(x){
+  if(Array.isArray(x.legs)&&x.legs.length)return x.legs.length;
+  const m=String(x.match||x.desc||'').match(/(\d+)\s*-?\s*leg/i); if(m)return +m[1];
+  return String(x.desc||'').split(/\s\+\s/).length;
+}
+const isFunParlay=x=>!!x&&x.kind==='parlay'&&!x.rrMode&&legCount(x)>=5;
 function bankStats(wk){
   const b=BANKKEY();
-  let staked=0,ret=0,open=0,w=0,l=0,p=0;
+  let staked=0,ret=0,open=0,w=0,l=0,p=0,funPL=0,funSt=0;
   b.bets.forEach(x=>{
     if(x.paper)return;                 // paper never touches the bankroll
     if(wk!=null&&Number(x.wk)!==Number(wk))return;
     const st=Number(x.stake)||0;
+    if(isFunParlay(x)){                // money counts, the record doesn't
+      if(x.result==='W'){funSt+=st;funPL+=payout(st,x.odds,x)-st;}
+      else if(x.result==='L'){funSt+=st;funPL-=st;}
+      else if(!x.result)open+=st;
+      return;
+    }
     if(x.result==="W"){staked+=st;ret+=payout(st,x.odds,x);w++;}
     else if(x.result==='L'){staked+=st;l++;}
     else if(x.result==='P'){staked+=st;ret+=st;w++;p++;}
     else open+=st;
   });
   const pl=ret-staked;
-  return {staked,ret,pl,open,w,l,p,
-    bal:Number(b.start||0)+pl,
+  return {staked,ret,pl,open,w,l,p,funPL,funSt,
+    bal:Number(b.start||0)+pl+funPL,
     roi:staked?pl/staked:0,
     settled:w+l};
 }
@@ -5381,6 +5396,7 @@ function renderBank(){
         <div class="stat"><div class="n">${money(s.open)}</div><div class="l">At risk, open<br>${(s.open/U()).toFixed(1)}u</div></div>
         <div class="stat"><div class="n">${b.bets.length}</div><div class="l">${thisWeek?`Logged wk ${S.week}`:'Total logged'}</div></div>
       </div>
+      ${s.funSt?`<div class="note" style="margin:8px 0 0">Group parlays (5+ legs): ${s.funPL>=0?'+':''}${money(s.funPL).replace('$','')} on ${money(s.funSt)} — in the balance, left out of P/L, ROI, record and every rating.</div>`:''}
       <div style="height:10px"></div>
       <div class="seg" style="grid-template-columns:1fr 1fr">
         <button class="sgbtn" data-paper="0" aria-selected="${!b.paper}">Real money</button>
@@ -5486,7 +5502,7 @@ function renderBank(){
           <div class="${match?'what':'who'}" style="${match?'font-weight:600;color:var(--ink)':''}">${(!match&&x.paper)?'<span class="pill" style="background:var(--hl-fade);margin-right:6px">PAPER</span>':''}${(x.kind==='parlay'&&Array.isArray(x.legs)&&x.legs.length)
             ? x.legs.map(l=>`<div style="font-weight:400">• ${esc(legName(l))}${l.odds!=null&&l.odds!==''?' <strong>'+fmtAm(l.odds)+'</strong>':''}</div>`).join('')
             : esc(x.desc)}</div>
-          ${outcome}
+          ${outcome}${isFunParlay(x)?'<div class="what" style="color:var(--ink-soft)">Group parlay — not counted in records or ratings</div>':''}
           ${(()=>{ try{ return clvLine(betClv(x)); }catch(_){ return ''; } })()}${clvPriceLine(x)}
           <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''}${x.odds!=null?' · '+fmtAm(x.odds):''} · ${unitStr(st)}</div>
         </div>
@@ -5541,6 +5557,7 @@ function bucketStats(kind,market){
   b.bets.forEach(x=>{
     // match the bankroll: real and paper are never mixed in one figure
     if(!!x.paper !== !!S.ledgerPaper)return;
+    if(isFunParlay(x))return;
     const k=x.kind==='parlay'?'parlay'
            :(x.kind==='cfb'?'cfb':(x.kind==='prop'?'prop':'side'));
     if(k!==kind)return;
@@ -5561,7 +5578,7 @@ function bucketStats(kind,market){
    bet that carried a model probability, paper included. */
 function calibration(){
   const b=BANKKEY();
-  const rows=b.bets.filter(x=>x.mprob!=null&&(x.result==='W'||x.result==='L'));
+  const rows=b.bets.filter(x=>x.mprob!=null&&!isFunParlay(x)&&(x.result==='W'||x.result==='L'));
   if(rows.length<5)return null;
   const bands=[[0,.4],[.4,.55],[.55,.7],[.7,1.01]];
   const out=bands.map(([lo,hi])=>{
@@ -5590,6 +5607,7 @@ function stakeStats(){
   const out={};BANDS.forEach(k=>out[k]={n:0,w:0,l:0,push:0,open:0,staked:0,ret:0,openAmt:0});
   b.bets.forEach(x=>{
     if(!!x.paper !== !!S.ledgerPaper)return;
+    if(isFunParlay(x))return;
     const st=Number(x.stake)||0;
     const r=out[stakeBand(st)];
     r.n++;
@@ -5609,6 +5627,7 @@ function weeklyHistory(){
   const wk={};
   b.bets.forEach(x=>{
     if(!!x.paper !== !!S.ledgerPaper)return;
+    if(isFunParlay(x))return;
     const k=String(x.wk);
     const w=wk[k]=wk[k]||{wk:Number(x.wk),n:0,w:0,l:0,push:0,open:0,
       staked:0,ret:0,openAmt:0,byType:{}};
@@ -6152,7 +6171,7 @@ document.getElementById('bankList').addEventListener('click',e=>{
   const g=e.target.closest('[data-bg]');
   if(g){
     const b=BANKKEY(), x=b.bets.find(y=>y.id===g.dataset.bid);
-    if(x&&x.card){toast('Grade the individual legs on the card — this one settles itself');return;}
+    if(x&&x.card&&cardBetHasPicks(x)){toast('Grade the individual legs on the card — this one settles itself');return;}
     if(x){x.result=x.result===g.dataset.bg?null:g.dataset.bg;save();renderBank();renderLedger();}
     return;
   }
