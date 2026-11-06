@@ -96,8 +96,8 @@ Tested and not used: FTN charting (box counts, blitz, play action, screens) adde
 |---|---|
 | callsheet-data | `SGO_KEY` (SportsGameOdds), `CFBD_KEY` (CollegeFootballData) |
 | sportsmf | `MFL_APIKEY` |
-| Hoops-Props | `ODDS_API_KEY` (The Odds API), used only when the repo variable `USE_ODDS` is `true` (off since 2026-11-03) |
-| scoresheet | `ODDS_API_KEY` |
+| Hoops-Props | `ODDS_API_KEY` (The Odds API), used only when the repo variable `USE_ODDS` is `true`. Its balance (`docs/data/credits.json`) is separate from Scoresheet's key |
+| scoresheet | `ODDS_API_KEY` (The Odds API), used only when the repo variable `USE_ODDS` is `true` (off since 2026-11-06) |
 | vault | Ballpark Pal + SportsGameOdds keys in Netlify function env |
 | Call Sheet / SportsMF on your phone | a GitHub fine-grained token (Contents read/write on callsheet-data; sportsmf for the MFL refresh), stored on the device only |
 | Call Sheet on your phone | an Anthropic API key for the bet slip reader (Settings › Bet slip reader), in its own localStorage slot `cs-anthropic-key` — never in `S`, so never in backups, `sync.json` or `shared.json` |
@@ -124,8 +124,14 @@ Never put a key in an `index.html` — anything there is public.
   app is `sportsmf.html` (the manifest and service worker start there).
 - **SportsMF reads both prop boards** (NBA from Hoops-Props, NHL from Scoresheet) — keep
   their `board.json` paths and top-level keys stable.
-- **Buckets odds are off (since 2026-11-03):** with `USE_ODDS` unset, Hoops-Props `board.json` has model-only
-  fair prices (no `price`, `book`, `ev`, `likely` on markets), so SportsMF's NBA Props tab shows fair odds only.
+- **Odds moved from Scoresheet to Buckets (2026-11-06):** Buckets prices only double-doubles (`player_double_double`,
+  first priority) and threes (`player_threes`) when `USE_ODDS` is `true`, with `NBA_SHARE` = 1.0. Threes prices go on
+  `board.json` (`thr_*`); `reb_*` / `ast_*` stay fair-only; double-double prices go on `doubles.json` as each player's
+  `odds` block, not on `board.json`, so SportsMF's NBA Props tab keeps its shape. With `USE_ODDS` off, `board.json` has
+  model-only fair prices (no `price`, `book`, `ev`, `likely` on markets).
+- **Scoresheet odds are off (since 2026-11-06):** its `tonight.yml` passes the key only when its own `USE_ODDS` is `true`.
+  `board.json` is model-only (`assist` and `sog1.5` with `p`/`fair`, no prices or game totals); SportsMF's NHL Props
+  tab shows model chance and fair odds with "no price".
   Players ruled Out on ESPN's injury report are dropped from `players[]`; others carry an optional `status`.
 - **Buckets schedule (since 2026-11-05):** `tonight.yml` runs at 15:17, 18:43 and 21:47 UTC (the old 16/19/22:00 runs were
   skipped or hours late). With odds off every run rebuilds the board; with odds on only the first run of the day does.
