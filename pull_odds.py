@@ -162,6 +162,15 @@ def pull(season, key, days=8, league="NFL"):
 
     out = []
     for ev in events:
+        x = parse_event(ev)
+        if x:
+            out.append(x)
+    return out, len(events)
+
+
+def parse_event(ev):
+    """One SGO event -> the app's game record (props + game lines), or None."""
+    if True:
         odds = ev.get("odds") or {}
         props = []
         for oid, o in (odds.items() if isinstance(odds, dict) else []):
@@ -215,7 +224,7 @@ def pull(season, key, days=8, league="NFL"):
         # total, moneyline and both team totals. See sgo_lines.py.
         lines = parse_game_lines(ev)
         if props or lines:
-            out.append({
+            return {
                 "id": ev.get("eventID"),
                 "wk": (ev.get("info") or {}).get("week"),
                 "home": team_name(ev, "home"),
@@ -223,8 +232,8 @@ def pull(season, key, days=8, league="NFL"):
                 "start": (ev.get("status") or {}).get("startsAt"),
                 "props": props,
                 "lines": lines,
-            })
-    return out, len(events)
+            }
+        return None
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ This is the master map. Each of the other repos has a short `DATA_MAP.md` that
 points back here. **Update this file in the same commit** whenever a data file,
 workflow schedule, or cross-app link changes.
 
-Last checked: 2026-11-05.
+Last checked: 2026-11-06.
 
 ## The apps
 
@@ -53,6 +53,7 @@ renaming a file breaks every app that reads it.
 | `roster-2026.json` | Roster, status, injury report, snaps | `export_roster.py` (build.yml) | build.yml | Call Sheet |
 | `def_history.json` | Weekly defense ranks | `export_def_history.py` (build.yml) | build.yml | `build_receivers.py` only |
 | `odds-2026.json` | NFL odds + player props from SportsGameOdds (`lines`, `props`, `start`) | `pull_odds.py` (odds.yml) | Wed 10:13, Fri 19:53 | Call Sheet, SportsMF |
+| `closing-2026.json` | Last pregame prices per game (lines, team totals, NFL props), captured 0–50 min before kickoff; pruned after 21 days | `close_odds.py` (close.yml) | every 20 min in game windows (see Gotchas) | Call Sheet (stores closing line value on each bet as `clvp`) |
 | `cfb-2026.json` | College schedule + finals (`kick` is **UTC**) | `export_cfb.py` (build.yml) | build.yml | Call Sheet |
 | `cfb-ratings-2026.json` | College ratings, team colors/abbr/logos, game projections (`kick` is **Eastern**) | `export_cfb_ratings.py` (build.yml, cfb-odds.yml) | build.yml + Fri 19:43, Sat 10:07 | Call Sheet, SportsMF |
 | `fcs-ratings-2026.json` | FCS ratings + games | `export_cfb_ratings.py` | same | Call Sheet, SportsMF |
@@ -60,7 +61,7 @@ renaming a file breaks every app that reads it.
 | `weather-2026.json` | Game-day forecasts + "weather under" flags | `weather.py forecast` (build.yml, cfb-odds.yml) | same | Call Sheet, SportsMF |
 | `weather-hist.json`, `weather-backtest.json` | Historical weather + the backtest behind the flags | `weather.py backtest` (weather-backtest.yml, manual) | manual | research only |
 | `experts-2026.json` | Expert crowd per NFL game (home/away counts) | `experts/export_cs.py` — by hand or the Friday Claude scheduled task | Fridays | Call Sheet, SportsMF |
-| `cfb-backtest.json`, `fcs-backtest.json` | Rating backtest summaries | `export_cfb_ratings.py` | with ratings | research only |
+| `cfb-backtest.json`, `fcs-backtest.json` | Rating backtest summaries; `cfb-backtest.json` `market` = how much of the model-vs-line gap held up (k ≈ 0) | `backtest_cfb.py` (manual), copied into the ratings file by `export_cfb_ratings.py` | manual | Call Sheet (college "model lean" note) |
 | `games-2025.json`, `roster-2025.json` | Last season | build scripts | frozen | research / prior-season fits |
 | `sync.json` | **Your bets, picks, bankroll and settings** | the Call Sheet app itself, via the GitHub API with your token (commits named "Call Sheet sync") | seconds after each change | SportsMF, Call Sheet on other devices |
 | `shared.json` | Read-only snapshot for friends | Call Sheet › Settings › Share (you upload it) | by hand | `share.html` |
@@ -75,7 +76,7 @@ Other folders: `experts/` (expert-pick pipeline, see its README), `research/cfbd
 | nflverse (`github.com/nflverse/nflverse-data` releases) | play-by-play, schedules, players, rosters, weekly rosters, snap counts, injuries, depth charts | NFL ratings, props, rosters, weather backtest |
 | ffopportunity (`github.com/ffverse/ffopportunity`, `latest-data`) | `ep_weekly_{season}.parquet` (expected yards) | props (carries, rush+rec yards) |
 | ESPN | NFL injury report | `export_games.py` |
-| SportsGameOdds (`SGO_KEY`, credits) | odds + props | `pull_odds.py`, `pull_cfb_odds.py` |
+| SportsGameOdds (`SGO_KEY`, credits) | odds + props | `pull_odds.py`, `pull_cfb_odds.py`, `close_odds.py` (one object per game, ~16 NFL + ~60 college a week) |
 | CollegeFootballData (`CFBD_KEY`) | college games, ratings inputs | `export_cfb*.py` |
 | Open-Meteo | forecasts | `weather.py` |
 
@@ -112,6 +113,11 @@ Never put a key in an `index.html` — anything there is public.
   credits). Every job re-syncs before pushing because the app commits
   `sync.json` often. Settings › Data schedule shows planned vs actual runs;
   its `JOBS` list in `index.html` must match these crons.
+- **Closing prices (since 2026-11-06):** `close.yml` runs at :07/:27/:47 UTC in
+  hours 0–1 daily, 16–23 Sat/Sun, 2–3 Sun, 13–14 Sun. Each run asks SGO only for
+  games in `odds-2026.json` / `cfb-odds-2026.json` starting in the next 50 min that
+  aren't captured yet, so a quiet run spends nothing. Settings › Data schedule shows
+  it as a "loose" job (last runs, no slot table).
 - **Two kickoff clocks for college:** `cfb-2026.json` `kick` is UTC,
   `cfb-ratings-2026.json` `kick` is Eastern. The game strip uses the ratings one.
 - **`sportsmf/index.html` is an old copy of Call Sheet**, not SportsMF. The real

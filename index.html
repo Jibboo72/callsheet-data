@@ -690,7 +690,7 @@ const KEY='nfl-call-sheet-v3', OLD='nfl-call-sheet-v2';
 // settings need to save correctly; those are irreplaceable and this file
 // is not. Also used by backup/share to exclude these from that export.
 const REFKEY=KEY+'-ref';
-const REDOWNLOADABLE=['players','games','cfb','odds','ratings','cfbr','fcsr','wx','props','experts','jobRuns','polls'];
+const REDOWNLOADABLE=['players','games','cfb','odds','closing','ratings','cfbr','fcsr','wx','props','experts','jobRuns','polls'];
 let openPid=null;
 
 /* One-time archive, run automatically the first time this update loads.
@@ -1587,13 +1587,25 @@ function renderScorecard(host){
    show the model beating the book. So "EV" here means "price vs. our blended
    probability", the tiers say when model and book agree, and the tracker
    saves every pick before kickoff so the record, not this code, decides. */
+/* Blend weights (k = share of the model in the blend, by side) refit
+   2026-11-05 on the tracker's first 324 graded props against each book's fair
+   price, together with the 2,238-game backtest:
+   - anytime TD "yes": the model beat the book (log loss .646 vs .657) -> 0.35
+   - passing TDs: about even with the book -> 0.30
+   - rush attempts, rush+rec yards: book alone predicted best -> 0.10
+   - longest rush: no skill in the backtest or live -> 0 (price shopping only)
+   NOSKILL markets stay on the board but never make Best EV, the game-card
+   picks or the tracker's lists. A model 15+ points away from the book's fair
+   price (WILD_GAP) lost money live (-9 units on 36) -> shown, never ranked. */
 const PMK={
-  td:   {label:'Anytime TD',     short:'TD',        f:'atd',   k:0.15},
+  td:   {label:'Anytime TD',     short:'TD',        f:'atd',   k:0.35, ku:0.15},
   ptd:  {label:'Passing TDs',    short:'pass TD',   f:'ptd',   k:0.30},
-  car:  {label:'Rush attempts',  short:'rush att',  f:'car',   k:0.30},
-  lrush:{label:'Longest rush',   short:'long rush', f:'lrush', k:0.30},
-  cyd:  {label:'Rush+rec yards', short:'rush+rec',  f:'combo', k:0.20}
+  car:  {label:'Rush attempts',  short:'rush att',  f:'car',   k:0.10},
+  lrush:{label:'Longest rush',   short:'long rush', f:'lrush', k:0},
+  cyd:  {label:'Rush+rec yards', short:'rush+rec',  f:'combo', k:0.10}
 };
+const WILD_GAP=0.15;
+const noSkill=(mk,side)=>mk==='lrush'||(mk==='car'&&side==='under');
 const PMK_ORDER=['td','ptd','car','lrush','cyd'];
 const sfxStrip=s=>String(s||'').replace(/(jr|sr|iii|ii|iv)$/,'');
 
@@ -1666,7 +1678,7 @@ function propBoard(){
       let pf=pe, hasFair=false;
       if(!isNaN(fo)){ const f=1/toDec(fo); if(Math.abs(f-pe)<=Math.max(0.03,0.25*pe)){ pf=f; hasFair=true; } }
       // the model only nudges the book's number: blend in log space so long shots can't swing wildly
-      const kk=hasFair?PMK[mk].k:0.30;
+      const kk=hasFair?(pr.side==='under'&&PMK[mk].ku!=null?PMK[mk].ku:PMK[mk].k):Math.min(0.30,PMK[mk].k);
       const pb=Math.min(0.97,Math.pow(pf,1-kk)*Math.pow(pm,kk)), ev=pb*dec-1, gap=pm-pf, n=E.n||0;
       if(pf<0.03||pb>0.97||ev>1.0)return;                 // long-shot noise and data glitches
       // a price far more generous than the rest of your books is usually stale or a typo:
@@ -1674,12 +1686,13 @@ function propBoard(){
       const outlier=bi.length>=2&&imp<0.7*med;
       let tier='';
       const floor=mk==='td'?0.15:0.25;                  // no tiers on long shots
-      if(!outlier&&pb>=floor){
+      const ns=noSkill(mk,pr.side), wild=Math.abs(gap)>WILD_GAP;
+      if(!outlier&&!ns&&!wild&&pb>=floor){
         if(hasFair&&Math.abs(gap)<=0.12&&n>=4&&ev>=0.05&&pm>imp&&pf>=imp)tier='A';
         else if(Math.abs(gap)<=0.15&&n>=3&&ev>=0.02&&pm>imp)tier='B';
       }
       const id=E.pid+'|'+mk+'|'+pr.side+'|'+line;
-      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pf,pb,ev,gap,tier,hasFair,outlier,start:g.start,gh:g.home,ga:g.away};
+      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pf,pb,ev,gap,tier,hasFair,outlier,ns,wild,start:g.start,gh:g.home,ga:g.away};
       if(!best[id]||row.ev>best[id].ev)best[id]=row;
     });
   });
@@ -1774,7 +1787,7 @@ function takePropSnaps(){
     };
     Object.values(byGame).forEach(arr=>{
       arr.filter(r=>r.tier).sort((a,b)=>b.ev-a.ev).slice(0,5).forEach(r=>put(r,'ev'));
-      arr.filter(r=>r.imp<=0.75).sort((a,b)=>b.pb-a.pb).slice(0,3).forEach(r=>put(r,'prob'));
+      arr.filter(r=>r.imp<=0.75&&!r.ns&&!r.wild).sort((a,b)=>b.pb-a.pb).slice(0,3).forEach(r=>put(r,'prob'));
     });
   }catch(e){}
 }
@@ -1843,7 +1856,7 @@ function renderPropsTab(host){
   }
   let rows=all.filter(r=>(mf==='all'||r.mk===mf));
   if(q) rows=rows.filter(r=>(r.E.name+' '+r.E.team+' '+r.E.opp).toLowerCase().includes(q));
-  if(mode==='ev') { const tr=r=>r.tier==='A'?0:(r.tier==='B'?1:2); rows=rows.filter(r=>r.ev>0&&r.pb>=0.08).sort((a,b)=>tr(a)-tr(b)||b.ev-a.ev); }
+  if(mode==='ev') { const tr=r=>r.tier==='A'?0:(r.tier==='B'?1:2); rows=rows.filter(r=>r.ev>0&&r.pb>=0.08&&!r.wild&&(!r.ns||mf===r.mk)).sort((a,b)=>tr(a)-tr(b)||b.ev-a.ev); }
   else rows=rows.filter(r=>r.imp<=0.75).sort((a,b)=>b.pb-a.pb);
   const missing=PMK_ORDER.filter(m=>!all.some(r=>r.mk===m));
   if(missing.length) html+=`<div class="note" style="margin:0 0 10px;color:var(--ink-soft)">No prices yet for: ${missing.map(m=>esc(PMK[m].label)).join(', ')}. The books haven't posted them or the odds pull doesn't include them yet.</div>`;
@@ -1853,7 +1866,7 @@ function renderPropsTab(host){
     const d=r.E.date.slice(5);
     html+=`<div class="pblock" style="margin-bottom:8px"><div class="pbody" style="padding:8px 10px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${esc(r.E.name)}</b>${tierChip(r.tier)}</div>
-      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}</div>
+      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}${r.ns?' · <span style="color:var(--ink-soft)">no proven model skill here — the EV is price shopping only</span>':''}${r.wild?' · <span style="color:var(--hl-long)">model 15+ pts off the book — usually the book knows something; not ranked</span>':''}</div>
       <div class="stats" style="grid-template-columns:1.5fr 1fr 1fr 1fr">
         <div class="stat"><div class="n" style="font-size:14px">${esc(propPick(r))}</div><div class="l">Pick</div></div>
         <div class="stat"><div class="n" style="font-size:15px">${fmtOdds(r.price)}</div><div class="l">${esc(bookName(r.book))}</div></div>
@@ -2070,7 +2083,21 @@ function cfbEdge(g){
   const pickTeam=pick?g[pick]:null;
   // the number you'd be betting: home's line, or away's (flipped)
   const num=pick==='home'?L.v:-L.v;
-  return {line:L.v,src:L.src,edge:e,pick,pickTeam,num};
+  // Market-adjusted spread: start from the line and keep only the share of the
+  // model's disagreement that held up in the 2021-25 backtest
+  // (backtest_cfb.py market_weight). That share is about zero, so this mostly
+  // IS the line: the model's lean is shown, but not as a bet.
+  const mk=S.cfbr&&S.cfbr.backtest&&S.cfbr.backtest.market;
+  const bin=mk&&(mk.by_edge||[]).find(b=>e>=b.lo&&e<b.hi);
+  const k=Math.max(0,bin?bin.k:(mk?mk.k:0));
+  const adj=L.v+k*(g.pem-L.v), adjEdge=Math.abs(adj-L.v);
+  return {line:L.v,src:L.src,edge:e,pick,pickTeam,num,adj,adjEdge,k,mkLabel:mk?mk.label:''};
+}
+/* one line under a college game: the model's lean, framed by the market fit */
+function cfbLeanNote(e,extra){
+  if(!e||!e.pickTeam)return '';
+  const pts=e.adjEdge;
+  return `<div class="note" style="margin:6px 0 0">Model lean: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)} · market-adjusted it moves the line ${pts<0.05?'0':pts.toFixed(1)} pt${pts>=0.05&&pts<1.05?'':'s'} — tested ${esc(e.mkLabel||'2021–25')}, the model added nothing to the closing line, so this is a lean, not a bet${extra||''}</div>`;
 }
 function cfbLogo(t,size){
   const x=cfbT(t); size=size||18;
@@ -2418,7 +2445,7 @@ function cfbMatchup(g,e,upsetsOnly,input){
           <div class="stat"><div class="n" style="font-size:15px;${gradeStyle(cfbGrades(g).line)}">${cfbSpr(g,g.pem)}</div><div class="l">Model</div></div>
           <div class="stat" style="background:${hot}"><div class="n">${e?e.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
         </div>
-        ${e&&e.pickTeam?`<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(e.pickTeam)} ${e.num>0?'+':''}${e.num.toFixed(1)}</b> · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}</div>`
+        ${e&&e.pickTeam?cfbLeanNote(e,` · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}`)
           :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}</div>`}
         ${(()=>{const w=g.hs==null?wxFor('cfb',g.id):null; const t=wxLine(w); return t?`<div class="note" style="margin:4px 0 0">${esc(t)}${w&&w.flags&&w.flags.length?` · <b>${esc(wxTag(w))}</b>`:''}</div>`:'';})()}
         ${cfbPoints(g)}
@@ -2613,6 +2640,12 @@ function mergeImport(raw){
     impSay(`Odds snapshot ${String(data.pulled||'').slice(0,16)} — ${n} game${n===1?'':'s'} with props.`);
     return;
   }
+  if(data&&data.kind==='closing'){
+    S.closing=slimClosing(data); updateClosingClv(); save(); renderAll();
+    const n=Object.keys(S.closing.games).length, m=(S.bank.bets||[]).filter(x=>x.clvp).length;
+    impSay(`Closing prices for ${n} game${n===1?'':'s'} · ${m} bet${m===1?'':'s'} measured against the close.`);
+    return;
+  }
   if(data&&data.kind==='props'){
     S.props=data; _pbMemo=null; takePropSnaps(); gradePropLog(); save(); renderAll();
     const np=(data.players||[]).length;
@@ -2758,6 +2791,7 @@ const DATA_BASE='https://raw.githubusercontent.com/Jibboo72/callsheet-data/main/
 const REFRESH_FILES=[
   ['Games & lines',  `games-${DATA_SEASON}.json`],
   ['Odds',           `odds-${DATA_SEASON}.json`],
+  ['Closing prices', `closing-${DATA_SEASON}.json`],
   ['Prop models',    `props-${DATA_SEASON}.json`],
   ['Power ratings',  `ratings-${DATA_SEASON}.json`],
   ['College schedule', `cfb-${DATA_SEASON}.json`],
@@ -3489,7 +3523,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-05 21:40 UTC';
+const BUILD_STAMP='2026-11-06 01:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4602,6 +4636,7 @@ function nflTotalQualifiers(games){
    the ratings file's line (CollegeFootballData, DraftKings where posted).
    Before kickoff it's measured against the current line and marked "so far".
    Team totals, moneylines, props and parlays aren't measured. */
+const CLV_PART=/(^|[^a-z0-9])(1h|2h|1q|2q|3q|4q|1st half|2nd half|first half|second half|half|quarter|1st quarter)(?=[^a-z0-9]|$)/;
 function betClv(x){
   if(!x||x.kind==='parlay'||x.kind==='prop')return null;
   const lg=x.kind==='cfb'?'cfb':'nfl';
@@ -4610,6 +4645,7 @@ function betClv(x){
   const txt=_nrm(String(x.desc||'').replace(/−/g,'-'));
   if(/(^|[^a-z])(tt|team total|team tot|team pts)(?=[^a-z]|$)/.test(txt))return null;
   if(/(^|[^a-z])(ml|moneyline|money line|to win)(?=[^a-z]|$)/.test(txt))return null;
+  if(CLV_PART.test(txt))return null;                 // halves/quarters close at their own numbers
   if(mk==='side'&&/(?:^|[^a-z])(over|under|o|u)\s*\d/.test(txt))mk='total';
   let closeHome=null, closeTot=null, final=false;
   if(lg==='nfl'){
@@ -4638,7 +4674,7 @@ function clvLine(c){
 }
 function clvSummary(){
   const b=BANKKEY(); const xs=b.bets.map(x=>({x,c:betClv(x)})).filter(r=>r.c&&r.c.final);
-  if(!xs.length)return `<div class="pblock" style="margin-bottom:14px"><div class="pbh">Closing line value</div><div class="pbody"><div class="note" style="margin:0">Once a straight side or total you logged is final, this shows whether you got a better number than the close — the earliest sign of real skill, long before the win rate means anything.</div></div></div>`;
+  if(!xs.length)return `<div class="pblock" style="margin-bottom:14px"><div class="pbh">Closing line value</div><div class="pbody"><div class="note" style="margin:0">Once a straight side or total you logged is final, this shows whether you got a better number than the close — the earliest sign of real skill, long before the win rate means anything.</div>${clvPriceSummary()}</div></div>`;
   const beat=xs.filter(r=>r.c.pts>0.01).length, worse=xs.filter(r=>r.c.pts<-0.01).length, same=xs.length-beat-worse;
   const avg=xs.reduce((a,r)=>a+r.c.pts,0)/xs.length;
   const col=avg>0.01?'var(--win)':(avg<-0.01?'var(--loss)':'var(--ink)');
@@ -4647,7 +4683,125 @@ function clvSummary(){
     <div class="stat"><div class="n">${same}</div><div class="l">Same<br>number</div></div>
     <div class="stat"><div class="n" style="color:var(--loss)">${worse}</div><div class="l">Worse<br>than close</div></div></div>
     <div class="note" style="margin:8px 0 0">Average <b style="color:${col}">${avg>0?'+':''}${avg.toFixed(2)} pts</b> per bet versus the closing number. Consistently positive is the best early sign the picks are sharp; consistently negative means the market is moving against you after you bet.</div>
+    ${clvPriceSummary()}
   </div></div>`;
+}
+
+/* ---------------- closing prices (close.yml -> data/closing-2026.json) ----------------
+   Each game's last pregame prices, captured 0-50 minutes before kickoff.
+   Every straight bet (side, total, moneyline, team total, prop) is matched to
+   its game's capture and gets x.clvp = how much your price was worth at the
+   closing fair price:  EV = p_close x your decimal odds - 1.
+   p_close is the no-vig chance from both sides of the closing market (props:
+   the feed's fair price, else consensus minus a typical cut). When your line
+   differs from the closing line (you took -3, it closed -4), p is moved
+   ~3% per point in the NFL, 2.5% in college. Stored on the bet, so it
+   survives the file being pruned after three weeks. Parlays aren't measured. */
+function slimClosing(d){
+  const games={};
+  Object.entries(d.games||{}).forEach(([id,g])=>{
+    if(!g)return;
+    const s=g.league==='NFL'?slimOdds({games:[Object.assign({},g,{id})]}).games[0]
+      :{id,league:g.league,home:g.home,away:g.away,start:g.start,lines:g.lines||null,props:[]};
+    s.league=g.league; s.captured=g.captured; games[id]=s;
+  });
+  return {kind:'closing',updated:d.updated,games};
+}
+const _vigFree=(a,b)=>{ const da=toDec(parseInt(a,10)), db=toDec(parseInt(b,10)); if(!da||!db)return null; const ia=1/da, ib=1/db; return ia/(ia+ib); };
+function closeGameFor(lg,g){
+  if(!S.closing||!S.closing.games||!g)return null;
+  const want=lg==='nfl'?'NFL':'NCAAF';
+  const nick=t=>(TEAMS[t]&&TEAMS[t][0])||t;
+  const day=String(g.date||'').slice(0,10);
+  const near=c=>{ if(!day||!c.start)return true; const dd=Math.abs(Date.parse(c.start)-Date.parse(day+'T18:00:00Z')); return dd<2.2*864e5; };
+  const nameHit=(gname,obj)=>{ const vals=typeof obj==='string'?[obj]:Object.values(obj||{}); const al=gradeAliases(lg,gname);
+    return vals.some(v=>{ const n=_nrm(String(v)); return n&&al.some(a=>a===n||(a.length>3&&n===a)); }); };
+  return Object.values(S.closing.games).find(c=>{
+    if(c.league!==want||!near(c))return false;
+    if(lg==='nfl')return nick(c.home)===nick(g.home)&&nick(c.away)===nick(g.away);
+    return nameHit(g.home,c.home)&&nameHit(g.away,c.away);
+  })||null;
+}
+function betClvPrice(x){
+  if(!x||x.kind==='parlay'||x.odds==null)return null;
+  const lg=x.kind==='cfb'?'cfb':'nfl';
+  const dec=toDec(+x.odds); if(!dec)return null;
+  const isProp=x.kind==='prop'||x.market==='td'||!!x.pickWho;
+  const g=findGameFor(lg,x)||(isProp&&lg==='nfl'?propGameFor(x):null); if(!g)return null;
+  const c=closeGameFor(lg,g); if(!c)return null;
+  const L=c.lines||{}, txt=_nrm(String(x.desc||'').replace(/−/g,'-')), PT=lg==='nfl'?0.03:0.025;
+  if(CLV_PART.test(txt))return null;
+  const out=(p,close,pts)=>p==null?null:{ev:Math.max(0.01,Math.min(0.99,p))*dec-1,p:Math.max(0.01,Math.min(0.99,p)),close,pts:pts==null?null:pts,at:c.captured||null};
+  if(isProp){
+    const r=readPropText(x.desc); if(!r)return null;
+    const who=pnorm(x.pickWho||x.match||''); if(!who)return null;
+    const line=r.side==='atleast'?r.line-0.5:r.line, side=r.side==='under'?'under':'over';
+    const pr=(c.props||[]).find(q=>OMKT[q.market]===r.mkt&&q.side===side&&Math.abs(Number(q.line)-line)<0.01&&
+      (sgoKey(q.player)===mkey(x.pickWho||x.match)||sfxStrip(sgoKey(q.player))===sfxStrip(mkey(x.pickWho||x.match))));
+    if(!pr)return null;
+    let p=null; const fo=parseInt(pr.fair,10), co=parseInt(pr.odds,10);
+    if(!isNaN(fo))p=1/toDec(fo); else if(!isNaN(co))p=(1/toDec(co))*(r.mkt==='td'&&side==='over'?0.92:0.955);
+    return out(p,`${fmtOdds(isNaN(co)?fo:co)} at close`,null);
+  }
+  if(/(^|[^a-z])(ml|moneyline|money line|to win)(?=[^a-z]|$)/.test(txt)){
+    const sd=sideOfText(lg,g,txt); if(!sd||!L.ml)return null;
+    const p=_vigFree(sd.side==='home'?L.ml.home:L.ml.away, sd.side==='home'?L.ml.away:L.ml.home);
+    return out(p,`${sd.name} ${sd.side==='home'?L.ml.home:L.ml.away} at close`,null);
+  }
+  const tm=txt.match(/(?:^|[^a-z])(over|under|o|u)\s*(\d+(?:\.\d+)?)/);
+  if(/(^|[^a-z])(tt|team total|team tot|team pts)(?=[^a-z]|$)/.test(txt)){
+    const sd=sideOfText(lg,g,txt); const t=L.team_total&&sd?L.team_total[sd.side]:null; if(!t||!tm||t.line==null)return null;
+    const over=tm[1][0]==='o', mine=Number(tm[2]), pts=over?t.line-mine:mine-t.line;
+    const p=_vigFree(over?t.over:t.under, over?t.under:t.over); if(p==null)return null;
+    return out(p+pts*PT*0.8,`${sd.name} TT ${over?'o':'u'}${t.line} at close`,pts);
+  }
+  if(x.market==='total'||(tm&&!sideOfText(lg,g,txt.replace(tm[0],' ')))){
+    if(!tm||!L.total||L.total.line==null)return null;
+    const over=tm[1][0]==='o', mine=Number(tm[2]), pts=over?L.total.line-mine:mine-L.total.line;
+    const p=_vigFree(over?L.total.over:L.total.under, over?L.total.under:L.total.over); if(p==null)return null;
+    return out(p+pts*PT*0.8,`${over?'o':'u'}${L.total.line} at close`,pts);
+  }
+  const b=betClv(x); const sd=sideOfText(lg,g,txt);
+  if(!sd||!L.spread||L.spread.home==null)return null;
+  const closeSide=sd.side==='home'?+L.spread.home:-L.spread.home;
+  let rest=txt; gradeAliases(lg,sd.name).forEach(a=>{ rest=rest.replace(a,' '); });
+  const n=rest.match(/(?:^|\s)([+-])\s?(\d+(?:\.\d+)?)(?!\d)/);
+  const mine=n?Number(n[1]+n[2]):(/(^|\s)(pk|pick|pickem|pick em)(\s|$)/.test(rest)?0:null);
+  if(mine==null)return null;
+  const pts=mine-closeSide;
+  const p=_vigFree(sd.side==='home'?L.spread.home_odds:L.spread.away_odds, sd.side==='home'?L.spread.away_odds:L.spread.home_odds); if(p==null)return null;
+  return out(p+pts*PT,`${sd.name} ${closeSide>0?'+':''}${closeSide} at close`,pts);
+}
+/* props have no game id on the bet: find the player's game that week */
+function propGameFor(x){
+  const who=x.pickWho||x.match; if(!who)return null;
+  const pl=Object.values(S.players||{}).find(p=>p&&p.name&&pnorm(p.name)===pnorm(who)); if(!pl||!pl.team)return null;
+  return ((S.games&&S.games.games)||[]).find(g=>Number(g.wk)===Number(x.wk)&&(g.home===pl.team||g.away===pl.team))||null;
+}
+function updateClosingClv(){
+  if(!S.closing||!S.bank)return false;
+  let ch=false;
+  (S.bank.bets||[]).forEach(x=>{
+    if(x.clvp||x.kind==='parlay')return;
+    try{ const r=betClvPrice(x); if(r){ x.clvp={ev:+r.ev.toFixed(4),p:+r.p.toFixed(4),close:r.close,pts:r.pts,at:r.at}; ch=true; } }catch(_){}
+  });
+  return ch;
+}
+function clvPriceLine(x){
+  const c=x&&x.clvp; if(!c)return '';
+  const col=c.ev>0.005?'var(--win)':(c.ev<-0.005?'var(--loss)':'var(--ink-soft)');
+  return `<div class="what" style="color:${col}">Closing price: ${esc(c.close)} · fair ${Math.round(c.p*100)}% · your price ${c.ev>=0?'+':''}${(c.ev*100).toFixed(1)}% vs the close</div>`;
+}
+function clvPriceSummary(){
+  const xs=(BANKKEY().bets||[]).filter(x=>x.clvp&&!x.paper);
+  if(!xs.length)return `<div class="note" style="margin:8px 0 0">Price vs the close (all straight bets incl. props and moneylines) starts filling in as games kick off — the closing capture runs on game days.</div>`;
+  const grp=x=>x.kind==='prop'||x.pickWho?'Props':(/(^|[^a-z])(ml|moneyline)(?=[^a-z]|$)/i.test(x.desc||'')?'Moneylines':((x.market==='total'||/\b(o|u|over|under)\s*\d/i.test(x.desc||''))?'Totals':'Spreads'));
+  const by={}; xs.forEach(x=>{ (by[grp(x)]=by[grp(x)]||[]).push(x); });
+  const avg=a=>a.reduce((s,x)=>s+x.clvp.ev,0)/a.length, beat=a=>a.filter(x=>x.clvp.ev>0.005).length;
+  const pc=v=>`<b style="color:${v>0.005?'var(--win)':(v<-0.005?'var(--loss)':'var(--ink)')}">${v>=0?'+':''}${(v*100).toFixed(1)}%</b>`;
+  return `<div class="lab" style="margin:12px 0 4px">Price vs the close · ${xs.length} bet${xs.length===1?'':'s'}</div>
+    <div class="note" style="margin:0 0 6px">Average ${pc(avg(xs))} — what your price was worth at the closing fair odds. Beat it on ${beat(xs)} of ${xs.length}. Bettors who stay above about +1% here win long-term, whatever the scoreboard says this month.</div>
+    ${Object.entries(by).map(([k,a])=>`<div class="note" style="margin:0">${esc(k)}: ${a.length} · avg ${pc(avg(a))} · beat ${beat(a)}</div>`).join('')}`;
 }
 
 const PRED_OPEN={};
@@ -5062,7 +5216,7 @@ function renderSides(){
           <div class="stat"><div class="n" style="font-size:15px">${ce?cfbSpr(cg,ce.line):'—'}</div><div class="l">Line</div></div>
           <div class="stat"><div class="n" style="font-size:15px">${cfbSpr(cg,cg.pem)}</div><div class="l">Model</div></div>
           <div class="stat"><div class="n">${ce?ce.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
-        </div>${ce&&ce.pickTeam?`<div class="note" style="margin:4px 0 0">Model side: ${esc(ce.pickTeam)} ${ce.num>0?'+':''}${ce.num.toFixed(1)}</div>`:''}`
+        </div>${ce&&ce.pickTeam?cfbLeanNote(ce,''):''}`
       : '';
     const cardBlock = (cg && !cg.fcs) ? cfbMatchup(cg,ce,false,false) : null;
     // power-ratings rank in front of each college team: FBS rank, or "FCS #n"
@@ -5323,7 +5477,7 @@ function renderBank(){
             ? x.legs.map(l=>`<div style="font-weight:400">• ${esc(legName(l))}${l.odds!=null&&l.odds!==''?' <strong>'+fmtAm(l.odds)+'</strong>':''}</div>`).join('')
             : esc(x.desc)}</div>
           ${outcome}
-          ${(()=>{ try{ return clvLine(betClv(x)); }catch(_){ return ''; } })()}
+          ${(()=>{ try{ return clvLine(betClv(x)); }catch(_){ return ''; } })()}${clvPriceLine(x)}
           <div class="what">${esc(league)} · Wk ${esc(x.wk)}${when?' · '+esc(String(when).slice(5)):''}${x.odds!=null?' · '+fmtAm(x.odds):''} · ${unitStr(st)}</div>
         </div>
         <div class="meta"><div class="odds" style="color:${rc}">${x.result?((ret>=0?'+':'')+money(ret).replace('$','')):'open'}</div></div>
@@ -6096,6 +6250,8 @@ const JOBS=[
    crons:[['13 10 * * 3','opening numbers'],['53 19 * * 5','weekend prices']]},
   {id:'cfbodds', file:'cfb-odds.yml', name:'College odds', what:'College lines, then college ratings and weather rebuilt on them',
    crons:[['43 19 * * 5','Friday prices'],['7 10 * * 6','Saturday morning prices']]},
+  {id:'close', file:'close.yml', name:'Closing prices', what:'Last pregame prices for each game, 0–50 min before kickoff, for closing line value (one SportsGameOdds credit per game)',
+   loose:true, plan:'Every 20 minutes through game windows: nightly 7–9 PM, Saturday and Sunday 11 AM–7 PM, Saturday 9–11 PM, Sunday 8–10 AM (Eastern). A run with nothing kicking off does nothing.', crons:[]},
   {id:'experts', file:null, name:'Expert picks', what:'Expert ATS picks loaded by the Claude scheduled task',
    crons:[['35 1 * * 6','Friday evening (8:35 PM Eastern)']], tzNote:'Runs on Claude, not GitHub'}
 ];
@@ -6180,6 +6336,15 @@ function renderSched(){
   const host=document.getElementById('schedPanel'); if(!host)return;
   const J=S.jobRuns;
   const body=JOBS.map(j=>{
+    if(j.loose){
+      const rr=((J&&J.runs&&J.runs[j.id])||[]).slice().sort((a,b)=>b.start-a.start).slice(0,6);
+      return `<div style="margin:0 0 16px">
+      <div style="font-weight:800;font-size:14px">${esc(j.name)}</div>
+      <div class="note" style="margin:2px 0 6px">${esc(j.what)}</div>
+      <div class="note" style="margin:0 0 6px;color:var(--ink)">${esc(j.plan)}</div>
+      ${rr.length?`<div class="note" style="margin:0">Last runs: ${rr.map(r=>`${esc(fmtWhen(r.start))} ${resIcon(r)}`).join(' · ')}</div>`:(J&&J.runs?'<div class="note" style="margin:0">No runs yet.</div>':'')}
+    </div>`;
+    }
     const slots=jobSlots(j,9).slice().reverse();
     const n=nextSlot(j);
     const plan=j.crons.map(([c,why])=>{ const t=cronTimes(c,Date.now(),Date.now()+8*864e5)[0]; return t?`<div>${esc(new Date(t).toLocaleString([], {weekday:'long',hour:'numeric',minute:'2-digit'}))} <span style="color:var(--ink-soft)">— ${esc(why)}</span></div>`:''; }).join('');

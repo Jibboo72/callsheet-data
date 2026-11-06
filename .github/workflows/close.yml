@@ -1,0 +1,50 @@
+name: Closing lines
+
+# Captures each game's last pregame prices (spread, total, moneyline, team
+# totals, NFL props) a few minutes to ~50 minutes before kickoff, so the app
+# can show closing line value on your bets. Runs every 20 minutes through the
+# game windows; a run with nothing kicking off spends nothing. Each game is
+# pulled once, so the SportsGameOdds cost is about 16 NFL + 60 college
+# objects a week.
+#
+# Times are UTC, set for Eastern STANDARD time (UTC-5). Off the hour on
+# purpose: GitHub ran top-of-the-hour jobs 3-6 hours late.
+on:
+  schedule:
+    - cron: "7,27,47 0,1 * * *"        # 7-9pm ET every night: TNF, SNF, MNF, weeknight college
+    - cron: "7,27,47 16-23 * * 0,6"    # Sat + Sun 11am-7pm ET: college Saturday, Sunday NFL
+    - cron: "7,27,47 2,3 * * 0"        # Sat 9-11pm ET: late college
+    - cron: "7,27,47 13,14 * * 0"      # Sun 8-10am ET: London / international games
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: closing-lines
+  cancel-in-progress: false
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Capture closing prices
+        env:
+          SGO_KEY: ${{ secrets.SGO_KEY }}
+        run: python close_odds.py 2026 data/closing-2026.json
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          [ -f data/closing-2026.json ] || exit 0
+          git add data/closing-2026.json
+          if git diff --staged --quiet; then
+            echo "No change."
+          else
+            git commit -m "Closing lines $(date -u +%Y-%m-%d\ %H:%M)"
+            for i in 1 2 3; do git pull --rebase --quiet && git push && break; sleep $((i*7)); done
+          fi

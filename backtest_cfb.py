@@ -90,6 +90,25 @@ def ats_table(df):
     return rows
 
 
+def market_weight(df):
+    """How much of the model's disagreement with the closing line is real.
+
+    Fits  actual - line = k * (model - line)  by least squares. k = 1 means
+    trust the model over the line, k = 0 means the line already knows
+    everything the model does. The app's "market-adjusted" spread is
+    line + k * (model - line), with k floored at 0, overall and by edge size.
+    """
+    d = df[df.line_spread.notna() & df.fbs2].copy()
+    L = -d.line_spread
+    e, r = d.pred - L, d.actual - L
+    fit = lambda m: float((e[m] * r[m]).sum() / (e[m] ** 2).sum()) if (e[m] ** 2).sum() else 0.0
+    out = dict(k=round(fit(e == e), 3), by_edge=[])
+    for lo, hi in ((0, 2), (2, 4), (4, 7), (7, 10), (10, 99)):
+        m = (e.abs() >= lo) & (e.abs() < hi)
+        out["by_edge"].append(dict(lo=lo, hi=hi, n=int(m.sum()), k=round(fit(m), 3)))
+    return out
+
+
 def summary(df, label):
     mm, ml, n = score(df)
     d = df[df.line_spread.notna() & df.fbs2]
@@ -160,9 +179,15 @@ if __name__ == "__main__":
     report(tr, f"TRAIN {TRAIN[0]}-{TRAIN[-1]}")
     te = run(cfg, TEST, lines)
     report(te, f"HELD-OUT {TEST[0]}")
+    mw = market_weight(pd.concat([tr, te]))
+    print(f"\nmarket weight k (share of model-vs-line gap that is real): {mw['k']:+.3f}")
+    for x in mw["by_edge"]:
+        print(f"  edge {x['lo']}-{x['hi']}: n={x['n']} k={x['k']:+.3f}")
     import json, os
     os.makedirs("data", exist_ok=True)
     with open("data/cfb-backtest.json", "w") as f:
         json.dump(dict(train=summary(tr, f"{TRAIN[0]}-{TRAIN[-1]}"),
-                       test=summary(te, f"{TEST[0]} (held out)")), f)
+                       test=summary(te, f"{TEST[0]} (held out)"),
+                       market=dict(label=f"{TRAIN[0]}-{TEST[-1]}",
+                                   **market_weight(pd.concat([tr, te])))), f)
     print("wrote data/cfb-backtest.json")
