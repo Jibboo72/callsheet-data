@@ -2024,9 +2024,9 @@ function cfbTTFadeList(games){
     <div class="note" style="margin:0 0 8px">When the model's team total is ${TTF_GAP}+ points off the book, bet the <b>other</b> side. 2021–25 the model's side hit only 44.6% there (7+: 43%), under 50% every season — so the fade went about 55%. Found looking back: tracked from ${TTF_START} on (Power › Scorecard › College) before it earns full stakes. Book team totals where posted, otherwise the number implied by the spread and total.</div>`;
   if(!rows.length) return h+`<div class="note" style="margin:0">Nothing this week.</div></div></div>`;
   rows.forEach(r=>{
-    h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed color-mix(in srgb,var(--ink) 30%,transparent)">
+    h+=`<div class="row" data-jumpgame="${esc(r.g.id)}" data-jlg="cfb" role="button" style="display:block;padding:7px 0;border-bottom:1px dashed color-mix(in srgb,var(--ink) 30%,transparent);cursor:pointer">
       <div style="font-family:var(--fb);font-weight:700;font-size:15px">${esc(r.team)} team total ${r.bet} ${r.book.toFixed(1)}${r.imp?' <span style="font-weight:400;font-size:11px">(implied — check your book)</span>':''}</div>
-      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} ${esc(r.g.kick||'')} · model ${r.model.toFixed(1)} (${r.gap>0?'+':''}${r.gap.toFixed(1)}) — fading it</div>
+      <div class="what">${esc(r.g.away)} @ ${esc(r.g.home)} · ${esc(String(r.g.date||'').slice(5))} ${esc(r.g.kick||'')} · model ${r.model.toFixed(1)} (${r.gap>0?'+':''}${r.gap.toFixed(1)}) — fading it <span style="color:var(--acc-text);font-weight:700">· Bet it ›</span></div>
     </div>`;
   });
   return h+`</div></div>`;
@@ -2499,8 +2499,9 @@ function cfbBoard(d,upsetsOnly){
     const hot=e&&e.edge>=7?'rgba(255,138,31,.30)':'transparent';
     const wpFav=g.home_wp>=0.5?g.home:g.away, wpv=Math.max(g.home_wp,1-g.home_wp);
     html+=`<div class="cat" style="margin-bottom:12px">
-      <div class="band" style="cursor:default;background:var(--stock-2)">
+      <div class="band" style="cursor:default;background:var(--stock-2);display:flex;align-items:center;justify-content:space-between;gap:8px">
         <span class="tag" style="font-size:13px">${tBtn(g.away,cfbLogo(g.away,16)+esc(g.away))} ${g.neutral?'vs':'@'} ${tBtn(g.home,cfbLogo(g.home,16)+esc(g.home))}</span>
+        ${played?'':`<button class="btn" data-jumpgame="${esc(g.id)}" data-jlg="cfb" style="width:auto;padding:5px 12px;font-size:12px;flex:none">Bet it ›</button>`}
       </div>
       <div class="pbody" style="padding:8px 10px">
         ${cfbMatchup(g,e,upsetsOnly,true)}
@@ -3523,7 +3524,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-06 12:45 UTC';
+const BUILD_STAMP='2026-11-07 13:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
