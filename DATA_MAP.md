@@ -12,7 +12,7 @@ Last checked: 2026-11-06.
 |---|---|---|---|---|
 | **Call Sheet** | NFL + college football | `Jibboo72/callsheet-data` | GitHub Pages: `jibboo72.github.io/callsheet-data/` | `data/*.json` (this repo) |
 | **SportsMF** | All (scores, bets, fantasy) | `Jibboo72/sportsmf` | GitHub Pages: `jibboo72.github.io/sportsmf/sportsmf.html` | `data/mfl.json` |
-| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF; also `doubles.json`, `doubles_log.json`; the page floors chances at 1%; `backtest_live.json` = this-season-only backtest; `top6_live.json` = top-6 replay (most likely and biggest-bump picks), read by the Doubles page, incl. 2- and 3-team parlay counts) |
+| **Buckets** | NBA | `Jibboo72/Hoops-Props` | GitHub Pages from `docs/`: `jibboo72.github.io/Hoops-Props/` | `docs/data/*.json` (board read by SportsMF; also `doubles.json` (incl. `parlay` = nightly 1-10 round-robin rating of the Best 6), `doubles_log.json`; the page floors chances at 1%; `backtest_live.json` = this-season-only backtest; `top6_live.json` = top-6 replay (most likely and biggest-bump picks), read by the Doubles page, incl. 2- and 3-team parlay counts) |
 | **Scoresheet** | NHL | `Jibboo72/scoresheet` | GitHub Pages from `docs/`: `jibboo72.github.io/scoresheet/` | `docs/data/*.json` |
 | **Vault** | MLB home runs | `Jibboo72/vault` (private) | Netlify (app + two key-holding functions) | nothing shared — browser storage only |
 | Expert ATS Ledger | NFL experts | Claude artifact `claude.ai/artifact/9Kcoigd7nydaf1Vrtg8Ab6` | claude.ai | feeds `data/experts-2026.json` here (see `experts/README.md`) |
@@ -133,6 +133,11 @@ Never put a key in an `index.html` — anything there is public.
   `board.json` is model-only (`assist` and `sog1.5` with `p`/`fair`, no prices or game totals); SportsMF's NHL Props
   tab shows model chance and fair odds with "no price".
   Players ruled Out on ESPN's injury report are dropped from `players[]`; others carry an optional `status`.
+- **Buckets round-robin rating (since 2026-11-06):** `parlay.py` (run by `board.py`) adds a `parlay` block to
+  `doubles.json`: the Best 6 double-doubles as a $30 round robin, 2-pick (15 x $2) and 3-pick (20 x $1.50), each rated
+  1-10 (5 = break-even) with the single book used, expected profit, chance to profit, chance to lose all, and `better`.
+  No extra odds credits; it reuses the board's pull. The channel's daily post reads it; final numbers come from the
+  first Tonight run of the day when odds are on (15:17 UTC). SportsMF doesn't read it; `board.json` is unchanged.
 - **Buckets schedule (since 2026-11-05):** `tonight.yml` runs at 15:17, 18:43 and 21:47 UTC (the old 16/19/22:00 runs were
   skipped or hours late). With odds off every run rebuilds the board; with odds on only the first run of the day does.
 - **Vault keeps everything in the browser** — no shared file, so its picks can't
