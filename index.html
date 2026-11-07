@@ -3524,7 +3524,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-07 13:40 UTC';
+const BUILD_STAMP='2026-11-07 17:55 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4230,6 +4230,19 @@ const FIN={}, FINASKED={};
 /* The calendar day a game kicks off in Eastern time. The college feed stamps
    kickoffs in UTC (a Thursday 8 PM ET game reads Friday 00:00), so those are
    converted; ratings-built games and NFL dates are already local. */
+/* kickoff as a timestamp, for ordering. College schedule kicks are UTC;
+   ratings / typed-in games carry Eastern clock times; NFL uses nflKick. */
+function kickTs(g,lg){
+  const d=String(g.date||'').slice(0,10), k=String(g.kick||'');
+  if(lg!=='cfb'){ try{ const t=nflKick(g).ts; if(t)return t; }catch(_){} }
+  const m=k.match(/^(\d{1,2}):(\d{2})/);
+  if(!d)return Infinity;
+  if(!m)return Date.parse(d+'T23:59:00Z')+864e5;      // TBA: end of the day
+  const hm=m[1].padStart(2,'0')+':'+m[2];
+  if(lg==='cfb'&&!g.fromRatings&&!g.mine)return Date.parse(d+'T'+hm+':00Z');
+  const mo=+d.slice(5,7), dst=mo>3&&mo<11||(mo===3&&+d.slice(8)>=8)||(mo===11&&+d.slice(8)<8);
+  return Date.parse(d+'T'+hm+':00'+(dst?'-04:00':'-05:00'));
+}
 function gameDay(g,lg){
   const d=String(g.date||'');
   if(lg==='cfb'&&g.kick&&!g.fromRatings&&!g.mine&&/^\d{1,2}:\d{2}$/.test(g.kick)){
@@ -5186,7 +5199,9 @@ function renderSides(){
     if(pa!==pb)return pa-pb;
     const dd=da.localeCompare(db);
     if(dd)return pa?-dd:dd;
-    return String(a.kick||'').localeCompare(String(b.kick||''));
+    // same day: real kickoff order. College schedule kicks are UTC, so a
+    // 7:30 PM ET game is "00:30" and used to sort above the noon slate.
+    return kickTs(a,lgk)-kickTs(b,lgk);
   });
   ensureFinals(cfb?'cfb':'nfl',games);
   const cal=(SRC()&&SRC().calibration)||{};
