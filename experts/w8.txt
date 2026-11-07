@@ -3,20 +3,20 @@
 # Skipped: CBS (grid page unreadable; CBS article shows straight-up picks only), SBR (byline Mike Spector, not Gary Pearson), RotoWire BtB (Whalen already in via staff grid).
 # Earlier note: for PHI-WAS the quoted lines conflict (PHI -5.5 at RotoWire/FanSided,
 # WAS -3.5/-4.5 at Covers/SBD) so sides are kept without quoted lines and the board's number is used.
-game CAR-GB 2026-10-29
-game BAL-BUF 2026-11-01
-game TEN-CIN 2026-11-01
-game ARI-DAL 2026-11-01
-game MIN-DET 2026-11-01
-game IND-JAX 2026-11-01
-game LV-NYJ 2026-11-01
-game CLE-PIT 2026-11-01
-game ATL-TB 2026-11-01
-game LAC-LAR 2026-11-01
-game KC-DEN 2026-11-01
-game NE-MIA 2026-11-01
-game PHI-WAS 2026-11-01
-game CHI-SEA 2026-11-02
+game CAR-GB 2026-10-29 19 27
+game BAL-BUF 2026-11-01 10 36
+game TEN-CIN 2026-11-01 36 43
+game ARI-DAL 2026-11-01 33 30
+game MIN-DET 2026-11-01 15 19
+game IND-JAX 2026-11-01 7 42
+game LV-NYJ 2026-11-01 38 33
+game CLE-PIT 2026-11-01 6 27
+game ATL-TB 2026-11-01 0 16
+game LAC-LAR 2026-11-01 9 24
+game KC-DEN 2026-11-01 24 28
+game NE-MIA 2026-11-01 24 19
+game PHI-WAS 2026-11-01 10 27
+game CHI-SEA 2026-11-02 34 17
 line PHI-WAS WAS -3.5
 
 # RotoWire staff picks (BetMGM). Whalen's staff pick stands in for Beating the Book until that column posts.
