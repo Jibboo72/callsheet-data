@@ -3668,7 +3668,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 15:50 UTC';
+const BUILD_STAMP='2026-11-08 15:58 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -7551,7 +7551,8 @@ const SHOT_TOOL={
       rr_size:{type:['integer','null'],description:'Round robins only: legs per combo (2 for “by 2s”)'},
       rr_count:{type:['integer','null'],description:'Round robins only: number of combos'},
       odds:{type:'string',description:'American odds of the whole ticket as shown after any boost, e.g. "+265" or "-110"; empty for round robins'},
-      to_win:{type:['number','null']},
+      to_win:{type:['number','null'],description:'Profit if it wins, stake NOT included, if shown'},
+      returns:{type:['number','null'],description:'Potential total return if it wins, stake included (e.g. Bet365 "Returns" / "To Return"), if shown'},
       status:{type:'string',enum:['open','won','lost','push','void','cashed_out']},
       payout:{type:['number','null'],description:'Total returned if settled or cashed out (stake included)'},
       legs:{type:'array',items:{type:'object',required:['kind','text'],properties:{
@@ -7586,7 +7587,7 @@ Rules:
 - Round robins: stake_total is the whole ticket; also give stake_per_bet, rr_size and rr_count when shown.
 - Same-game parlays are type "sgp".
 - Spreads: line is from the picked team's side. Totals: side over/under. Team totals: kind team_total with the team.
-- Odds as American strings with sign. Convert decimal/fractional if that's what the slip shows.
+- Odds as American strings with sign. Convert decimal/fractional if that's what the slip shows. If the slip shows no ticket odds, leave odds empty and fill to_win / returns from what it shows.
 - Leg results from checkmarks/X marks if shown.`;
 
 async function shotCall(imgs){
@@ -7687,6 +7688,18 @@ function shotGuessCard(it){
   if(k==='td')return props.every(l=>/^TE$/i.test(l.pos||''))?'tetd':'td';
   return {rec:'slot',lng:'long','lng-u':'fade'}[k]||'';
 }
+const _toAm=d=>d>=2?Math.round((d-1)*100):Math.round(-100/(d-1));
+function shotOddsFrom(it,raw){
+  const st=it.stake;
+  if(st>0){
+    if(raw.to_win!=null&&+raw.to_win>0)return {odds:_toAm(1+(+raw.to_win)/st),how:'from the payout'};
+    const ret=raw.returns!=null?+raw.returns:(raw.status==='open'||raw.status==='won'?+raw.payout:NaN);
+    if(ret>st)return {odds:_toAm(ret/st),how:'from the payout'};
+  }
+  const ds=it.legs.map(l=>l.odds!=null?toDec(l.odds):null);
+  if(ds.length>1&&ds.every(d=>d>1))return {odds:_toAm(ds.reduce((a,b)=>a*b,1)),how:'legs multiplied'};
+  return null;
+}
 function shotStatusResult(s){ return {won:'W',lost:'L',push:'P',void:'P'}[s]||null; }
 function shotItem(raw,from){
   const placedWk=weekForDate(shotDate(raw.placed));
@@ -7702,6 +7715,9 @@ function shotItem(raw,from){
     result:shotStatusResult(raw.status), payout:raw.payout!=null?Number(raw.payout):null, status:raw.status||'open'};
   if(it.type==='straight'&&legs.length>1)it.type='parlay';
   if(it.type==='straight'&&it.odds==null&&legs[0])it.odds=legs[0].odds;
+  // No ticket odds on the slip (Bet365 parlays often show only legs, stake and
+  // return): work them out from the payout, else multiply the legs' odds.
+  if(it.odds==null&&it.type!=='round_robin'){ const c=shotOddsFrom(it,raw); if(c){ it.odds=c.odds; it.oddsCalc=c.how; } }
   if(it.type==='round_robin'){
     if(it.per==null&&it.stake&&it.count)it.per=Math.round(it.stake/it.count*100)/100;
     if(!it.size)it.size=2;
@@ -7778,7 +7794,7 @@ function renderShot(){
             <div><span class="lab">Bets</span><input data-si="${i}:count" value="${it.count!=null?it.count:''}" inputmode="numeric"></div>
             <div><span class="lab">Size</span><input data-si="${i}:size" value="${it.size||2}" inputmode="numeric"></div>`
           :`<div><span class="lab">Stake</span><input data-si="${i}:stake" value="${it.stake!=null?it.stake:''}" inputmode="decimal"></div>
-            <div><span class="lab">Odds</span><input data-si="${i}:odds" value="${it.odds!=null?fmtAm(it.odds):''}" inputmode="text"></div>`}
+            <div><span class="lab">Odds${it.oddsCalc?` <span style="text-transform:none;letter-spacing:0;color:var(--acc-text)">· ${esc(it.oddsCalc)}</span>`:''}</span><input data-si="${i}:odds" value="${it.odds!=null?fmtAm(it.odds):''}" inputmode="text"></div>`}
         <div><span class="lab">Week</span><input data-si="${i}:wk" value="${it.wk}" inputmode="numeric"></div>
       </div>
       ${showCard?`<span class="lab" style="margin-top:8px">Card</span><select data-si="${i}:cid">${cardOpts(it)}</select>`:''}
@@ -7837,9 +7853,10 @@ function shotLegOut(l,wk){
 function shotCommit(){
   const todo=SHOT.items.filter(x=>x.inc);
   for(const it of todo){
+    if(it.odds==null&&it.type!=='round_robin'){ const c=shotOddsFrom(it,it.raw||{}); if(c){ it.odds=c.odds; it.oddsCalc=c.how; } }
     if(it.type==='round_robin'){ if(!it.per||!it.count){ toast('A round robin needs its per-bet stake and number of bets'); return; } if(!it.cid){ toast('Pick a card for the round robin'); return; } }
     else if(!it.stake){ toast('Every bet needs a stake'); return; }
-    else if(it.odds==null&&!(SHOT.from&&it.legs.every(l=>l.type==='prop')&&it.type==='straight')){ toast('Every bet needs its odds'); return; }
+    else if(it.odds==null&&it.result!=='L'&&it.result!=='P'&&!(SHOT.from&&it.legs.every(l=>l.type==='prop')&&it.type==='straight')){ toast('Add the odds, or the payout, for every open or winning bet'); return; }
   }
   const b=BANKKEY(); let added=0; const graded=[];
   const nid=()=>'b'+Date.now()+Math.random().toString(36).slice(2,6);
