@@ -458,6 +458,7 @@ code{font-family:var(--fm)}
 
 <nav class="tabs" role="tablist">
   <button role="tab" id="tabCards" aria-selected="true">Props</button>
+  <button role="tab" id="tabToday" aria-selected="false">Today</button>
   <button role="tab" id="tabSides" aria-selected="false">Sides</button>
   <button role="tab" id="tabRoster" aria-selected="false">Roster</button>
   <button role="tab" id="tabBank" aria-selected="false">Bank</button>
@@ -468,6 +469,10 @@ code{font-family:var(--fm)}
 <section id="paneCards">
   <div id="cats"></div>
   <p class="note">Tap the color chip to open a player. Tap the pick text to bench it — benched legs stay on the card but drop out of the slip math. Tap the band to collapse a market.</p>
+</section>
+
+<section id="paneToday" hidden>
+  <div id="todayBoard"></div>
 </section>
 
 <section id="paneSides" hidden>
@@ -1093,7 +1098,7 @@ function screenPanel(cid){
             ${x.prior?`<br><span style="color:var(--hl-long)">all ${x.prior.n} with ${esc(x.prior.from)}</span>`:''}
           </span></div>`).join('')
         :`<div class="empty">Nobody clears the filter. Import player logs on the Roster tab if you haven't.</div>`}
-      <div class="note" style="margin:10px 0 8px">${havePrices&&S.screenValue!==false?'Ranked by value score: the book’s no-vig chance at each line, moved by his own games (worth 30 games of weight), then edge per dollar you could win. The big % on the pill is the raw hit-rate model at the card’s line.':'Ranked on how often it has hit, not on price. Check each against the number before you take it.'}</div>
+      <div class="note" style="margin:10px 0 8px">${havePrices&&S.screenValue!==false?'Ranked by value score: the book’s no-vig chance at each line, moved by his own games (the book counts as 100 games), then edge per dollar you could win. The big % on the pill is the raw hit-rate model at the card’s line.':'Ranked on how often it has hit, not on price. Check each against the number before you take it.'}</div>
       <button class="btn ghost" data-screen="close">Close</button>
     </div></div>`;
 }
@@ -3234,10 +3239,11 @@ function postedAt(pid,mkt,line,side){
    longest) that padding is simply wrong, and 5-8 games can't stand on their
    own -- so the same five depth receivers topped "by value" every week at
    +40-80% "EV". Here the padding is the BOOK's no-vig chance at that exact
-   line, worth MKT_K (30) games: a 7-game sample moves the number about a
-   fifth of the way from the market toward his hit rate. Not yet tested
-   against closing prices -- treat the edge as a lead, not a verdict. Anytime TD uses the same blend as the Props board. */
-const MKT_K=30;
+   line, worth MKT_K (100) games: an 8-game sample moves the number about 7%
+   of the way from the market toward his hit rate. Depth players' low lines
+   reflect a smaller role than the games in their logs, and this model has
+   never been tested against closing prices -- so the market leads. Anytime TD uses the same blend as the Props board. */
+const MKT_K=100;
 function marketProb(pid,mkt,line,side,odds,opts){
   const mp=modelProb(pid,mkt,line,side,opts); if(!mp)return null;
   const dec=toDec(+odds); if(!dec)return null;
@@ -3618,7 +3624,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 06:40 UTC';
+const BUILD_STAMP='2026-11-08 14:55 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4937,6 +4943,186 @@ function cardBetHasPicks(x){
   }
   return false;
 }
+/* ---------------- Today's best ----------------
+   Every bet available on today's (Eastern) games that haven't kicked off,
+   scored the same way, top 10 shown.
+   - Props: the Props board's blended chances (TD, pass TD, rush att,
+     rush+rec) plus receptions and longest reception from the receiver model,
+     anchored to the book (marketProb). One prop per player: his best one;
+     cut it and his next best becomes eligible.
+   - NFL spreads / moneylines / team totals: the book's own no-vig chance --
+     the side model added nothing to the closing line (fit 2021-26, no
+     look-ahead), so these only rank when a price beats the market. NFL
+     totals keep a 10% model nudge (the one place it showed a little).
+   - College spreads / totals: same, at an assumed -110 (no college prices
+     in the app). College team-total fades use their own record: about 55%
+     at 5+ points, 57% at 7+ in 2021-25, shrunk to 54% / 55.5% because the
+     rule was found looking back.
+   Value = EV %. Probability = chance to hit among bets within 5% of
+   break-even. Both only consider prices from -250 to +500, and over/under
+   props only on main lines (book fair 35-65%) -- alt lines like receptions
+   over 0.5 at -900 or under 0.5 at +450 are filler.
+   Cuts are kept per day (S.todayCut) and can be put back. */
+const TD_K={nflTot:0.10, sdSide:13.5, sdTot:13};
+const _todayET=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/New_York'});
+const _etDay=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'America/New_York'});
+const _etTime=t=>new Date(t).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
+function _phi(z){ const t=1/(1+0.2316419*Math.abs(z)), d=0.3989423*Math.exp(-z*z/2); const p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z>0?1-p:p; }
+function _phiInv(p){ p=Math.min(0.999,Math.max(0.001,p)); let lo=-6,hi=6; for(let i=0;i<50;i++){ const m=(lo+hi)/2; if(_phi(m)<p)lo=m; else hi=m; } return (lo+hi)/2; }
+function _cand(o){ const dec=toDec(+o.odds); if(!dec)return null; o.dec=dec; o.ev=o.p*dec-1; o.kelly=o.ev/(dec-1); return o; }
+function todayCandidates(){
+  const day=_todayET(), now=Date.now(), out=[];
+  const nflGames=((S.odds&&S.odds.games)||[]).filter(g=>{ const t=Date.parse(g.start||''); return !isNaN(t)&&t>now&&_etDay(t)===day; });
+  const nick=t=>(TEAMS[t]&&TEAMS[t][0])||t;
+  const sched=g=>((S.games&&S.games.games)||[]).find(x=>nick(x.home)===nick(g.home)&&nick(x.away)===nick(g.away)&&Math.abs(Date.parse(String(x.date).slice(0,10)+'T18:00:00Z')-Date.parse(g.start))<2.5*864e5)||null;
+  const gameOf={};
+  nflGames.forEach(g=>{ const sg=sched(g); gameOf[g.home]=gameOf[g.away]={g,sg}; });
+  // ---- NFL props from the Props board
+  try{
+    propBoard().forEach(r=>{
+      if(r.ns||r.wild||r.outlier||r.pb<0.05)return;
+      const t=Date.parse(r.start||''); if(isNaN(t)||t<=now||_etDay(t)!==day)return;
+      const lab=PMK[r.mk].label, sideTxt=r.mk==='td'&&r.side==='over'&&Math.abs(r.line-0.5)<0.01?'':` ${r.side} ${r.line}`;
+      const c=_cand({kind:'prop',who:r.E.name,team:r.E.team,mk:r.mk,line:r.line,side:r.side,odds:r.price,book:r.book,p:r.pb,fair:r.pf,
+        title:`${r.E.name} ${r.mk==='td'?'anytime TD':lab.toLowerCase()}${sideTxt}`,start:t,match:`${r.ga} @ ${r.gh}`,
+        sg:(gameOf[r.gh]||{}).sg,key:`p|${mkey(r.E.name)}|${r.mk}|${r.side}|${r.line}`});
+      if(c)out.push(c);
+    });
+  }catch(e){ console.error(e); }
+  // ---- receptions / longest reception (receiver model, book-anchored)
+  try{
+    const idx=oddsIndex();
+    Object.entries(S.players||{}).forEach(([pid,pl])=>{
+      if(!pl||!pl.name||!pl.team||!gameOf[pl.team])return;
+      const byM=idx[mkey(pl.name)]; if(!byM)return;
+      ['rec','lng'].forEach(mk=>{
+        (byM[mk]||[]).forEach(x=>{
+          const side=x.side==='under'?'under':'over';
+          const mq=marketProb(pid,mk,x.line,side,x.odds); if(!mq)return;
+          const G=gameOf[pl.team].g, t=Date.parse(G.start);
+          const c=_cand({kind:'prop',who:pl.name,team:pl.team,mk,line:x.line,side,odds:x.odds,book:x.book,p:mq.prob,fair:mq.q,
+            title:`${pl.name} ${mk==='rec'?'receptions':'longest reception'} ${side} ${x.line}`,start:t,match:`${G.away} @ ${G.home}`,
+            sg:gameOf[pl.team].sg,key:`p|${mkey(pl.name)}|${mk}|${side}|${x.line}`});
+          if(c)out.push(c);
+        });
+      });
+    });
+  }catch(e){ console.error(e); }
+  // ---- NFL game lines
+  nflGames.forEach(g=>{
+    const L=g.lines||{}, sg=sched(g), t=Date.parse(g.start), match=`${g.away} @ ${g.home}`, gid=sg?sg.id:null;
+    const add=o=>{ const c=_cand(Object.assign({kind:'game',lg:'nfl',start:t,match,sg,gid},o)); if(c)out.push(c); };
+    if(L.spread&&L.spread.home!=null){
+      const ph=_vigFree(L.spread.home_odds,L.spread.away_odds);
+      if(ph!=null){ const hl=+L.spread.home, fm=n=>n>0?'+'+n:(n===0?'pk':String(n));
+        add({type:'Spread',title:`${g.home} ${fm(hl)}`,odds:L.spread.home_odds,book:L.spread.book,p:ph,fair:ph,key:`g|${g.id}|spread|h`});
+        add({type:'Spread',title:`${g.away} ${fm(-hl)}`,odds:L.spread.away_odds,book:L.spread.book,p:1-ph,fair:1-ph,key:`g|${g.id}|spread|a`}); }
+    }
+    if(L.ml&&L.ml.home!=null){
+      const ph=_vigFree(L.ml.home,L.ml.away);
+      if(ph!=null){ add({type:'Moneyline',title:`${g.home} ML`,odds:L.ml.home,book:L.ml.book||'',p:ph,fair:ph,key:`g|${g.id}|ml|h`});
+        add({type:'Moneyline',title:`${g.away} ML`,odds:L.ml.away,book:L.ml.book||'',p:1-ph,fair:1-ph,key:`g|${g.id}|ml|a`}); }
+    }
+    if(L.total&&L.total.line!=null){
+      const po=_vigFree(L.total.over,L.total.under);
+      if(po!=null){
+        let p=po; if(sg&&sg.ptot!=null){ p=_phi(_phiInv(po)+TD_K.nflTot*(sg.ptot-L.total.line)/TD_K.sdTot); }
+        add({type:'Total',title:`${match} over ${L.total.line}`,odds:L.total.over,book:L.total.book,p,fair:po,key:`g|${g.id}|tot|o`});
+        add({type:'Total',title:`${match} under ${L.total.line}`,odds:L.total.under,book:L.total.book,p:1-p,fair:1-po,key:`g|${g.id}|tot|u`});
+      }
+    }
+    ['home','away'].forEach(sd=>{
+      const tt=L.team_total&&L.team_total[sd]; if(!tt||tt.line==null)return;
+      const po=_vigFree(tt.over,tt.under); if(po==null)return;
+      const team=sd==='home'?g.home:g.away;
+      add({type:'Team total',title:`${team} team total over ${tt.line}`,odds:tt.over,book:tt.book,p:po,fair:po,key:`g|${g.id}|tt${sd}|o`});
+      add({type:'Team total',title:`${team} team total under ${tt.line}`,odds:tt.under,book:tt.book,p:1-po,fair:1-po,key:`g|${g.id}|tt${sd}|u`});
+    });
+  });
+  // ---- College (lines from the ratings file, priced at -110)
+  ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>{
+    if(g.hs!=null||g.fcs)return;
+    const t=kickTs(Object.assign({fromRatings:true},g),'cfb'); if(!isFinite(t)||t<=now||_etDay(t)!==day)return;
+    const match=`${g.away} @ ${g.home}`, base={kind:'game',lg:'cfb',start:t,match,gid:g.id,odds:-110,book:'',assumed:true};
+    const add=o=>{ const c=_cand(Object.assign({},base,o)); if(c)out.push(c); };
+    if(g.line!=null){
+      const hl=+g.line, fm=n=>n>0?'+'+n:(n===0?'pk':String(n));
+      add({type:'Spread',title:`${g.home} ${fm(hl)}`,p:0.5,fair:0.5,key:`c|${g.id}|spread|h`});
+      add({type:'Spread',title:`${g.away} ${fm(-hl)}`,p:0.5,fair:0.5,key:`c|${g.id}|spread|a`});
+    }
+    if(g.line_total!=null){
+      add({type:'Total',title:`${match} over ${g.line_total}`,p:0.5,fair:0.5,key:`c|${g.id}|tot|o`});
+      add({type:'Total',title:`${match} under ${g.line_total}`,p:0.5,fair:0.5,key:`c|${g.id}|tot|u`});
+    }
+    try{ cfbTTPicks(g,null).forEach(f=>{
+      const p=Math.abs(f.gap)>=7?0.555:0.54;
+      add({type:'Team total',title:`${f.team} team total ${f.bet.toLowerCase()} ${f.book.toFixed(1)}`,p,fair:0.5,fade:true,
+        note:`TT fade: model ${f.model.toFixed(1)} is ${Math.abs(f.gap).toFixed(1)} off${f.imp?' (book TT implied)':''}`,key:`c|${g.id}|tt${f.sd}|${f.bet[0]}`});
+    }); }catch(e){}
+  });
+  return out;
+}
+function renderToday(){
+  const host=document.getElementById('todayBoard'); if(!host)return;
+  const day=_todayET(), mode=S.todayMode==='prob'?'prob':'value';
+  S.todayCut=S.todayCut&&S.todayCut.day===day?S.todayCut:{day,keys:[]};
+  const cut=new Set(S.todayCut.keys);
+  const all=todayCandidates();
+  // Value = EV %, Probability = chance, both inside -250..+500: shorter is
+  // alt-line filler (receptions over 0.5 at -900), longer is long-shot
+  // territory where small chance errors become big fake edges
+  const score=c=>mode==='value'?c.ev:c.p;
+  const inBand=c=>+c.odds>=-250&&+c.odds<=500&&(c.kind!=='prop'||c.mk==='td'||(c.fair>=0.35&&c.fair<=0.65));
+  const okMode=c=>inBand(c)&&(mode==='value'?c.ev>0:c.ev>=-0.05);
+  const live=all.filter(c=>!cut.has(c.key)&&okMode(c));
+  // one prop per player: his best by the current sort
+  const bestOf={};
+  live.forEach(c=>{ if(c.kind!=='prop')return; const k=mkey(c.who); if(!bestOf[k]||score(c)>score(bestOf[k]))bestOf[k]=c; });
+  // and only the better side of any one game market
+  const pool=live.filter(c=>c.kind!=='prop'||bestOf[mkey(c.who)]===c).sort((a,b)=>score(b)-score(a));
+  const seen=new Set(), top=[];
+  for(const c of pool){ const gk=c.kind==='game'?c.key.replace(/\|[^|]+$/,''):null; if(gk&&seen.has(gk))continue; if(gk)seen.add(gk); top.push(c); if(top.length>=10)break; }
+  const cutRows=all.filter(c=>cut.has(c.key));
+  const pc=x=>`${(x*100).toFixed(0)}%`;
+  const evc=v=>v>0.005?'var(--win)':(v<-0.005?'var(--loss)':'var(--ink-soft)');
+  const row=(c,i,isCut)=>{
+    const jump=c.kind==='game'?(c.lg==='cfb'?`data-jumpgame="${esc(c.gid)}" data-jlg="cfb"`:(c.gid?`data-jumpgame="${esc(c.gid)}" data-jlg="nfl"`:'')):(c.sg?`data-jumpgame="${esc(c.sg.id)}" data-jlg="nfl"`:'');
+    return `<div class="row" style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px dashed color-mix(in srgb,var(--ink) 30%,transparent)">
+      ${isCut?'':`<div style="flex:none;width:22px;font-weight:800;font-size:15px;color:var(--acc-text);padding-top:1px">${i+1}</div>`}
+      <div style="flex:1;min-width:0;${jump?'cursor:pointer':''}" ${jump} ${jump?'role="button"':''}>
+        <div style="font-weight:700;font-size:15px">${esc(c.title)}</div>
+        <div class="what">${esc(c.kind==='prop'?c.match:(c.type+(c.lg==='cfb'?' · college':'')))} · ${esc(_etTime(c.start))} · <b>${fmtAm(+c.odds)}</b>${c.book?' '+esc(bookName(c.book)):''}${c.assumed?' (assumed — check your book)':''}</div>
+        <div class="what">Chance ${pc(c.p)} · book fair ${pc(c.fair)} · <span style="color:${evc(c.ev)};font-weight:700">${c.ev>=0?'+':''}${(c.ev*100).toFixed(1)}% EV</span>${c.note?' · '+esc(c.note):''}${c.mk==='rec'||c.mk==='lng'?' · <span style="color:var(--ink-soft)">receiver model, untested vs closing prices</span>':''}${jump?' <span style="color:var(--acc-text);font-weight:700">· Bet it ›</span>':''}</div>
+      </div>
+      <button class="btn ${isCut?'':'ghost'}" data-tcut="${esc(c.key)}" data-tback="${isCut?1:0}" style="width:auto;flex:none;padding:5px 10px;font-size:12px">${isCut?'Add back':'Cut'}</button>
+    </div>`;
+  };
+  const nGames=new Set(all.map(c=>c.match)).size;
+  host.innerHTML=`<div class="pblock" style="margin-bottom:14px"><div class="pbh">Today’s best · ${esc(new Date(day+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}))}</div><div class="pbody">
+    <nav class="tabs" style="margin-bottom:10px"><button data-tmode="value" aria-selected="${mode==='value'}">Value</button><button data-tmode="prob" aria-selected="${mode==='prob'}">Probability</button></nav>
+    <div class="note" style="margin:0 0 8px">${mode==='value'
+      ?'Ranked by expected value across every prop, spread, total and team total on games that haven’t kicked off, priced −250 to +500, props on their main lines. One prop per player.'
+      :'Ranked by chance to hit, among bets priced −250 to +500 (props on main lines) and within 5% of break-even. One prop per player.'}
+      ${all.length} bets on ${nGames} games considered.</div>
+    ${top.length?top.map((c,i)=>row(c,i,false)).join(''):`<div class="note" style="margin:0">${all.length?'Nothing qualifies right now.':'No games left today with prices loaded — refresh data on game day.'}</div>`}
+  </div></div>
+  ${cutRows.length?`<div class="pblock" style="margin-bottom:14px"><div class="pbh">Cut · ${cutRows.length}</div><div class="pbody">${cutRows.map(c=>row(c,0,true)).join('')}</div></div>`:''}
+  <div class="note">Spreads, totals and team totals count, but the side model added nothing to the closing line in testing (NFL and college), so they use the book’s own price and only rank when that price is better than the market. College team-total fades use their 2021–25 record. College lines are shown at −110. Props use the same book-anchored chances as the Props board.</div>`;
+}
+document.addEventListener('click',e=>{
+  const m=e.target.closest('[data-tmode]');
+  if(m&&m.closest('#todayBoard')){ S.todayMode=m.dataset.tmode; save(); renderToday(); return; }
+  const c=e.target.closest('[data-tcut]');
+  if(c&&c.closest('#todayBoard')){
+    e.stopPropagation();
+    const day=_todayET(); S.todayCut=S.todayCut&&S.todayCut.day===day?S.todayCut:{day,keys:[]};
+    const k=c.dataset.tcut;
+    if(c.dataset.tback==='1')S.todayCut.keys=S.todayCut.keys.filter(x=>x!==k);
+    else if(!S.todayCut.keys.includes(k))S.todayCut.keys.push(k);
+    save(); renderToday();
+  }
+});
+
 const PRED_OPEN={};
 function pnCdf(z){ const t=1/(1+0.2316419*Math.abs(z)), d=0.3989423*Math.exp(-z*z/2), p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z>0?1-p:p; }
 const pnOrd=n=>{ const s=['th','st','nd','rd'],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
@@ -6535,7 +6721,7 @@ renderFresh();
 setInterval(()=>{ try{ renderFresh(); }catch(e){} },60*1000);
 setTimeout(()=>{ try{ loadJobRuns(); }catch(e){} },2500);
 document.addEventListener('click',e=>{ if(!e.target.closest('[data-sched]'))return; showTab('Settings'); setTimeout(()=>{ const el=document.getElementById('schedPanel'); if(el)el.scrollIntoView({behavior:'smooth',block:'start'}); },50); });
-function renderAll(){try{renderFresh();}catch(e){}_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderPower();renderBank();renderLedger();try{renderStrip();}catch(e){}}
+function renderAll(){try{renderFresh();}catch(e){}_paceCache=null;_oddsIdx=null;_nflWkMap=null;renderBooks&&renderBooks();renderQuota&&renderQuota();document.getElementById('wkNum').textContent='Week '+S.week+(isClosed(S.week)?' ✓':'');renderCards();renderSides();renderRoster();renderPower();renderBank();renderLedger();try{renderStrip();}catch(e){}try{if(!document.getElementById('paneToday').hidden)renderToday();}catch(e){}}
 
 /* Every tap inside Props or Sides (BET, grade, fold, add, unit buttons...)
    rebuilds that whole list's innerHTML. That's what was making the page
@@ -7196,16 +7382,17 @@ document.getElementById('backupRestore').addEventListener('click',()=>{
 
 let lastMainTab='Cards';
 function showTab(name){
-  const map={Cards:'paneCards',Sides:'paneSides',Roster:'paneRoster',Power:'panePower',Bank:'paneBank',Ledger:'paneLedger',Settings:'paneSettings'};
+  const map={Cards:'paneCards',Today:'paneToday',Sides:'paneSides',Roster:'paneRoster',Power:'panePower',Bank:'paneBank',Ledger:'paneLedger',Settings:'paneSettings'};
   if(name!=='Settings') lastMainTab=name;
   if(name==='Settings'){ try{ renderSched(); loadJobRuns(); }catch(e){} }
+  if(name==='Today'){ try{ renderToday(); }catch(e){ console.error(e); } }
   Object.entries(map).forEach(([k,v])=>{
     document.getElementById(v).hidden=(k!==name);
     const t=document.getElementById('tab'+k); if(t)t.setAttribute('aria-selected',String(k===name));
   });
   window.scrollTo(0,0);
 }
-['Cards','Sides','Roster','Bank','Ledger','Power'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
+['Cards','Today','Sides','Roster','Bank','Ledger','Power'].forEach(k=>document.getElementById('tab'+k).addEventListener('click',()=>showTab(k)));
 // the gear toggles Settings; Done goes back to wherever you were
 document.getElementById('tabSettings').addEventListener('click',()=>{
   if(document.getElementById('paneSettings').hidden) showTab('Settings'); else showTab(lastMainTab);
