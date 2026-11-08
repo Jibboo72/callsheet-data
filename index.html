@@ -1042,14 +1042,15 @@ function screenPanel(cid){
             <span style="color:var(--ink-soft)">raw ${x.hr.h}/${x.hr.n}${x.hr.cur?' this season':' incl. last yr'} · ${x.st.recpg.toFixed(1)} rec/g · ${Math.round(x.st.cr*100)}% catch · ${x.st.ypr.toFixed(1)} ypc</span>
             ${(()=>{
               if(x.posted){
-                const e=edgeOf(x.mp,x.posted.odds);
+                const mq=marketProb(x.pid,sc.mkt,sc.line,sc.side,x.posted.odds);
+                const e=edgeOf(mq?mq.prob:x.mp,x.posted.odds);
                 const col=e.ev>0.05?'var(--win)':(e.ev<-0.05?'var(--loss)':'var(--ink-soft)');
                 const bk=x.posted.book?` <span style="color:var(--ink-soft)">${esc(bookName(x.posted.book))}</span>`:'';
-                return `<br><strong>${fmtAm(x.posted.odds)}</strong>${bk} at ${esc(String(sc.line))} · implies ${Math.round(e.imp*100)}% · <span style="color:${col};font-weight:600">${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV</span>${sharpNote(x.mp,x.posted)}`;
+                return `<br><strong>${fmtAm(x.posted.odds)}</strong>${bk} at ${esc(String(sc.line))} · book fair ${mq?Math.round(mq.q*100):Math.round(e.imp*100)}% · with his games ${Math.round((mq?mq.prob:x.mp)*100)}% · <span style="color:${col};font-weight:600">${e.ev>=0?'+':''}${(e.ev*100).toFixed(0)}% EV</span>${sharpNote(x.mp,x.posted)}`;
               }
               if(x.best){
                 const col=x.best.ev>0.05?'var(--win)':(x.best.ev<-0.05?'var(--loss)':'var(--ink-soft)');
-                return `<br><span style="color:var(--ink-soft)">no ${esc(String(sc.line))} posted — best is ${esc(x.best.side)} ${x.best.line} at ${fmtAm(x.best.odds)} · <span style="color:${col};font-weight:600">${x.best.ev>=0?'+':''}${(x.best.ev*100).toFixed(0)}% EV</span></span>`;
+                return `<br><span style="color:var(--ink-soft)">no ${esc(String(sc.line))} posted — best is ${esc(x.best.side)} ${x.best.line} at ${fmtAm(x.best.odds)} · book fair ${Math.round(x.best.fair*100)}%, with his games ${Math.round(x.best.prob*100)}% · <span style="color:${col};font-weight:600">${x.best.ev>=0?'+':''}${(x.best.ev*100).toFixed(0)}% EV</span></span>`;
               }
               return havePrices?`<br><span style="color:var(--ink-soft)">no price posted</span>`:'';
             })()}
@@ -1058,7 +1059,7 @@ function screenPanel(cid){
             ${x.prior?`<br><span style="color:var(--hl-long)">all ${x.prior.n} with ${esc(x.prior.from)}</span>`:''}
           </span></div>`).join('')
         :`<div class="empty">Nobody clears the filter. Import player logs on the Roster tab if you haven't.</div>`}
-      <div class="note" style="margin:10px 0 8px">Ranked on how often it has hit, not on price. Check each against the number before you take it.</div>
+      <div class="note" style="margin:10px 0 8px">${havePrices&&S.screenValue!==false?'Ranked by value score: the book’s no-vig chance at each line, moved by his own games (worth 30 games of weight), then edge per dollar you could win. The big % on the pill is the raw hit-rate model at the card’s line.':'Ranked on how often it has hit, not on price. Check each against the number before you take it.'}</div>
       <button class="btn ghost" data-screen="close">Close</button>
     </div></div>`;
 }
@@ -1605,6 +1606,24 @@ const PMK={
   cyd:  {label:'Rush+rec yards', short:'rush+rec',  f:'combo', k:0.10}
 };
 const WILD_GAP=0.15;
+const TD_LONG=0.12;      // book fair chance under 12% (about +650 or longer) = a TD long shot
+/* Anytime-TD calibration from the walk-forward backtest (export_props.py
+   atd_bins, 2025 -> 2026, 2,257 player-games): the model ran a touch high
+   from 6% to 25% (e.g. said 12.5%, hit 11.7%). Map each prediction onto what
+   actually happened, straight-line between bin centres. */
+function tdCal(p,side){
+  const bins=S.props&&S.props.calib&&S.props.calib.atd_bins;
+  if(!bins||!bins.length||p==null)return p;
+  const yes=side==='under'?1-p:p;
+  const pts=bins.filter(b=>b.n>=40).map(b=>[b.pred,b.act]).sort((a,b)=>a[0]-b[0]);
+  if(!pts.length)return p;
+  let q;
+  if(yes<=pts[0][0])q=yes*pts[0][1]/pts[0][0];
+  else if(yes>=pts[pts.length-1][0])q=yes+(pts[pts.length-1][1]-pts[pts.length-1][0]);
+  else for(let i=1;i<pts.length;i++){ if(yes<=pts[i][0]){ const [x0,y0]=pts[i-1],[x1,y1]=pts[i]; q=y0+(y1-y0)*(yes-x0)/(x1-x0); break; } }
+  q=Math.max(0.005,Math.min(0.97,q));
+  return side==='under'?1-q:q;
+}
 const noSkill=(mk,side)=>mk==='lrush'||(mk==='car'&&side==='under');
 const PMK_ORDER=['td','ptd','car','lrush','cyd'];
 const sfxStrip=s=>String(s||'').replace(/(jr|sr|iii|ii|iv)$/,'');
@@ -1651,7 +1670,8 @@ function propBoard(){
             ||idx[g.home+'|'+g.away+'|'+sfxStrip(k)]||idx[g.away+'|'+g.home+'|'+sfxStrip(k)];
       if(!E)return;
       const line=Number(pr.line);
-      const pm=propProb(E,mk,pr.side,line); if(pm==null)return;
+      const pm0=propProb(E,mk,pr.side,line); if(pm0==null)return;
+      const pm=mk==='td'?tdCal(pm0,pr.side):pm0;
       // best price at THIS line among your books; else the consensus (not bettable at yours)
       let bk=null;
       Object.entries(pr.books||{}).forEach(([bid,b])=>{
@@ -1678,7 +1698,10 @@ function propBoard(){
       let pf=pe, hasFair=false;
       if(!isNaN(fo)){ const f=1/toDec(fo); if(Math.abs(f-pe)<=Math.max(0.03,0.25*pe)){ pf=f; hasFair=true; } }
       // the model only nudges the book's number: blend in log space so long shots can't swing wildly
-      const kk=hasFair?(pr.side==='under'&&PMK[mk].ku!=null?PMK[mk].ku:PMK[mk].k):Math.min(0.30,PMK[mk].k);
+      let kk=hasFair?(pr.side==='under'&&PMK[mk].ku!=null?PMK[mk].ku:PMK[mk].k):Math.min(0.30,PMK[mk].k);
+      // the 0.35 TD weight was earned on prices shorter than about +650; nothing
+      // longer has been tracked yet, so long shots get the old, cautious weight
+      if(mk==='td'&&pr.side==='over'&&pf<TD_LONG)kk=Math.min(kk,0.15);
       const pb=Math.min(0.97,Math.pow(pf,1-kk)*Math.pow(pm,kk)), ev=pb*dec-1, gap=pm-pf, n=E.n||0;
       if(pf<0.03||pb>0.97||ev>1.0)return;                 // long-shot noise and data glitches
       // a price far more generous than the rest of your books is usually stale or a typo:
@@ -1692,7 +1715,11 @@ function propBoard(){
         else if(Math.abs(gap)<=0.15&&n>=3&&ev>=0.02&&pm>imp)tier='B';
       }
       const id=E.pid+'|'+mk+'|'+pr.side+'|'+line;
-      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pf,pb,ev,gap,tier,hasFair,outlier,ns,wild,start:g.start,gh:g.home,ga:g.away};
+      // value score = Kelly fraction: edge per dollar you could win. Raw EV %
+      // ranks every +1500 long shot first (1 point of chance = 15% EV there);
+      // this ranks by how much of the bankroll the edge is actually worth.
+      const kelly=ev/(dec-1);
+      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pm0,pf,pb,ev,kelly,gap,tier,hasFair,outlier,ns,wild,longshot:pf<TD_LONG,start:g.start,gh:g.home,ga:g.away};
       if(!best[id]||row.ev>best[id].ev)best[id]=row;
     });
   });
@@ -1856,7 +1883,7 @@ function renderPropsTab(host){
   }
   let rows=all.filter(r=>(mf==='all'||r.mk===mf));
   if(q) rows=rows.filter(r=>(r.E.name+' '+r.E.team+' '+r.E.opp).toLowerCase().includes(q));
-  if(mode==='ev') { const tr=r=>r.tier==='A'?0:(r.tier==='B'?1:2); rows=rows.filter(r=>r.ev>0&&r.pb>=0.08&&!r.wild&&(!r.ns||mf===r.mk)).sort((a,b)=>tr(a)-tr(b)||b.ev-a.ev); }
+  if(mode==='ev') { const tr=r=>r.tier==='A'?0:(r.tier==='B'?1:2); rows=rows.filter(r=>r.ev>0&&r.pb>=0.08&&!r.wild&&!r.outlier&&(!r.ns||mf===r.mk)).sort((a,b)=>tr(a)-tr(b)||b.kelly-a.kelly); }
   else rows=rows.filter(r=>r.imp<=0.75).sort((a,b)=>b.pb-a.pb);
   const missing=PMK_ORDER.filter(m=>!all.some(r=>r.mk===m));
   if(missing.length) html+=`<div class="note" style="margin:0 0 10px;color:var(--ink-soft)">No prices yet for: ${missing.map(m=>esc(PMK[m].label)).join(', ')}. The books haven't posted them or the odds pull doesn't include them yet.</div>`;
@@ -1866,7 +1893,7 @@ function renderPropsTab(host){
     const d=r.E.date.slice(5);
     html+=`<div class="pblock" style="margin-bottom:8px"><div class="pbody" style="padding:8px 10px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${esc(r.E.name)}</b>${tierChip(r.tier)}</div>
-      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}${r.ns?' · <span style="color:var(--ink-soft)">no proven model skill here — the EV is price shopping only</span>':''}${r.wild?' · <span style="color:var(--hl-long)">model 15+ pts off the book — usually the book knows something; not ranked</span>':''}</div>
+      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}${r.ns?' · <span style="color:var(--ink-soft)">no proven model skill here — the EV is price shopping only</span>':''}${r.wild?' · <span style="color:var(--hl-long)">model 15+ pts off the book — usually the book knows something; not ranked</span>':''}${r.longshot&&r.mk==='td'&&r.side==='over'?' · <span style="color:var(--ink-soft)">long shot — model weight capped, untested at these prices</span>':''}</div>
       <div class="stats" style="grid-template-columns:1.5fr 1fr 1fr 1fr">
         <div class="stat"><div class="n" style="font-size:14px">${esc(propPick(r))}</div><div class="l">Pick</div></div>
         <div class="stat"><div class="n" style="font-size:15px">${fmtOdds(r.price)}</div><div class="l">${esc(bookName(r.book))}</div></div>
@@ -3167,6 +3194,37 @@ function postedAt(pid,mkt,line,side){
   const want = side==='under' ? 'under' : 'over';
   return postedFor(pid,mkt).find(x=>x.side===want&&Math.abs(x.line-Number(line))<0.01)||null;
 }
+/* The card model is a hit rate over a handful of games, padded toward a fixed
+   league average set for each card's default line. Judged against a price at
+   another line (depth receivers are posted at 1.5-2.5 catches, 9.5-12.5
+   longest) that padding is simply wrong, and 5-8 games can't stand on their
+   own -- so the same five depth receivers topped "by value" every week at
+   +40-80% "EV". Here the padding is the BOOK's no-vig chance at that exact
+   line, worth MKT_K (30) games: a 7-game sample moves the number about a
+   fifth of the way from the market toward his hit rate. Not yet tested
+   against closing prices -- treat the edge as a lead, not a verdict. Anytime TD uses the same blend as the Props board. */
+const MKT_K=30;
+function marketProb(pid,mkt,line,side,odds,opts){
+  const mp=modelProb(pid,mkt,line,side,opts); if(!mp)return null;
+  const dec=toDec(+odds); if(!dec)return null;
+  const want=side==='under'?'over':'under';
+  const opp=postedFor(pid,mkt).find(x=>(x.side==='under'?'under':'over')===want&&Math.abs(x.line-Number(line))<0.01);
+  let q=null;
+  if(opp){ const d2=toDec(+opp.odds); if(d2){ const a=1/dec,b2=1/d2; q=a/(a+b2); } }
+  if(q==null)q=(1/dec)*(mkt==='td'&&side!=='under'?0.92:0.955);
+  let prob;
+  if(mkt==='td'){
+    const k=q<TD_LONG?0.15:0.35;
+    prob=Math.pow(q,1-k)*Math.pow(mp.prob,k);
+  } else {
+    const n=mp.n||0, h=typeof mp.h==='number'?mp.h:mp.prob*n;
+    const M=MODEL[mkt==='lng'?(side==='under'?'und':'lng'):'rec']||MODEL.rec;
+    const own=(h+M.k*M.base)/(n+M.k);                 // what modelProb padded with
+    prob=(h+MKT_K*q)/(n+MKT_K)+(mp.prob-own);           // keep its opponent / injury nudges
+  }
+  prob=Math.max(0.02,Math.min(0.97,prob));
+  return {prob,q,raw:mp.prob};
+}
 /* best value available on this player in this market, judged by the model */
 function bestValue(pid,mkt,opts,side,nearLine){
   const rows=postedFor(pid,mkt)
@@ -3189,11 +3247,11 @@ function bestValue(pid,mkt,opts,side,nearLine){
 
   let best=null;
   pool.forEach(x=>{
-    const mp=modelProb(pid,mkt,x.line,x.side,opts);
+    const mp=marketProb(pid,mkt,x.line,x.side,x.odds,opts);
     if(!mp)return;
     const e=edgeOf(mp.prob,x.odds);
     if(!e)return;
-    if(!best||e.ev>best.ev) best={...x,prob:mp.prob,ev:e.ev,imp:e.imp};
+    if(!best||e.ev>best.ev) best={...x,prob:mp.prob,raw:mp.raw,fair:mp.q,ev:e.ev,imp:e.imp};
   });
   return best;
 }
@@ -3453,16 +3511,18 @@ function screen(cid){
   out.forEach(x=>{
     x.posted=postedAt(x.pid,sc.mkt,sc.line,sc.side);
     x.best=bestValue(x.pid,sc.mkt,null,sc.side==='under'?'under':'over',sc.line);
-    x.ev=x.posted?(edgeOf(x.mp,x.posted.odds)||{}).ev:null;
+    const mpp=x.posted?marketProb(x.pid,sc.mkt,sc.line,sc.side,x.posted.odds):null;
+    x.ev=mpp?(edgeOf(mpp.prob,x.posted.odds)||{}).ev:null;
+    // value score (Kelly): edge per dollar you could win, so long prices
+    // don't float to the top on a small difference in chance
+    const o=x.posted?x.posted.odds:(x.best?x.best.odds:null), d=o!=null?toDec(+o):null;
+    const ev=x.ev!=null?x.ev:(x.best?x.best.ev:null);
+    x.val=(ev!=null&&d>1)?ev/(d-1):-99;
   });
   // with prices loaded, anyone without one isn't bettable this week
   const byValue=S.screenValue!==false;
   if(havePrices&&byValue){
-    out.sort((a,b)=>{
-      const av=(a.ev!=null?a.ev:(a.best?a.best.ev:-99));
-      const bv=(b.ev!=null?b.ev:(b.best?b.best.ev:-99));
-      return bv-av;
-    });
+    out.sort((a,b)=>b.val-a.val);
   } else {
     out.sort((a,b)=>{
       if(cfg.useDef&&a.mu&&b.mu&&a.mu.d_rank&&b.mu.d_rank){
@@ -3524,7 +3584,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-07 17:55 UTC';
+const BUILD_STAMP='2026-11-08 06:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —

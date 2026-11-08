@@ -685,6 +685,15 @@ def backtest(pg, carries, train_season, test_season):
             x = min(int(round(o["combo_mu"] / 5)), len(s) - 1)
             P["combo"][0].append(s[x]); P["combo"][1].append(float(r.combo >= COMBO_X[x]))
     res = {k: _brier(*v) for k, v in P.items()}
+    # anytime-TD calibration by predicted chance: long shots are where a small
+    # overrating turns into a big (fake) EV, so check them on their own
+    pa, aa = np.array(P["atd"][0]), np.array(P["atd"][1])
+    res["atd_bins"] = []
+    for lo, hi in ((0, .06), (.06, .10), (.10, .15), (.15, .25), (.25, .40), (.40, 1.01)):
+        m = (pa >= lo) & (pa < hi)
+        if m.sum():
+            res["atd_bins"].append({"lo": lo, "hi": hi, "n": int(m.sum()),
+                                    "pred": round(float(pa[m].mean()), 4), "act": round(float(aa[m].mean()), 4)})
     p = np.clip(np.array(LRC[0]), 0.02, 0.98)
     if len(p) > 200:
         b = irls_logit(np.log(p / (1 - p))[:, None], np.array(LRC[1]), l2=1.0)
