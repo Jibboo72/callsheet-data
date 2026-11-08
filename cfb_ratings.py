@@ -90,13 +90,22 @@ CONFIG = dict(
     sd_margin=15.8,         # game-margin SD for win % (backtest residual sd)
     scar_t=25.0,            # a game this many points below the line leaves a mark...
     scar_s=0.10,            # ...of this share of the shortfall beyond it, for the season
+    tot_keep=0.58,          # game totals keep 58% of their distance from the
+                            # league average (2026-11-08). Points-based totals
+                            # swing too wide: fluke scores (return TDs, garbage
+                            # time, OT, blowouts of weak teams) don't repeat.
+                            # Fit on 2021-22 walk-forward: model side at 5+ off
+                            # the closing total went 47.8% -> 53.4% on 2023-25,
+                            # miss 13.27 -> 12.89 (line 12.68). A play-by-play
+                            # rebuild (drives x points per drive) did no better.
 )
 
 # The FCS model: same engine over every Division I game (FBS and FCS), so
 # FCS teams are rated off their whole schedule, not just their FBS games.
 # Knobs tuned separately by backtest_fcs.py against FCS-vs-FCS closing lines.
 # Tuned on 2022-2024 FCS-vs-FCS games; held-out 2025: MAE 12.15 vs line 11.86.
-FCS_CONFIG = dict(CONFIG, scope="di", alpha=1.0, alpha_fcs=2.0, hfa=2.0, scar_s=0.0)
+FCS_CONFIG = dict(CONFIG, scope="di", alpha=1.0, alpha_fcs=2.0, hfa=2.0, scar_s=0.0,
+                  tot_keep=1.0)    # the totals pullback was only tested on FBS
 
 
 # --------------------------------------------------------------------------
@@ -327,9 +336,11 @@ def project(model, home, away, neutral=False):
     h, a = t.loc[home], t.loc[away]
     hfa = 0.0 if neutral else cfg["hfa"]
     spread = h.net - a.net + hfa            # + = home favored by this many
-    total = 2 * model["avg"] + h.off + a["def"] + a.off + h["def"]
+    raw = 2 * model["avg"] + h.off + a["def"] + a.off + h["def"]
+    total = 2 * model["avg"] + cfg.get("tot_keep", 1.0) * (raw - 2 * model["avg"])
     wp = 0.5 * (1 + math.erf(spread / (cfg["sd_margin"] * math.sqrt(2))))
-    return {"margin": float(spread), "total": float(total), "home_wp": float(wp)}
+    return {"margin": float(spread), "total": float(total), "total_raw": float(raw),
+            "home_wp": float(wp)}
 
 
 # --------------------------------------------------------------------------

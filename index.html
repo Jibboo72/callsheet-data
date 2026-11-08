@@ -1430,7 +1430,7 @@ function takeSnaps(){
     if(S.cfbr&&Array.isArray(S.cfbr.games)) S.cfbr.games.forEach(g=>{
       if(g.fcs||g.hs!=null||g.pem==null)return;
       if(g.tt_home==null&&g.tt_away==null&&g.line_total==null&&g.line==null)return;
-      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date,kickMs('cfb',g));
+      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,ptr:g.pem_total_raw,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date,kickMs('cfb',g));
     });
     if(S.games&&Array.isArray(S.games.games)) S.games.games.forEach(g=>{
       if(('margin' in g)||g.ptot==null||g.proj==null)return;
@@ -1518,8 +1518,13 @@ const FADE_START='2026-10-17', FADE_GAP=5;
    been 47%. The NFL rule is now FOLLOW the model, restarted from that date so
    it is still a forward test. College game totals backtested at 47% for the
    model at 5+ (fade 53%), so college keeps the fade from its original date. */
-const TOT_RULE={nfl:{follow:true,start:'2026-10-24'},cfb:{follow:false,start:FADE_START}};
-function fadeRows(lg){
+const TOT_RULE={nfl:{follow:true,start:'2026-10-24'},cfb:{follow:false,start:FADE_START},
+  /* 2026-11-08 split rule, from the 2021-25 breakdown: at 5+ points off, the
+     raw model's own side went 44% in conference games and 40% in late
+     non-conference games on 2023-25 (fade), but 55.5% in early-season
+     (weeks 0-7) non-conference games (follow). Forward test from today. */
+  cfbSplit:{split:true,start:'2026-11-08'}};
+function fadeRows(lg,key){
   const out={done:[],open:[]}; if(!S.snap)return out;
   const pre=lg+':';
   const res={};
@@ -1528,14 +1533,19 @@ function fadeRows(lg){
   const names={};
   if(lg==='cfb') ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>names[String(g.id)]=cfbAb(g.away)+' @ '+cfbAb(g.home));
   else ((S.games&&S.games.games)||[]).forEach(g=>names[String(g.id)]=g.away+' @ '+g.home);
+  const meta={};
+  if(lg==='cfb') ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>meta[String(g.id)]={wk:g.wk,conf:!!g.conf_game});
+  const rule=TOT_RULE[key||lg]||TOT_RULE.cfb;
   Object.keys(S.snap).forEach(k=>{
     if(!k.startsWith(pre))return;
     const sn=S.snap[k], id=k.slice(pre.length);
-    const rule=TOT_RULE[lg]||TOT_RULE.cfb;
-    if(!sn||sn.pt==null||sn.lt==null||String(sn.d||'')<rule.start)return;
-    const gap=sn.pt-sn.lt; if(Math.abs(gap)<FADE_GAP)return;
-    const over=rule.follow?gap>0:gap<0;
-    const r={id,date:sn.d,name:names[id]||id,model:sn.pt,book:sn.lt,bet:over?'Over':'Under'};
+    const pt=sn&&sn.ptr!=null?sn.ptr:(sn?sn.pt:null);     // raw model total: what the rules were tested on
+    if(!sn||pt==null||sn.lt==null||String(sn.d||'')<rule.start)return;
+    const gap=pt-sn.lt; if(Math.abs(gap)<FADE_GAP)return;
+    let follow=!!rule.follow, why='';
+    if(rule.split){ const m=meta[id]; if(!m)return; follow=!m.conf&&m.wk<8; why=follow?'early non-conf · follow':(m.conf?'conference · fade':'late season · fade'); }
+    const over=follow?gap>0:gap<0;
+    const r={id,date:sn.d,name:names[id]||id,model:pt,book:sn.lt,bet:over?'Over':'Under',why};
     if(res[id]!=null){ const a=res[id]; r.actual=a; r.res=a===sn.lt?'P':(over===(a>sn.lt)?'W':'L'); out.done.push(r); }
     else out.open.push(r);
   });
@@ -1543,15 +1553,17 @@ function fadeRows(lg){
   out.open.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   return out;
 }
-function fadeBlock(lg){
-  const f=fadeRows(lg);
+function fadeBlock(lg,key){
+  const f=fadeRows(lg,key);
   const w=f.done.filter(x=>x.res==='W').length, l=f.done.filter(x=>x.res==='L').length, p=f.done.filter(x=>x.res==='P').length;
   const n=w+l, pc=n?w/n:null;
   const col=pc==null||n<30?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
   const mark=r=>r==='W'?'<span style="color:var(--win);font-weight:700">W</span>':(r==='L'?'<span style="color:var(--loss);font-weight:700">L</span>':'<span style="color:var(--ink-soft)">P</span>');
-  const rule=TOT_RULE[lg]||TOT_RULE.cfb;
-  let h=`<div class="pblock"><div class="pbh">${rule.follow?'Totals tracker · follow the model':'Fade tracker'} · total, ${FADE_GAP}+ pts from the book</div><div class="pbody">
-    <div class="note" style="margin:0 0 8px">${rule.follow
+  const rule=TOT_RULE[key||lg]||TOT_RULE.cfb;
+  let h=`<div class="pblock"><div class="pbh">${rule.split?'Split rule tracker':(rule.follow?'Totals tracker · follow the model':'Fade tracker')} · total, ${FADE_GAP}+ pts from the book</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">${rule.split
+      ?`Fixed in advance (${rule.start}): when the raw model total is ${FADE_GAP}+ points off the book's — <b>fade</b> it in conference games and from week 8 on, <b>follow</b> it in early-season non-conference games. On 2023–25, games the rule was never tuned on, the model's own side went 44% in conference games, 40% late non-conference, and 55.5% early non-conference. Counts games from ${rule.start} on, numbers saved before kickoff.`
+      :rule.follow
       ?`Fixed in advance: when the model's total is ${FADE_GAP}+ points off the book's, bet the model's side. 2021–25 that went 111-97 (53%), 56–58% in each of the last three seasons — the earlier "fade it" idea came from a few 2026 weeks and would have lost over five years. Counts games from ${rule.start} on, using numbers saved before kickoff.`
       :`Fixed in advance: when the model's total is ${FADE_GAP}+ points off the book's, bet the other way (2021–25 the model's own side hit 47% there). Counts games from ${rule.start} on, using numbers saved before kickoff.`} The backtest's 56.7% for this idea is one small sample picked after the fact — it needs about 100 games above 53% before it means anything.</div>
     <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
@@ -1561,7 +1573,7 @@ function fadeBlock(lg){
     </div>`;
   if(f.open.length){
     h+=`<div class="lab" style="margin:10px 0 4px">Flagged now · ${f.open.length}</div>`;
-    f.open.slice(0,12).forEach(r=>{ h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(r.name)}</b><br><span style="color:var(--ink-soft);font-size:11px">model ${r.model.toFixed(1)} · book ${r.book}</span></span><span class="v" style="white-space:nowrap;margin-left:8px">${r.bet} ${r.book}</span></div>`; });
+    f.open.slice(0,12).forEach(r=>{ h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(r.name)}</b><br><span style="color:var(--ink-soft);font-size:11px">model ${r.model.toFixed(1)} · book ${r.book}</span></span><span class="v" style="white-space:nowrap;margin-left:8px">${r.bet} ${r.book}${r.why?`<br><span style="font-size:10px;color:var(--ink-soft)">${esc(r.why)}</span>`:''}</span></div>`; });
   } else h+=`<div class="note" style="margin:8px 0 0">${n?'Nothing flagged right now.':'No game has been flagged yet — flags appear once a game with a 5+ point gap has been loaded before kickoff.'}</div>`;
   if(f.done.length){
     h+=`<div class="lab" style="margin:10px 0 4px">Graded</div>`;
@@ -1575,7 +1587,7 @@ function fadeBlock(lg){
    fade/follow). Newest week first, season total at the bottom. */
 function scoreWeekly(lg,rows){
   const W={}, cell=()=>({w:0,l:0,p:0});
-  const get=wk=>W[wk]=W[wk]||{line:cell(),tot:cell(),tt:cell(),ttf:cell(),tf:cell(),date:''};
+  const get=wk=>W[wk]=W[wk]||{line:cell(),tot:cell(),tt:cell(),ttf:cell(),tf:cell(),sp:cell(),date:''};
   const add=(c,res)=>{ if(res==='W')c.w++; else if(res==='L')c.l++; else if(res==='P')c.p++; };
   rows.forEach(r=>{
     if(r.wk==null)return; const x=get(r.wk); if(String(r.date)>x.date)x.date=String(r.date);
@@ -1588,13 +1600,14 @@ function scoreWeekly(lg,rows){
   else ((S.games&&S.games.games)||[]).forEach(g=>wkOf[String(g.id)]=g.wk);
   try{ fadeRows(lg).done.forEach(r=>{ const wk=wkOf[r.id]; if(wk!=null)add(get(wk).tf,r.res); }); }catch(e){}
   if(lg==='cfb'){ try{ cfbTTFadeTracker().done.forEach(r=>{ const wk=wkOf[r.id]; if(wk!=null)add(get(wk).ttf,r.res); }); }catch(e){} }
+  if(lg==='cfb'){ try{ fadeRows('cfb','cfbSplit').done.forEach(r=>{ const wk=wkOf[r.id]; if(wk!=null)add(get(wk).sp,r.res); }); }catch(e){} }
   return W;
 }
 function scoreWeeklyBlock(lg,rows){
   const W=scoreWeekly(lg,rows), wks=Object.keys(W).map(Number).sort((a,b)=>b-a);
   if(!wks.length)return '';
   const cols=lg==='cfb'
-    ?[['line','Spread'],['tot','Total'],['tt','Team tot'],['ttf','TT fade'],['tf','Tot fade']]
+    ?[['line','Spread'],['tot','Total'],['tt','Team tot'],['ttf','TT fade'],['tf','Tot fade'],['sp','Split']]
     :[['line','Spread'],['tot','Total'],['tt','Team tot'],['tf','Tot rule']];
   const fmt=c=>{ const n=c.w+c.l; if(!n&&!c.p)return '<span style="color:var(--ink-soft)">—</span>';
     const pc=n?c.w/n:null, col=pc==null?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
@@ -1602,7 +1615,7 @@ function scoreWeeklyBlock(lg,rows){
   const tot={}; cols.forEach(([k])=>{ tot[k]={w:0,l:0,p:0}; wks.forEach(w=>{ ['w','l','p'].forEach(f=>tot[k][f]+=W[w][k][f]); }); });
   const cw=Math.floor(84/cols.length);
   let h=`<div class="pblock"><div class="pbh">By week · model record</div><div class="pbody">
-    <div class="note" style="margin:0 0 8px">Each market graded as a bet on the model’s side, gaps of 1+ point (smaller is noise). ${lg==='cfb'?'TT fade and Tot fade are the fixed rules below (bet against the model when it’s 5+ off).':'Tot rule is the fixed totals rule below (follow the model when it’s 5+ off).'} Team totals start from when the app began saving them. Green 52.4%+ (break-even at −110), red under 47.6%; “p” = pushes.</div>
+    <div class="note" style="margin:0 0 8px">Each market graded as a bet on the model’s side, gaps of 1+ point (smaller is noise). ${lg==='cfb'?'TT fade and Tot fade are the fixed rules below (bet against the model when it’s 5+ off); Split fades it in conference and late-season games and follows it in early non-conference ones (from Nov 8). College model totals are pulled about halfway to average from Nov 8; the fade rules keep using the raw number they were tested on.':'Tot rule is the fixed totals rule below (follow the model when it’s 5+ off).'} Team totals start from when the app began saving them. Green 52.4%+ (break-even at −110), red under 47.6%; “p” = pushes.</div>
     <table class="pow" style="width:100%;table-layout:fixed;font-size:12px"><colgroup><col style="width:16%">${cols.map(()=>`<col style="width:${cw}%">`).join('')}</colgroup>
     <thead><tr><th style="text-align:left;letter-spacing:0">Wk</th>${cols.map(([,l])=>`<th style="letter-spacing:0;font-size:10px">${l}</th>`).join('')}</tr></thead><tbody>`;
   wks.forEach((w,i)=>{
@@ -1638,6 +1651,7 @@ function renderScorecard(host){
       ${tm?`<div class="note" style="margin:8px 0 0">Average miss on the total: model <b>${tm.m.toFixed(2)}</b> · book <b>${tm.b.toFixed(2)}</b> (${tm.n} games).</div>`:''}</div></div>`;
   } else html+=`<div class="pblock"><div class="pbh">Total</div><div class="pbody"><div class="note" style="margin:0">${lg==='nfl'?'No NFL totals graded yet — the model total arrives with the next data rebuild (Roster › Refresh all data).':'No totals graded yet.'}</div></div></div>`;
   html+=fadeBlock(lg);
+  if(lg==='cfb')html+=fadeBlock('cfb','cfbSplit');
   if(lg==='cfb') html+=cfbTTFadeBlock();
   // team totals
   const ttAll=[]; rows.forEach(r=>(r.tt||[]).forEach(t=>ttAll.push(t)));
@@ -2113,7 +2127,8 @@ function cfbLine(g){
 const TTF_START='2026-10-24', TTF_GAP=5;
 function cfbTTPicks(g,sn){
   const pem=sn?(sn.ps!=null?sn.ps:sn.pem):(g.pem_score!=null?g.pem_score:g.pem);
-  const pt=sn?sn.pt:g.pem_total, L=sn?sn.l:g.line, LT=sn?sn.lt:g.line_total;
+  // the fade was tested on the raw model total, before the 2026-11-08 pullback
+  const pt=sn?(sn.ptr!=null?sn.ptr:sn.pt):(g.pem_total_raw!=null?g.pem_total_raw:g.pem_total), L=sn?sn.l:g.line, LT=sn?sn.lt:g.line_total;
   if(pem==null||pt==null)return [];
   const mh=(pt-pem)/2, ma=(pt+pem)/2;
   let bh=sn?sn.th:g.tt_home, ba=sn?sn.ta:g.tt_away, imp=false;
@@ -3668,7 +3683,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 16:10 UTC';
+const BUILD_STAMP='2026-11-08 21:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —

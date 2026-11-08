@@ -55,7 +55,7 @@ renaming a file breaks every app that reads it.
 | `odds-2026.json` | NFL odds + player props from SportsGameOdds (`lines`, `props`, `start`) | `pull_odds.py` (odds.yml) | Wed 10:13, Fri 19:53 | Call Sheet, SportsMF |
 | `closing-2026.json` | Last pregame prices per game (lines, team totals, NFL props), captured 0–50 min before kickoff; pruned after 21 days | `close_odds.py` (close.yml) | every 20 min in game windows (see Gotchas) | Call Sheet (stores closing line value on each bet as `clvp`) |
 | `cfb-2026.json` | College schedule + finals (`kick` is **UTC**) | `export_cfb.py` (build.yml) | build.yml | Call Sheet |
-| `cfb-ratings-2026.json` | College ratings, team colors/abbr/logos, game projections (`kick` is **Eastern**) | `export_cfb_ratings.py` (build.yml, cfb-odds.yml) | build.yml + Fri 19:43, Sat 10:07 | Call Sheet, SportsMF |
+| `cfb-ratings-2026.json` | College ratings, team colors/abbr/logos, game projections (`kick` is **Eastern**; `pem_total` = model total pulled 42% toward average since 2026-11-08, `pem_total_raw` = before the pullback, used by the fade rules) | `export_cfb_ratings.py` (build.yml, cfb-odds.yml) | build.yml + Fri 19:43, Sat 10:07 | Call Sheet, SportsMF |
 | `fcs-ratings-2026.json` | FCS ratings + games | `export_cfb_ratings.py` | same | Call Sheet, SportsMF |
 | `cfb-odds-2026.json` | College odds from SportsGameOdds | `pull_cfb_odds.py` (cfb-odds.yml) | Fri 19:43, Sat 10:07 | `export_cfb_ratings.py` only |
 | `weather-2026.json` | Game-day forecasts + "weather under" flags | `weather.py forecast` (build.yml, cfb-odds.yml) | same | Call Sheet, SportsMF |

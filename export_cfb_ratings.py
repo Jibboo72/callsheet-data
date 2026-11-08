@@ -349,6 +349,7 @@ def build(season):
                  fcs=not fbs2,
                  pem=round(-p["margin"], 1),          # betting convention: home spread
                  pem_total=round(p["total"], 1),
+                 pem_total_raw=round(p.get("total_raw", p["total"]), 1),   # before the pullback; the fade rules use this
                  home_wp=round(p["home_wp"], 3) if fbs2 else (FCS_WIN if r.home_division == "fbs" else 1 - FCS_WIN))
         if isinstance(r.notes, str) and r.notes:
             g["notes"] = r.notes
@@ -595,6 +596,7 @@ def _game_rec(r, m, lmap, fbs_side=False):
              aconf=r.away_conference if isinstance(r.away_conference, str) else "",
              hdiv=r.home_division, adiv=r.away_division,
              pem=round(-p["margin"], 1), pem_total=round(p["total"], 1),
+             pem_total_raw=round(p.get("total_raw", p["total"]), 1),
              home_wp=round(p["home_wp"], 3))
     if isinstance(r.notes, str) and r.notes:
         g["notes"] = r.notes
