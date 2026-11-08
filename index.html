@@ -3215,7 +3215,7 @@ function marketProb(pid,mkt,line,side,odds,opts){
   let prob;
   if(mkt==='td'){
     const k=q<TD_LONG?0.15:0.35;
-    prob=Math.pow(q,1-k)*Math.pow(mp.prob,k);
+    prob=Math.pow(q,1-k)*Math.pow(tdCal(mp.prob,side==='under'?'under':'over'),k);
   } else {
     const n=mp.n||0, h=typeof mp.h==='number'?mp.h:mp.prob*n;
     const M=MODEL[mkt==='lng'?(side==='under'?'und':'lng'):'rec']||MODEL.rec;
@@ -3584,7 +3584,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 06:10 UTC';
+const BUILD_STAMP='2026-11-08 06:25 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
