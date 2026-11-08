@@ -824,10 +824,23 @@ async function load(){
   // saved state is read asynchronously above, and a refresh that landed
   // before that would be overwritten by it. It only reads what the GitHub
   // workflows have already published.
-  if(!S.lastRefresh || !S.odds || Date.now()-S.lastRefresh > 30*60*1000){
-    refreshAllData().catch(()=>{}).then(()=>autoGradeBets());
-  } else setTimeout(autoGradeBets,2500);
-  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){ autoGradeBets(); pullMergeSync(); } });
+  // The 30-minute clock is kept per device (localStorage), not in S: S is
+  // synced, so another phone's refresh used to make this one skip its own.
+  // And a home-screen app is usually RESUMED, not reloaded, so the check
+  // also runs every time the app comes back to the front.
+  const lastLocal=()=>{ try{ return +localStorage.getItem('cs-last-refresh')||0; }catch(e){ return 0; } };
+  let refreshing=false;
+  const maybeRefresh=()=>{
+    if(refreshing||(S.odds&&Date.now()-lastLocal()<30*60*1000))return Promise.resolve(false);
+    refreshing=true;
+    return refreshAllData().catch(()=>{}).then(()=>{ try{ localStorage.setItem('cs-last-refresh',String(Date.now())); }catch(e){} refreshing=false; autoGradeBets(); return true; });
+  };
+  maybeRefresh().then(did=>{ if(!did)setTimeout(autoGradeBets,2500); });
+  let lastBuildCheck=Date.now();
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden){
+    autoGradeBets(); pullMergeSync(); maybeRefresh();
+    if(Date.now()-lastBuildCheck>30*60*1000){ lastBuildCheck=Date.now(); checkForNewerBuild(); }
+  } });
   setTimeout(pullMergeSync,1500);
   setInterval(autoGradeBets,5*60*1000);
   setInterval(()=>{ try{ takePropSnaps(); if(gradePropLog())save(); }catch(e){} },5*60*1000);
@@ -844,13 +857,13 @@ let t; function save(){
       // away what can be re-downloaded (and the retired v2 copy) and retry.
       try{ localStorage.removeItem(REFKEY); localStorage.removeItem(OLD); }catch(e){}
       coreOk=await store.set(KEY,core);
-      if(coreOk) S.lastRefresh=0;       // reference data was dropped — re-pull on next open
+      if(coreOk){ S.lastRefresh=0; try{ localStorage.removeItem('cs-last-refresh'); }catch(e){} }       // reference data was dropped — re-pull on next open
     }
     let refOk=await refStore.set(REFKEY,ref);
     if(!refOk&&ref.odds){               // odds are the biggest and the easiest to re-pull
       const r2=Object.assign({},ref); delete r2.odds;
       refOk=await refStore.set(REFKEY,r2);
-      if(refOk) S.lastRefresh=0;
+      if(refOk){ S.lastRefresh=0; try{ localStorage.removeItem('cs-last-refresh'); }catch(e){} }
     }
     // core failing means bets/picks/settings themselves aren't saving —
     // this is exactly the failure mode that caused silent data loss
@@ -3683,7 +3696,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 21:30 UTC';
+const BUILD_STAMP='2026-11-08 21:45 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -3703,10 +3716,11 @@ async function checkForNewerBuild(){
     const latest=m[1];
     const host=document.getElementById('buildInfo');
     if(latest===BUILD_STAMP){
-      if(host)host.textContent+=' · up to date';
+      if(host&&!/up to date/.test(host.textContent))host.textContent+=' · up to date';
       return;
     }
     if(host)host.innerHTML+=` · <span style="color:var(--loss);font-weight:700">running an old build (latest is ${esc(latest)})</span>`;
+    if(document.getElementById('hardReloadBtn'))return;
     const banner=document.createElement('div');
     banner.className='flag';
     banner.style.cssText='position:fixed;left:12px;right:12px;bottom:70px;z-index:80;background:var(--stock);border-color:var(--loss)';
