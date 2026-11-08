@@ -3668,7 +3668,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 15:58 UTC';
+const BUILD_STAMP='2026-11-08 16:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4190,10 +4190,13 @@ function settlementForBatch(cid,bet){
   else if(bet.rrMode==='parlay'){if(decs.length>=2)bets=[decs];}
   else{const k=Math.max(2,Math.min(Number(bet.rrSize)||2,decs.length));if(decs.length>=k)bets=combosOf(decs,k);}
   let staked=0,ret=0,won=0;
+  // a parlay ticket read from a slip carries the book's own ticket price
+  // (Bet365 often shows no leg odds at all) -- pay that unless a leg pushed
+  const tk=bet.rrMode==='parlay'&&bet.ticketOdds!=null&&!legs.some(p=>p.grade==='P')?toDec(+bet.ticketOdds):null;
   bets.forEach(bt=>{
     staked+=stake;
     if(bt.every(x=>x.win)){
-      let pay=stake*bt.reduce((a,x)=>a*x.d,1);
+      let pay=tk?stake*tk:stake*bt.reduce((a,x)=>a*x.d,1);
       if(bt.length>1&&boost)pay=applyBoost(pay,stake,boost);
       ret+=pay;won++;
     }
@@ -7884,7 +7887,7 @@ function shotCommit(){
       const settled=it.result&&it.payout!=null;
       b.bets.push(Object.assign({id,kind:'prop',card:cid,desc:`${catById(cid).name} · ${nb} bet${nb===1?'':'s'}, ${settled?'settled':'pending'}`,
         odds:null,stake:Math.round(per*nb*100)/100,result:settled?(it.payout>=per*nb?'W':'L'):null,fixedReturn:settled?it.payout:null,
-        rrMode:mode,rrSize:mode==='rr'?(it.size||2):cd.size,rrStake:per,rrBoost:0},base));
+        rrMode:mode,rrSize:mode==='rr'?(it.size||2):cd.size,rrStake:per,rrBoost:0,ticketOdds:mode==='parlay'&&it.odds!=null?it.odds:null},base));
       it.legs.forEach(l=>{ const p=shotPick(l,cid,it); p.rrBatch=id; cd.picks.push(p); const g=shotLegResult(l); if(g&&!settled)graded.push([wk,cid,p,g]); });
       added++;
       return;
