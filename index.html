@@ -1569,6 +1569,49 @@ function fadeBlock(lg){
   }
   return h+`</div></div>`;
 }
+/* Week-by-week model record: one row per week, each market graded the same
+   way as the season tables (bet the model's side; gaps under 1 point are
+   noise and left out), plus the two fixed rules (team-total fade, totals
+   fade/follow). Newest week first, season total at the bottom. */
+function scoreWeekly(lg,rows){
+  const W={}, cell=()=>({w:0,l:0,p:0});
+  const get=wk=>W[wk]=W[wk]||{line:cell(),tot:cell(),tt:cell(),ttf:cell(),tf:cell(),date:''};
+  const add=(c,res)=>{ if(res==='W')c.w++; else if(res==='L')c.l++; else if(res==='P')c.p++; };
+  rows.forEach(r=>{
+    if(r.wk==null)return; const x=get(r.wk); if(String(r.date)>x.date)x.date=String(r.date);
+    if(r.lres&&r.lg>=1)add(x.line,r.lres);
+    if(r.tres&&r.tg>=1)add(x.tot,r.tres);
+    (r.tt||[]).forEach(t=>{ if(t.gap>=1)add(x.tt,t.res); });
+  });
+  const wkOf={};
+  if(lg==='cfb') ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>wkOf[String(g.id)]=g.wk);
+  else ((S.games&&S.games.games)||[]).forEach(g=>wkOf[String(g.id)]=g.wk);
+  try{ fadeRows(lg).done.forEach(r=>{ const wk=wkOf[r.id]; if(wk!=null)add(get(wk).tf,r.res); }); }catch(e){}
+  if(lg==='cfb'){ try{ cfbTTFadeTracker().done.forEach(r=>{ const wk=wkOf[r.id]; if(wk!=null)add(get(wk).ttf,r.res); }); }catch(e){} }
+  return W;
+}
+function scoreWeeklyBlock(lg,rows){
+  const W=scoreWeekly(lg,rows), wks=Object.keys(W).map(Number).sort((a,b)=>b-a);
+  if(!wks.length)return '';
+  const cols=lg==='cfb'
+    ?[['line','Spread'],['tot','Total'],['tt','Team tot'],['ttf','TT fade'],['tf','Tot fade']]
+    :[['line','Spread'],['tot','Total'],['tt','Team tot'],['tf','Tot rule']];
+  const fmt=c=>{ const n=c.w+c.l; if(!n&&!c.p)return '<span style="color:var(--ink-soft)">—</span>';
+    const pc=n?c.w/n:null, col=pc==null?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+    return `<div style="font-weight:700;white-space:nowrap">${c.w}-${c.l}</div><div style="font-size:10px;color:${col};font-weight:700;white-space:nowrap">${pc==null?'':(pc*100).toFixed(0)+'%'}${c.p?` <span style="color:var(--ink-soft);font-weight:400">${c.p}p</span>`:''}</div>`; };
+  const tot={}; cols.forEach(([k])=>{ tot[k]={w:0,l:0,p:0}; wks.forEach(w=>{ ['w','l','p'].forEach(f=>tot[k][f]+=W[w][k][f]); }); });
+  const cw=Math.floor(84/cols.length);
+  let h=`<div class="pblock"><div class="pbh">By week · model record</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Each market graded as a bet on the model’s side, gaps of 1+ point (smaller is noise). ${lg==='cfb'?'TT fade and Tot fade are the fixed rules below (bet against the model when it’s 5+ off).':'Tot rule is the fixed totals rule below (follow the model when it’s 5+ off).'} Team totals start from when the app began saving them. Green 52.4%+ (break-even at −110), red under 47.6%; “p” = pushes.</div>
+    <table class="pow" style="width:100%;table-layout:fixed;font-size:12px"><colgroup><col style="width:16%">${cols.map(()=>`<col style="width:${cw}%">`).join('')}</colgroup>
+    <thead><tr><th style="text-align:left;letter-spacing:0">Wk</th>${cols.map(([,l])=>`<th style="letter-spacing:0;font-size:10px">${l}</th>`).join('')}</tr></thead><tbody>`;
+  wks.forEach((w,i)=>{
+    const d=W[w].date?new Date(W[w].date+'T12:00:00').toLocaleDateString('en-US',{month:'numeric',day:'numeric'}):'';
+    h+=`<tr${i===0?' style="background:var(--acc-soft)"':''}><td style="text-align:left"><b>${w}</b><div style="font-size:10px;color:var(--ink-soft)">${d}</div></td>${cols.map(([k])=>`<td class="n">${fmt(W[w][k])}</td>`).join('')}</tr>`;
+  });
+  h+=`<tr style="border-top:2px solid var(--line)"><td style="text-align:left"><b>Season</b></td>${cols.map(([k])=>`<td class="n">${fmt(tot[k])}</td>`).join('')}</tr>`;
+  return h+`</tbody></table></div></div>`;
+}
 function renderScorecard(host){
   const lg=S.scoreLg||'cfb';
   const rows=scoreRows(lg);
@@ -1581,6 +1624,7 @@ function renderScorecard(host){
     return;
   }
   html+=`<div class="note" style="margin:0 0 10px">${rows.length} played games with a model number and a book line. Each is graded as a bet on the side the model likes: it wins, loses or pushes against the result. Break-even at −110 is 52.4%. Gaps under 1 point are inside the noise (home-field convention, rounding), so read the tiers, not the All row. Rows under 15 games stay grey.</div>`;
+  html+=scoreWeeklyBlock(lg,rows);
   // line
   const lineItems=rows.filter(r=>r.lres).map(r=>({lg:r.lg,res:r.lres}));
   const lm=scoreMae(rows,'lerrM','lerrB');
@@ -3624,7 +3668,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 14:55 UTC';
+const BUILD_STAMP='2026-11-08 15:50 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
