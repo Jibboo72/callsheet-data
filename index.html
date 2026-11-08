@@ -624,6 +624,40 @@ code{font-family:var(--fm)}
 <input type="file" id="shotInput" accept="image/*" multiple hidden>
 
 <script>
+/* Downloaded reference data (odds, roster, props, ratings) is ~3 MB of text
+   and outgrew localStorage (Safari allows about 5 MB, counted 2 bytes per
+   character). It now lives in IndexedDB, which has room for far more; bets,
+   picks and settings stay in localStorage as before. Falls back to
+   localStorage if IndexedDB isn't available. */
+const idb={
+  _db:null,
+  open(){
+    if(this._db)return this._db;
+    this._db=new Promise((res,rej)=>{
+      try{
+        const r=indexedDB.open('callsheet',1);
+        r.onupgradeneeded=()=>{ r.result.createObjectStore('kv'); };
+        r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+      }catch(e){ rej(e); }
+    });
+    return this._db;
+  },
+  async get(k){ try{ const db=await this.open(); return await new Promise((res,rej)=>{ const q=db.transaction('kv','readonly').objectStore('kv').get(k); q.onsuccess=()=>res(q.result==null?null:q.result); q.onerror=()=>rej(q.error); }); }catch(e){ return undefined; } },
+  async set(k,v){ try{ const db=await this.open(); await new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').put(v,k); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error); }); return true; }catch(e){ return false; } }
+};
+const refStore={
+  async get(k){
+    const v=await idb.get(k);
+    if(v)return v;
+    const old=await store.get(k);                     // older builds kept it in localStorage
+    if(old&&v!==undefined){ if(await idb.set(k,old)){ try{ localStorage.removeItem(k); }catch(e){} } }
+    return old;
+  },
+  async set(k,v){
+    if(await idb.set(k,v)){ try{ localStorage.removeItem(k); }catch(e){} return true; }
+    return store.set(k,v);
+  }
+};
 const store={
   async get(k){try{if(window.storage){const r=await window.storage.get(k,false);return r?JSON.parse(r.value):null;}}catch(e){}
     try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}},
@@ -748,7 +782,7 @@ async function load(){
   // reference data (games/cfb/odds/players) lives in its own slot as of
   // this build; older saves still have it inline in the main key above,
   // and this simply finds nothing yet until the next save splits it out
-  const ref=await store.get(REFKEY);
+  const ref=await refStore.get(REFKEY);
   if(ref) S=Object.assign(S,ref);
   const migration=archiveCurrentWeekAsZero();
   // The shared parlay slip used to live at S.slip directly; it's now one
@@ -807,10 +841,10 @@ let t; function save(){
       coreOk=await store.set(KEY,core);
       if(coreOk) S.lastRefresh=0;       // reference data was dropped — re-pull on next open
     }
-    let refOk=await store.set(REFKEY,ref);
+    let refOk=await refStore.set(REFKEY,ref);
     if(!refOk&&ref.odds){               // odds are the biggest and the easiest to re-pull
       const r2=Object.assign({},ref); delete r2.odds;
-      refOk=await store.set(REFKEY,r2);
+      refOk=await refStore.set(REFKEY,r2);
       if(refOk) S.lastRefresh=0;
     }
     // core failing means bets/picks/settings themselves aren't saving —
@@ -3584,7 +3618,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 06:25 UTC';
+const BUILD_STAMP='2026-11-08 06:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
