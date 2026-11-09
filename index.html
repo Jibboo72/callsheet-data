@@ -221,7 +221,7 @@ input:focus-visible,select:focus-visible,button:focus-visible,textarea:focus-vis
 .cfbtm:active{opacity:.6}
 select[data-cfbconf]{width:100%}
 .hr{height:2px;background:var(--ink);margin:18px 0}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:80px;background:var(--ink);color:var(--stock);padding:10px 16px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-family:var(--fb);opacity:0;pointer-events:none;transition:opacity .25s;z-index:60}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:80px;background:var(--ink);color:var(--stock);padding:10px 16px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;font-family:var(--fb);opacity:0;pointer-events:none;transition:opacity .25s;z-index:95}
 .toast[data-on="1"]{opacity:1}
 
 /* ---- player screen ---- */
@@ -3696,7 +3696,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-08 21:45 UTC';
+const BUILD_STAMP='2026-11-09 00:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -7813,10 +7813,11 @@ function renderShot(){
     const allProps=it.legs.length&&it.legs.every(l=>l.type==='prop');
     const showCard=!SHOT.from&&(allProps||it.type==='round_robin');
     const res=it.result?{W:'Won',L:'Lost',P:'Push'}[it.result]:'Open';
-    return `<div class="pblock shotbet${it.inc?'':' off'}" style="margin-bottom:12px"><div class="pbh" style="display:flex;align-items:center;gap:10px">
+    return `<div class="pblock shotbet${it.inc?'':' off'}${it.err&&it.inc?' bad':''}" style="margin-bottom:12px${it.err&&it.inc?';border-color:var(--loss);box-shadow:0 0 0 2px var(--loss)':''}"><div class="pbh" style="display:flex;align-items:center;gap:10px">
       <button class="shotinc" data-shotinc="${i}">${it.inc?'✓ Adding':'Skipping'}</button>
       <span style="flex:1">${esc(typeLab[it.type]||'Bet')}${it.type==='round_robin'?` · ${it.size}-pick`:''}${it.legs.length>1?` · ${it.legs.length} legs`:''}</span>
       <span style="font-weight:500;opacity:.8">${esc(it.book||'')}</span></div><div class="pbody">
+      ${it.err&&it.inc?`<div class="note" style="margin:0 0 8px;color:var(--loss);font-weight:700">${esc(it.err)}</div>`:''}
       ${it.dup?`<div class="note" style="margin:0 0 8px;color:var(--loss);font-weight:600">Already in your Bank — left unticked so it isn’t added twice.</div>`:''}
       ${it.warn.length?`<div class="note" style="margin:0 0 8px;color:var(--hl-long)">${it.warn.map(esc).join(' · ')}</div>`:''}
       ${it.legs.map((l,j)=>shotLegRow(i,j,l,it.legs.length===1&&it.type!=='round_robin')).join('')}
@@ -7883,12 +7884,24 @@ function shotLegOut(l,wk){
   return {desc:l.desc,odds:l.odds,kind:'custom',market:'other',match:'',wk};
 }
 function shotCommit(){
-  const todo=SHOT.items.filter(x=>x.inc);
-  for(const it of todo){
+  // Check each ticket on its own. One incomplete ticket used to stop the
+  // whole batch, and its message showed BEHIND this screen, so Add looked
+  // dead. Now the good ones are added and the problem ones stay here,
+  // marked in red, to fix or skip.
+  const all=SHOT.items.filter(x=>x.inc), todo=[], held=[];
+  for(const it of all){
     if(it.odds==null&&it.type!=='round_robin'){ const c=shotOddsFrom(it,it.raw||{}); if(c){ it.odds=c.odds; it.oddsCalc=c.how; } }
-    if(it.type==='round_robin'){ if(!it.per||!it.count){ toast('A round robin needs its per-bet stake and number of bets'); return; } if(!it.cid){ toast('Pick a card for the round robin'); return; } }
-    else if(!it.stake){ toast('Every bet needs a stake'); return; }
-    else if(it.odds==null&&it.result!=='L'&&it.result!=='P'&&!(SHOT.from&&it.legs.every(l=>l.type==='prop')&&it.type==='straight')){ toast('Add the odds, or the payout, for every open or winning bet'); return; }
+    let err='';
+    if(it.type==='round_robin'){ if(!it.per||!it.count)err='Needs the per-bet stake and the number of bets.'; else if(!it.cid)err='Pick a card for this round robin.'; }
+    else if(!it.stake)err='Needs a stake.';
+    else if(it.odds==null&&it.result!=='L'&&it.result!=='P'&&!(SHOT.from&&it.legs.every(l=>l.type==='prop')&&it.type==='straight'))err='Needs the odds (or the payout) — type them in the Odds box.';
+    if(!it.legs.length)err='No legs were read from the slip.';
+    it.err=err; (err?held:todo).push(it);
+  }
+  if(!todo.length){
+    renderShot(); toast(held.length===1?'Fix the bet marked in red, or tap “✓ Adding” to skip it':`Fix the ${held.length} bets marked in red, or skip them`);
+    const el=document.querySelector('#shotSheet .shotbet.bad'); if(el)el.scrollIntoView({block:'center'});
+    return;
   }
   const b=BANKKEY(); let added=0; const graded=[];
   const nid=()=>'b'+Date.now()+Math.random().toString(36).slice(2,6);
@@ -7922,7 +7935,7 @@ function shotCommit(){
       return;
     }
     if(it.type==='round_robin'){
-      toast('Round robins with game legs aren’t supported yet — enter that one by hand'); return;
+      it.err='Round robins with game legs can’t be added from a screenshot yet — enter this one by hand, or skip it.'; held.push(it); return;
     }
     if(it.legs.length===1){
       const l=it.legs[0], o=shotLegOut(l,wk);
@@ -7945,8 +7958,11 @@ function shotCommit(){
     added++;
   });
   graded.forEach(([wk,cid,p,g])=>{ try{ applyPickGrade(wk,cid,p,g); }catch(_){} });
-  save(); SHOT=null; renderShot(); renderAll();
-  toast(`Added ${added} bet${added===1?'':'s'}`);
+  save();
+  if(held.length){ SHOT.items=held; renderShot(); }
+  else { SHOT=null; renderShot(); }
+  renderAll();
+  toast(`Added ${added} bet${added===1?'':'s'}${held.length?` · ${held.length} still need${held.length===1?'s':''} fixing`:''}`);
   try{ if(S.autoGrade!==false){ autoGradeProps&&autoGradeProps(); } }catch(_){}
 }
 renderShotSettings();
