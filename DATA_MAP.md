@@ -138,7 +138,7 @@ Never put a key in an `index.html` — anything there is public.
   1-10 (5 = break-even) with the single book used, expected profit, chance to profit, chance to lose all, and `better`.
   No extra odds credits; it reuses the board's pull. The channel's daily post reads it; final numbers come from the
   first Tonight run of the day when odds are on (15:17 UTC). SportsMF doesn't read it; `board.json` is unchanged.
-- **Buckets schedule (since 2026-11-05):** `tonight.yml` runs at 15:17, 18:43 and 21:47 UTC (the old 16/19/22:00 runs were
-  skipped or hours late). With odds off every run rebuilds the board; with odds on only the first run of the day does.
+- **Buckets schedule (since 2026-11-05):** `tonight.yml` runs every 20 minutes (:07/:27/:47) from 13:00 to 23:59 UTC and :07/:37 from 00:00 to 04:59 UTC
+  (GitHub drops or delays scheduled runs, so there are many chances). With odds off every run rebuilds the board; with odds on only the first run of the day does.
 - **Vault keeps everything in the browser** — no shared file, so its picks can't
   show in SportsMF until it publishes or syncs something.
