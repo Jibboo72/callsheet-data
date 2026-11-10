@@ -2067,7 +2067,7 @@ function renderPower(){
   ];
   const ncol=2+COLS.length;
   const asOf=rts.through_week!=null?`as of week ${rts.through_week}`:'';
-  let html=`<div class="note" style="margin:0 0 10px">Opponent-adjusted power ratings from play-by-play, ${esc(String(rts.season||''))} ${esc(asOf)} — the same engine behind the Sides projection and the Props matchup grades. Offense and defense are rated separately so a team can be judged against the specific unit it's facing; defense is flipped so higher = better D everywhere. Tap any column to sort — the # changes to rank that stat. Tap a team for its special teams.</div>
+  let html=`<div class="note" style="margin:0 0 10px">Opponent-adjusted power ratings from play-by-play, ${esc(String(rts.season||''))} ${esc(asOf)} — the same engine behind the Sides projection and the Props matchup grades. Offense and defense are rated separately so a team can be judged against the specific unit it's facing; defense is flipped so higher = better D everywhere. Tap any column to sort — the # changes to rank that stat. Tap a team for its special teams. Since Nov 9 each rating includes the team’s quarterback for its next game (tap a team to see who and how much); a big swing shows under the team name.</div>
     <table class="pow">
       <thead><tr>
         <th data-sort="rank">#</th><th data-sort="team">Team</th>
@@ -2081,12 +2081,12 @@ function renderPower(){
       const open=powerExpanded===t.team;
       html+=`<tr data-team="${t.team}">
         <td>${rankOf[t.team]}</td>
-        <td><span class="swatch" style="background:${teamColor(t.team)}"></span>${esc(t.team)}</td>
+        <td><span class="swatch" style="background:${teamColor(t.team)}"></span>${esc(t.team)}${t.qb&&Math.abs(t.qb_adj)>=1.5?`<div style="font-size:10px;color:${t.qb_adj>0?'var(--win)':'var(--loss)'};white-space:nowrap">${esc(t.qb)} ${fmt(t.qb_adj)}</div>`:''}</td>
         ${COLS.map(([k])=>`<td class="n">${fmt(t[k])}</td>`).join('')}
       </tr>`;
       if(open){
         html+=`<tr class="detail"><td colspan="${ncol}">
-          ${esc(nick(t.team)||t.team)} · Special teams ${fmt(t.special)}
+          ${esc(nick(t.team)||t.team)} · Special teams ${fmt(t.special)}${t.qb?` · QB <b>${esc(t.qb)}</b> ${fmt(t.qb_adj)} pts (in the rating)`:''}
         </td></tr>`;
       }
     });
@@ -2453,12 +2453,13 @@ function nflSideNote(g){
   const ia=g.inj_adj!=null?+g.inj_adj:null;
   const injTxt=(ia!=null&&Math.abs(ia)>=0.3)?` · injuries move it ${Math.abs(ia).toFixed(1)} toward ${esc(ia>0?g.home:g.away)}${g.inj_src==='espn'?' (live report)':''}`
     :(g.inj_src==null&&!('margin' in g)?' · no injury report yet':'');
+  const qbTxt=(g.qb_away&&g.qb_home)?` · QBs assumed: ${esc(g.qb_away)} / ${esc(g.qb_home)}`:'';
   const early=(+g.wk<=4&&!('margin' in g))?`<div class="note" style="margin:4px 0 0">Early season — the ratings still lean on last season. Weeks 2–4 edges tested at about a coin flip.</div>`:'';
   if(edge!=null&&Math.abs(edge)>=0.05){
     const n=edge>0?-g.spread:g.spread;
-    return `<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(edge>0?g.home:g.away)} ${n>0?'+':''}${n.toFixed(1)}</b> · ${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}</div>${early}`;
+    return `<div class="note" style="margin:6px 0 0"><b>Model side: ${esc(edge>0?g.home:g.away)} ${n>0?'+':''}${n.toFixed(1)}</b> · ${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}${qbTxt}</div>${early}`;
   }
-  return `<div class="note" style="margin:6px 0 0">${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}</div>${early}`;
+  return `<div class="note" style="margin:6px 0 0">${esc(fav)} wins ${(wp*100).toFixed(1)}%${tot}${injTxt}${qbTxt}</div>${early}`;
 }
 /* ---- Expert crowd (data/experts-2026.json, built from the Expert ATS Ledger) ----
    Each game carries how many published experts (CBS, Bleacher Report, Yahoo,
@@ -3696,7 +3697,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-09 00:30 UTC';
+const BUILD_STAMP='2026-11-10 05:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —

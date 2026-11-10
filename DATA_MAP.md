@@ -4,7 +4,7 @@ This is the master map. Each of the other repos has a short `DATA_MAP.md` that
 points back here. **Update this file in the same commit** whenever a data file,
 workflow schedule, or cross-app link changes.
 
-Last checked: 2026-11-06.
+Last checked: 2026-11-10.
 
 ## The apps
 
@@ -45,8 +45,8 @@ renaming a file breaks every app that reads it.
 
 | File | What's in it | Written by | When (UTC cron) | Read by |
 |---|---|---|---|---|
-| `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals | `export_games.py` (build.yml) | Tue 10:17, Thu 18:37, Sat 09:23 + 12:41, Sun 09:17 + 12:47 | Call Sheet, SportsMF |
-| `ratings-2026.json` | NFL power ratings | `export_ratings.py` (build.yml) | build.yml | Call Sheet, SportsMF |
+| `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals; since 2026-11-10 team ratings include the quarterback (`teams[].qb`, `qb_adj`; games carry `qb_home` / `qb_away`) and past games' projections are never rewritten | `export_games.py` (build.yml) | Tue 10:17, Thu 18:37, Sat 09:23 + 12:41, Sun 09:17 + 12:47 | Call Sheet, SportsMF |
+| `ratings-2026.json` | NFL power ratings (`rating`, `offense`, `off_pass` include the quarterback adjustment; `qb`, `qb_adj` say who and how much) | `export_ratings.py` (build.yml) | build.yml | Call Sheet, SportsMF |
 | `matchup.json` | NFL matchup grades (pass/rush D) | `export_matchup.py` (build.yml) | build.yml | Call Sheet |
 | `props-2026.json` | Player prop distributions (ATD with `tdu` TD-usage block, pass TDs, carries, longest rush, rush+rec yds), backtest calib (incl. `atd_bins`, anytime-TD calibration by predicted chance, used by the app to correct TD chances), recent results | `export_props.py` (build.yml) — also pulls nflverse depth charts and ffopportunity expected yards (both free, optional) | build.yml | Call Sheet |
 | `receivers-2026.json`, `receivers-2025.json` | Receiver game logs (incl. per-game `xtd`) | `build_receivers.py` (build.yml) | build.yml | Call Sheet |

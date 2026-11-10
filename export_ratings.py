@@ -23,7 +23,7 @@ import json
 import sys
 
 import pandas as pd
-from power_ratings import load_pbp, build_ratings, CONFIG
+from power_ratings import load_pbp, build_ratings_qb, load_qb_plays, CONFIG
 
 
 def build_export(season, week):
@@ -34,7 +34,15 @@ def build_export(season, week):
         pbp = load_pbp([season - 1, season])
     except Exception:
         pbp = load_pbp([season])
-    r = build_ratings(pbp, season, week, CONFIG)
+    # ratings include each team's quarterback for its next game -- the same
+    # expected-starter rule export_games.py uses, so the two files agree
+    from export_games import expected_starters, espn_injury_rows
+    try:
+        rows = espn_injury_rows()
+    except Exception:
+        rows = []
+    r, _ = build_ratings_qb(pbp, load_qb_plays(range(season - 3, season + 1)), season, week, CONFIG,
+                            lambda qb: expected_starters(qb, rows))
 
     cols = ['rating', 'offense', 'defense', 'off_pass', 'off_rush',
             'def_pass', 'def_rush', 'special']
@@ -43,6 +51,8 @@ def build_export(season, week):
     for rank, (t, row) in enumerate(r[cols].iterrows(), start=1):
         entry = {'team': t, 'rank': rank}
         entry.update({c: round(float(row[c]), 2) for c in cols})
+        entry['qb'] = row['qb_name'] if isinstance(row['qb_name'], str) else None
+        entry['qb_adj'] = round(float(row['qb_adj']), 2)
         teams.append(entry)
 
     return {'kind': 'ratings', 'season': int(season), 'through_week': int(week),

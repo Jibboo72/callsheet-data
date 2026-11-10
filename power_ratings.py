@@ -46,8 +46,14 @@ import pandas as pd
 
 CONFIG = dict(
     # --- sample filtering ---
-    wp_low=0.05,            # drop plays outside this win-probability band (garbage time)
-    wp_high=0.95,
+    # 2026-11-09 audit (2021-26 walk-forward, 1,500 games): the garbage-time
+    # filter was costing accuracy. Dropping plays outside 5-95% win
+    # probability threw away real information -- with no filter the same
+    # ratings missed the final margin by 13.04 instead of 13.09 and sat
+    # closer to the closing line (3.19 vs 3.33). A tighter 10-90% band was
+    # worse still (13.16). So every scrimmage play counts.
+    wp_low=0.0,
+    wp_high=1.0,
     max_qtr=5,
 
     # --- recency ---
@@ -135,8 +141,26 @@ CONFIG = dict(
     # live default. Still worth re-checking against next season's results
     # as a hypothesis, not a settled number; see test_injury_discount.py's
     # own docstring/comments for the full sweep and reasoning.
+    # 2026-11-09: 3.0 -> 1.2. With the quarterback handled directly (below)
+    # the injury report no longer has to carry "the starter is out", and the
+    # joint fit puts the rest of the report at 1.1-1.3.
     injury_trailing_weeks=6,
-    injury_weight=3.0,
+    injury_weight=1.2,
+
+    # --- quarterback adjustment (2026-11-09 audit) ---
+    # The biggest single gap in the ratings: a team's pass offense was rated
+    # on whoever threw its passes lately, with no idea who starts THIS week.
+    # qb_values() rates every passer (EPA per dropback vs league average,
+    # opponent-adjusted, shrunk toward a replacement-level passer) and each
+    # team gets  qb_weight x (2 x starter - passers already in its rating)
+    # points: one part for a CHANGE at quarterback, one for his quality.
+    # Walk-forward 2021-26, weights fit on 2017-20 only: miss vs final margin
+    # 13.03 -> 12.85 (closing line 12.58), distance from the closing line
+    # 3.46 -> 2.46 points. Totals: 13.56 -> 13.37 (line 13.09).
+    qb_weight=15.0,         # rating points per 1.0 EPA/dropback
+    qb_k=400.0,             # dropbacks of "replacement level" every passer starts with
+    qb_half_life=40.0,      # weeks; a passer's form fades slower than a team's
+    qb_rep=-0.12,           # replacement level: how passers with <150 career dropbacks have done
 )
 
 TEAM_FIX = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA"}
@@ -858,6 +882,129 @@ def build_ratings(pbp, as_of_season, as_of_week, cfg=CONFIG, teams=None,
     c = _fit_components(pbp, as_of_season, as_of_week, cfg, teams,
                         ngs_pass, ngs_rush, pfr_prss)
     return combine_components(c, cfg)
+
+
+# --------------------------------------------------------------------------
+# QUARTERBACKS
+# --------------------------------------------------------------------------
+
+QB_COLS = ["season", "week", "posteam", "defteam", "epa", "qb_dropback",
+           "passer_player_id", "passer_player_name", "play_type", "qb_kneel",
+           "qb_spike", "aborted_play", "special", "qtr"]
+
+
+def load_qb_plays(seasons, cache_dir="."):
+    """Dropbacks with a known passer for the given seasons (slim columns, so
+    four seasons cost little). Seasons that can't be loaded are skipped."""
+    frames = []
+    for s in seasons:
+        path = f"{cache_dir}/pbp{s}.parquet"
+        try:
+            df = pd.read_parquet(path, columns=QB_COLS)
+        except Exception:
+            try:
+                df = pd.read_parquet("https://github.com/nflverse/nflverse-data/releases/"
+                                     f"download/pbp/play_by_play_{s}.parquet", columns=QB_COLS)
+            except Exception:
+                continue
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=QB_COLS)
+    return qb_plays(pd.concat(frames, ignore_index=True))
+
+
+def qb_plays(pbp):
+    """The dropbacks qb_values() rates, from any play-by-play frame."""
+    d = pbp
+    m = (d["posteam"].notna() & d["defteam"].notna() & d["epa"].notna()
+         & (d["qb_kneel"] != 1) & (d["qb_spike"] != 1) & (d["aborted_play"] != 1)
+         & (d["special"] != 1) & d["play_type"].isin(["pass", "run"])
+         & (d["qtr"] <= 5) & (d["qb_dropback"] == 1) & d["passer_player_id"].notna())
+    d = d.loc[m, ["season", "week", "posteam", "defteam", "epa",
+                  "passer_player_id", "passer_player_name"]].copy()
+    for c in ("posteam", "defteam"):
+        d[c] = d[c].replace(TEAM_FIX)
+    return d
+
+
+def qb_values(qp, as_of_season, as_of_week, cfg=CONFIG, pass_def=None):
+    """Rate every passer using only dropbacks before (as_of_season, as_of_week).
+
+    qp: qb_plays() rows, ideally the last four seasons.
+    pass_def: team -> pass-defense EPA effect (_fit_components()['pd_e']), so
+    a passer isn't punished for a hard schedule.
+    Returns dict:
+      v      passer id -> EPA per dropback vs league average, shrunk toward
+             cfg['qb_rep'] by cfg['qb_k'] dropbacks
+      mix    team -> the same number averaged over the passers already inside
+             that team's rating (its rated dropbacks, same recency weights)
+      recent team -> passer with the most dropbacks in its latest game
+      depth  team -> this season's passers, most dropbacks first
+      name   passer id -> name
+    """
+    s, w = as_of_season, as_of_week
+    q = qp[((qp.season < s) | ((qp.season == s) & (qp.week < w))) & (qp.season >= s - 3)]
+    empty = dict(v=pd.Series(dtype=float), mix=pd.Series(dtype=float), recent={}, depth={}, name={})
+    if q.empty:
+        return empty
+    e = q.epa.values - q.groupby("season").epa.transform("mean").values
+    if pass_def is not None:
+        e = e - q.defteam.map(pass_def).fillna(0.0).values
+    ago = (s - q.season.values) * 22.0 + (w - q.week.values)
+    wq = np.exp(-np.log(2.0) / cfg["qb_half_life"] * np.maximum(ago, 0.0))
+    ids = q.passer_player_id.values
+    num = pd.Series(wq * e).groupby(ids).sum()
+    den = pd.Series(wq).groupby(ids).sum()
+    v = (num + cfg["qb_k"] * cfg["qb_rep"]) / (den + cfg["qb_k"])
+
+    t = q[q.season >= s - 1]                      # the plays the team rating is built on
+    wt = play_weights(t, s, w, cfg)
+    tv = t.passer_player_id.map(v).values
+    mix = (pd.Series(wt * tv).groupby(t.posteam.values).sum()
+           / pd.Series(wt).groupby(t.posteam.values).sum())
+
+    last = t.assign(_k=t.season * 100 + t.week)
+    last = last[last._k == last.groupby("posteam")._k.transform("max")]
+    recent = (last.groupby(["posteam", "passer_player_id"]).size().reset_index(name="n")
+                  .sort_values("n").groupby("posteam").passer_player_id.last().to_dict())
+    cur = q[q.season == s]
+    depth = {tm: g.passer_player_id.value_counts().index.tolist() for tm, g in cur.groupby("posteam")}
+    name = q.drop_duplicates("passer_player_id", keep="last").set_index("passer_player_id").passer_player_name.to_dict()
+    return dict(v=v, mix=mix, recent=recent, depth=depth, name=name)
+
+
+def qb_adjust(ratings, qb, starters=None, cfg=CONFIG):
+    """Fold this week's quarterback into the team ratings.
+
+    starters: team -> passer id expected to start (missing teams use their
+    most recent starter; an id with no history counts as replacement level).
+    Adds qb_id / qb_name / qb_adj and moves rating, offense and off_pass by
+    qb_adj points.
+    """
+    r = ratings.copy()
+    starters = starters or {}
+    ids, names, adjs = [], [], []
+    for tm in r.index:
+        qid = starters.get(tm) or qb["recent"].get(tm)
+        mix = float(qb["mix"].get(tm, 0.0)) if len(qb["mix"]) else 0.0
+        vq = mix if qid is None else float(qb["v"].get(qid, cfg["qb_rep"]))
+        adjs.append(cfg["qb_weight"] * (2.0 * vq - mix))
+        ids.append(qid); names.append(qb["name"].get(qid) if qid else None)
+    r["qb_id"], r["qb_name"], r["qb_adj"] = ids, names, adjs
+    for c in ("rating", "offense", "off_pass"):
+        r[c] = r[c] + r["qb_adj"]
+    return r.sort_values("rating", ascending=False)
+
+
+def build_ratings_qb(pbp, qp, as_of_season, as_of_week, cfg=CONFIG, starters=None):
+    """build_ratings() plus the quarterback adjustment. Returns (ratings, qb)
+    where qb is qb_values()'s dict (for looking up other passers)."""
+    c = _fit_components(pbp, as_of_season, as_of_week, cfg)
+    r = combine_components(c, cfg)
+    qb = qb_values(qp, as_of_season, as_of_week, cfg, pass_def=c["pd_e"])
+    if callable(starters):                 # let the caller pick starters from qb's own tables
+        starters = starters(qb)
+    return qb_adjust(r, qb, starters, cfg), qb
 
 
 # --------------------------------------------------------------------------

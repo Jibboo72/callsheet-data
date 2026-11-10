@@ -55,6 +55,13 @@ LAST SEASON'S PLAYS (added 2026-10-23)
   2+ went from 45% to 49%.
 
 FROZEN PRE-KICKOFF PROJECTIONS (added 2026-10-23)
+  2026-11-09 audit: ratings now include each team's quarterback for that game
+  (power_ratings.qb_adjust: the week's actual starter for played games, the
+  expected starter for the next one), the garbage-time filter is off, the
+  injury weight is 1.2, and scale / home field are fit on three completed
+  seasons instead of one. 2021-26 walk-forward: miss vs the final margin
+  13.03 -> 12.84 (closing line 12.58); totals 13.56 -> 13.42 (line 13.09).
+
   Once a game is played, its proj/ptot/inj values are the ones this file
   carried the last time it was built BEFORE kickoff (read back from the
   previous copy of the output file), flagged frz=1 -- so the Scorecard
@@ -72,8 +79,8 @@ import urllib.request
 import numpy as np
 import pandas as pd
 
-from power_ratings import (load_pbp, load_games, build_ratings,
-                           load_injury_discount_team_week, CONFIG,
+from power_ratings import (load_pbp, load_games, build_ratings, build_ratings_qb,
+                           load_qb_plays, load_injury_discount_team_week, CONFIG,
                            POSITION_INJURY_WEIGHT, DEFAULT_POSITION_INJURY_WEIGHT,
                            STATUS_INJURY_WEIGHT, TEAM_FIX)
 
@@ -225,40 +232,97 @@ def espn_discounts(season, before_week):
     return out
 
 
+CALIB_SEASONS = 3           # completed seasons the scale / home field are fit on
+
+
+def week_starters(g, week):
+    """{team: passer id} for the quarterbacks who started that week's games
+    (nflverse fills these in once a game is played)."""
+    out = {}
+    for _, x in g[g.week == week].iterrows():
+        for tm, q in ((x.home_team, x.get("home_qb_id")), (x.away_team, x.get("away_qb_id"))):
+            if isinstance(q, str) and q:
+                out[tm] = q
+    return out
+
+
+def _qb_key(name):
+    """'Jared Goff' and 'J.Goff' -> 'j goff', to match ESPN to play-by-play."""
+    s = _nm(str(name).replace(".", " "))
+    parts = s.split()
+    return f"{parts[0][0]} {parts[-1]}" if len(parts) >= 2 else s
+
+
+def expected_starters(qb, espn_rows=None):
+    """{team: passer id} for teams whose usual starter is ruled Out or
+    Doubtful on ESPN's report: the team's next passer this season, else an
+    unknown id (which rates as replacement level). Everyone else is left to
+    the default -- whoever started their last game."""
+    out = {}
+    for r in espn_rows or []:
+        if str(r.get("position", "")).upper() != "QB" or r.get("status") not in ("Out", "Doubtful"):
+            continue
+        tm = r["team"]; cur = qb["recent"].get(tm)
+        if not cur or _qb_key(qb["name"].get(cur, "")) != _qb_key(r["name"]):
+            continue
+        alts = [q for q in qb["depth"].get(tm, []) if q != cur]
+        out[tm] = alts[0] if alts else "replacement"
+        print(f"QB: {tm} {r['name']} is {r['status']} -> "
+              f"{qb['name'].get(out[tm], 'replacement-level passer')}", file=sys.stderr)
+    return out
+
+
 def fit_scale_hfa(season):
     """
-    Regress actual margin on raw rating difference for one completed season.
-    Returns (scale, hfa, n). Walk-forward: each week is projected from
-    ratings built only on earlier weeks.
+    Regress actual margin on the adjusted rating difference (ratings with
+    that week's starting quarterback, plus the injury discount) over the
+    last CALIB_SEASONS completed seasons ending at `season` (2020 skipped).
+    One season alone left the home-field number too noisy: on 2021-26,
+    three seasons cut the miss vs the final margin from 12.88 to 12.84.
+    Returns (scale, hfa, n, pts_coef). Walk-forward: each week is projected
+    from ratings built only on earlier weeks.
     """
-    pbp = _pbp_two(season)          # same inputs the live ratings get
-    g = load_games()
-    g = g[(g.season == season) & (g.game_type == "REG")]
-    g = g.dropna(subset=["home_score", "away_score"])
-    if g.empty:
-        return None
-
-    cur = pbp[(pbp.season == season) & (pbp.season_type == "REG")]
-    maxwk = int(cur.week.max())
+    seasons = [y for y in range(season, season - CALIB_SEASONS - 2, -1) if y != 2020][:CALIB_SEASONS]
+    gall = load_games()
     raw, act = [], []
     tx, ty = [], []      # team-points rows: [offense, opposing defense, home]
-    for w in range(FIRST_FIT_WEEK, maxwk + 1):
-        r = build_ratings(pbp, season, w, CONFIG)
-        for _, x in g[g.week == w].iterrows():
-            if x.home_team not in r.index or x.away_team not in r.index:
-                continue
-            # neutral-site games (London, Germany, Brazil...) have no home
-            # field, so they'd only muddy the home-field fit
-            if str(x.get("location", "Home")) == "Neutral":
-                continue
-            raw.append(float(r.loc[x.home_team, "rating"] -
-                             r.loc[x.away_team, "rating"]))
-            act.append(float(x.home_score - x.away_score))
-            h, a = x.home_team, x.away_team
-            tx.append([float(r.loc[h, "offense"]), float(r.loc[a, "defense"]), 1.0])
-            ty.append(float(x.home_score))
-            tx.append([float(r.loc[a, "offense"]), float(r.loc[h, "defense"]), 0.0])
-            ty.append(float(x.away_score))
+    for fs in seasons:
+        try:
+            pbp = _pbp_two(fs)          # same inputs the live ratings get
+            qp = load_qb_plays(range(fs - 3, fs + 1))
+        except (Exception, SystemExit) as e:
+            print(f"warning: calibration skipped {fs} ({e})", file=sys.stderr)
+            continue
+        g = gall[(gall.season == fs) & (gall.game_type == "REG")]
+        g = g.dropna(subset=["home_score", "away_score"])
+        if g.empty:
+            continue
+        try:
+            dd = load_injury_discount_team_week([fs])
+            didx = dd.set_index(["season", "week", "team_abbr"])["discount"].to_dict()
+        except Exception:
+            didx = {}
+        cur = pbp[(pbp.season == fs) & (pbp.season_type == "REG")]
+        maxwk = int(cur.week.max())
+        for w in range(FIRST_FIT_WEEK, maxwk + 1):
+            r, _ = build_ratings_qb(pbp, qp, fs, w, CONFIG, week_starters(g, w))
+            for _, x in g[g.week == w].iterrows():
+                if x.home_team not in r.index or x.away_team not in r.index:
+                    continue
+                # neutral-site games (London, Germany, Brazil...) have no home
+                # field, so they'd only muddy the home-field fit
+                if str(x.get("location", "Home")) == "Neutral":
+                    continue
+                h, a = x.home_team, x.away_team
+                inj = didx.get((fs, w, a), 0.0) - didx.get((fs, w, h), 0.0)
+                raw.append(float(r.loc[h, "rating"] - r.loc[a, "rating"])
+                           + CONFIG["injury_weight"] * inj)
+                act.append(float(x.home_score - x.away_score))
+                tx.append([float(r.loc[h, "offense"]), float(r.loc[a, "defense"]), 1.0])
+                ty.append(float(x.home_score))
+                tx.append([float(r.loc[a, "offense"]), float(r.loc[h, "defense"]), 0.0])
+                ty.append(float(x.away_score))
+        del pbp
     if len(raw) < 50:
         return None
     b = np.polyfit(np.array(raw), np.array(act), 1)
@@ -283,7 +347,30 @@ def build(season, cache_dir=None, prev_path=None):
     # week 1 that is last season alone, at prior-season weight -- the same
     # ordering, just scaled, as carrying last season's final ratings forward.
     pbp = _pbp_two(season)
-    ratings = build_ratings(pbp, season, played_through + 1, CONFIG)
+    qp = load_qb_plays(range(season - 3, season + 1))
+    # Each team's rating includes its quarterback for the next game: whoever
+    # started last, unless ESPN has him Out or Doubtful (then the next passer
+    # up, or a replacement-level one). See power_ratings.qb_adjust().
+    try:
+        espn_rows = espn_injury_rows() if len(played) < len(g) else []
+    except Exception:
+        espn_rows = []
+    def _starters(qb):
+        st = {}
+        # nflverse lists the expected starter for a team's next game when known
+        for _, u in g[g.home_score.isna()].sort_values("week").iterrows():
+            for tm, q in ((u.home_team, u.get("home_qb_id")), (u.away_team, u.get("away_qb_id"))):
+                if tm not in st and isinstance(q, str) and q:
+                    st[tm] = q
+        nxt = {}
+        for _, u in g[g.home_score.isna()].sort_values("week").iterrows():
+            nxt.setdefault(u.home_team, u.get("home_qb_id")); nxt.setdefault(u.away_team, u.get("away_qb_id"))
+        st = {tm: q for tm, q in st.items() if nxt.get(tm) == q}      # only the NEXT game's listing
+        qb2 = dict(qb, recent={**qb["recent"], **st})
+        st.update(expected_starters(qb2, espn_rows))
+        return st
+
+    ratings, qb_now = build_ratings_qb(pbp, qp, season, played_through + 1, CONFIG, _starters)
 
     ratings = ratings.copy()
     ratings["rating_rank"] = ratings.rating.rank(ascending=False).astype(int)
@@ -297,6 +384,9 @@ def build(season, cache_dir=None, prev_path=None):
                      "def_pass", "def_rush", "special")}
         teams[t].update({k: int(row[k]) for k in
                          ("rating_rank", "off_rank", "def_rank")})
+        # quarterback folded into rating / offense / off_pass above
+        teams[t]["qb"] = row["qb_name"] if isinstance(row["qb_name"], str) else None
+        teams[t]["qb_adj"] = _n(row["qb_adj"])
 
     # --- calibration from a COMPLETED season -------------------------
     # Always calibrate on the PRIOR season. Fitting on the season being
@@ -311,7 +401,7 @@ def build(season, cache_dir=None, prev_path=None):
     else:
         scale, hfa, nfit, pts_coef = 1.0, 1.6, 0, None
     print(f"calibration: scale={scale:.3f} hfa={hfa:+.2f} "
-          f"(fit on {fit_season}, n={nfit})", file=sys.stderr)
+          f"(fit on the {CALIB_SEASONS} seasons through {fit_season}, n={nfit})", file=sys.stderr)
 
     # --- starter-availability (injury) discount, per game/week ---------
     # Free nflverse injury reports + snap counts, same pipeline as
@@ -374,7 +464,8 @@ def build(season, cache_dir=None, prev_path=None):
     if played_through:
         for w in range(1, played_through + 1):
             try:
-                wk_ratings[w] = build_ratings(pbp, season, w, CONFIG)
+                wk_ratings[w] = build_ratings_qb(pbp, qp, season, w, CONFIG,
+                                                 week_starters(g, w))[0]
             except Exception as e:
                 print(f"warning: week {w} pre-game ratings failed ({e}); "
                       f"using current ratings for it", file=sys.stderr)
@@ -435,11 +526,16 @@ def build(season, cache_dir=None, prev_path=None):
             "inj_away": _n(inj_away, 2),
             "inj_adj": _n(inj_adj, 2),
             "inj_src": inj_src,
+            # the quarterbacks the projection assumed (None before any data)
+            "qb_home": (R.loc[h, "qb_name"] if h in R.index and isinstance(R.loc[h, "qb_name"], str) else None),
+            "qb_away": (R.loc[a, "qb_name"] if a in R.index and isinstance(R.loc[a, "qb_name"], str) else None),
         }
         if not pd.isna(x.home_score):
             # freeze what the board showed before kickoff (module docstring)
             p0 = prev.get(x.game_id)
-            if p0 and (p0.get("frz") or "margin" not in p0) and p0.get("proj") is not None:
+            # (2026-11-09: any earlier number is kept, frozen or not, so a
+            # formula change never rewrites what past games were projected at)
+            if p0 and p0.get("proj") is not None:
                 for k in ("proj", "ptot", "inj_home", "inj_away", "inj_adj", "inj_src"):
                     rec[k] = p0.get(k)
                 rec["frz"] = 1
@@ -455,7 +551,7 @@ def build(season, cache_dir=None, prev_path=None):
         "season": season,
         "through_week": played_through,
         "calibration": {"scale": round(scale, 4), "hfa": round(hfa, 3),
-                        "fit_season": int(fit_season), "n": nfit,
+                        "fit_season": int(fit_season), "fit_seasons": CALIB_SEASONS, "n": nfit,
                         "pts_coef": [round(v, 4) for v in pts_coef] if pts_coef else None},
         "teams": teams,
         "games": games,
