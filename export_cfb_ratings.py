@@ -401,6 +401,22 @@ def build(season):
                 rec[me]["cw" if won else "cl"] += 1
             rec[me]["opp"].append(op)
     net_all = T["net"]
+    # Resume ("earned"): wins minus the wins a top-10-calibre team (the average
+    # of the teams ranked 8-12) would expect against the same games at the same
+    # sites. Power says how good a team is; this says what its record has
+    # earned. A 6-3 team can be #6 by power and #20 by resume.
+    _top = fbs.sort_values("net", ascending=False)["net"]
+    bench = float(_top.iloc[7:12].mean()) if len(_top) >= 12 else float(_top.mean())
+    res = {t: 0.0 for t in fbs.index}
+    for g in games:
+        if "hs" not in g:
+            continue
+        for me, op, sgn in ((g["home"], g["away"], 1), (g["away"], g["home"], -1)):
+            if me not in res:
+                continue
+            h = 0.0 if g.get("neutral") else sgn * cfg["hfa"]
+            p = _phi((bench - float(net_all.get(op, 0.0)) + h) / cfg["sd_margin"])
+            res[me] += (1.0 if (g["hs"] > g["as_"]) == (sgn == 1) else 0.0) - p
     trend = {t: [] for t in fbs.index}
     for wk in played_wks[1:] + [through + 1]:
         mt = (fits.get(wk) or cur)["teams"].set_index("team")
@@ -430,7 +446,7 @@ def build(season):
             rank=int(r["rank"]), off=round(float(r.off), 1), deff=round(float(-r["def"]), 1),
             net=round(float(r.net), 1), off_rank=int(r.off_rank), def_rank=int(r.def_rank),
             w=rec[t]["w"], l=rec[t]["l"], cw=rec[t]["cw"], cl=rec[t]["cl"],
-            sos=round(sos, 1), rsos=round(rsos, 1), trend=trend[t],
+            sos=round(sos, 1), rsos=round(rsos, 1), res=round(res[t], 2), trend=trend[t],
             scar=round(float(T.loc[t, "scar"]), 2) if "scar" in T.columns else 0.0,
             exp_w=round(s.get("exp_w", 0), 1), exp_l=round(s.get("exp_l", 0), 1),
             reach=round(s.get("reach", 0), 4), win=round(s.get("win", 0), 4),
@@ -442,6 +458,8 @@ def build(season):
             t["conf_rank"] = i + 1
     for t in teams:
         t["sos_rank"] = 1 + sum(1 for o in teams if o["sos"] > t["sos"])
+    for i, t in enumerate(sorted(teams, key=lambda x: (-x["res"], -x["net"]))):
+        t["res_rank"] = i + 1
 
     confs = []
     for c, tg in sim.get("_title", {}).items():
