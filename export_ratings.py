@@ -48,7 +48,7 @@ def build_export(season, week):
             'def_pass', 'def_rush', 'special']
 
     teams = []
-    for rank, (t, row) in enumerate(r[cols].iterrows(), start=1):
+    for rank, (t, row) in enumerate(r.iterrows(), start=1):
         entry = {'team': t, 'rank': rank}
         entry.update({c: round(float(row[c]), 2) for c in cols})
         entry['qb'] = row['qb_name'] if isinstance(row['qb_name'], str) else None
