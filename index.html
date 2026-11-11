@@ -805,6 +805,7 @@ async function load(){
   document.getElementById('setBudget').value=S.budget;
   document.getElementById('setAutoGrade').checked=S.autoGrade!==false;
   if(S.importUrl) document.getElementById('impUrl').value=S.importUrl;
+  try{ applyWx(); }catch(e){}
   try{ if(S.look)setLook(S.look); else S.look=lookNow(); }catch(e){}
   renderAll();
   setTimeout(()=>{ try{ loadPolls(); }catch(e){} },1500);
@@ -1436,6 +1437,7 @@ function kickMs(lg,g){
   }catch(e){ return null; }
 }
 function takeSnaps(){
+  try{ applyWx(); }catch(e){}
   try{
     const iso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
     S.snap=S.snap||{};
@@ -2452,7 +2454,7 @@ function nflSideNote(g){
   const erf=x=>{const t=1/(1+0.3275911*Math.abs(x)),y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);return x>=0?y:-y;};
   const ph=0.5*(1+erf(g.proj/13/Math.SQRT2));
   const fav=ph>=0.5?g.home:g.away, wp=Math.max(ph,1-ph);
-  const tot=g.ptot!=null?` · model total ${g.ptot.toFixed(1)}${g.total!=null?` (line ${g.total})`:''}`:'';
+  const tot=g.ptot!=null?` · model total ${g.ptot.toFixed(1)}${wxPtsTxt(g)}${g.total!=null?` (line ${g.total})`:''}`:'';
   const edge=g.spread!=null?g.proj-g.spread:null;
   // injury adjustment: points it moved the projection (home perspective)
   const ia=g.inj_adj!=null?+g.inj_adj:null;
@@ -2589,8 +2591,8 @@ function cfbMatchup(g,e,upsetsOnly,input){
           <div class="stat"><div class="n" style="font-size:15px;${gradeStyle(cfbGrades(g).line)}">${cfbSpr(g,g.pem)}</div><div class="l">Model</div></div>
           <div class="stat" style="background:${hot}"><div class="n">${e?e.edge.toFixed(1):'—'}</div><div class="l">Edge</div></div>
         </div>
-        ${e&&e.pickTeam?cfbLeanNote(e,` · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${g.line_total!=null?` (line ${g.line_total})`:''}`)
-          :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}</div>`}
+        ${e&&e.pickTeam?cfbLeanNote(e,` · ${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${wxPtsTxt(g)}${g.line_total!=null?` (line ${g.line_total})`:''}`)
+          :`<div class="note" style="margin:6px 0 0">${esc(cfbAb(wpFav))} wins ${pct1(wpv)} · model total ${g.pem_total}${wxPtsTxt(g)}</div>`}
         ${(()=>{const w=g.hs==null?wxFor('cfb',g.id):null; const t=wxLine(w); return t?`<div class="note" style="margin:4px 0 0">${esc(t)}${w&&w.flags&&w.flags.length?` · <b>${esc(wxTag(w))}</b>`:''}</div>`:'';})()}
         ${cfbPoints(g)}
         ${played?`<div class="note" style="margin:4px 0 0">Final ${esc(cfbAb(g.away))} ${g.as_} – ${esc(cfbAb(g.home))} ${g.hs}${g.ats?` · model side ${g.ats==='W'?'covered':(g.ats==='L'?'lost':'pushed')}`:''}${(!g.ats&&e&&e.pick)?` · model side ${cfbCover(g,e)}`:''}</div>`:''}
@@ -2798,7 +2800,7 @@ function mergeImport(raw){
     return;
   }
   if(data&&data.kind==='weather'){
-    S.wx=data; save(); renderAll();
+    S.wx=data; applyWx(); takeSnaps(); save(); renderAll();
     const nf=Object.values(data.nfl||{}).filter(x=>x.flags&&x.flags.length).length;
     impSay(`Weather forecast ${String(data.generated||'').slice(5,16).replace('T',' ')} UTC: ${nf} NFL game${nf===1?'':'s'} flagged for the weather under.`);
     return;
@@ -3702,7 +3704,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-10 13:15 UTC';
+const BUILD_STAMP='2026-11-11 13:30 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4377,9 +4379,33 @@ function addGameForm(){
 /* ---------------- weather (weather-YYYY.json, built by weather.py) ----------------
    Forecast over each outdoor game's window. NFL outdoor games with rain/snow
    or 15+ mph wind went under the closing total 190-135 (58.5%) in
-   2016-2025 — books shade totals for weather, just not enough. College is
-   shown for information until its own backtest is in. */
+   2016-2025 — books shade totals for weather, just not enough. Since
+   2026-11-11 the forecast also carries points (applyWx, below), which go
+   into the NFL and college model totals. */
 function wxFor(lg,id){ const w=S.wx&&S.wx[lg]; return w?w[String(id)]||null:null; }
+/* Weather in POINTS (weather.py weather_points, 2026-11-11). Our model totals
+   know nothing about weather, so the forecast's pts is added to them here:
+   NFL rain (0.05"+ during the game) has cost about 6 points vs normal, and
+   the closing total only came down ~1.4 -- those games landed 4.8 under it,
+   31-17 since 2016. Wind 25+ mph costs more; 15-25 the line already prices.
+   College rain about 2.5. Rain counts in proportion to its chance.
+   The raw number is kept (ptot_nowx / pem_total_nowx), so this can be
+   re-applied every time a games, ratings or weather file lands. A game
+   that has kicked off drops out of the weather file and keeps its last
+   adjustment. */
+function applyWx(){
+  const one=(g,lg,fld)=>{
+    if(g[fld]==null)return;
+    const raw=fld+'_nowx';
+    if(g[raw]==null)g[raw]=g[fld];
+    const w=wxFor(lg,g.id);
+    if(w&&!w.unknown&&!w.neutral)g.wxpts=w.pts!=null?+w.pts:0;
+    g[fld]=Math.round((g[raw]+(g.wxpts||0))*10)/10;
+  };
+  ((S.games&&S.games.games)||[]).forEach(g=>{ if(!('margin' in g))one(g,'nfl','ptot'); });
+  ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>{ if(g.hs==null)one(g,'cfb','pem_total'); });
+}
+const wxPtsTxt=g=>g&&g.wxpts!=null&&Math.abs(g.wxpts)>=0.5?` incl. weather ${g.wxpts>0?'+':''}${(+g.wxpts).toFixed(1)}`:'';
 function wxLine(w){
   if(!w)return '';
   if(w.indoor)return 'Indoors — weather not a factor';
@@ -4388,17 +4414,19 @@ function wxLine(w){
   if((w.snow||0)>0)bits.push(`snow ${w.snow}"`);
   else if((w.precip||0)>=0.01||(w.pop||0)>=30)bits.push(`${w.pop!=null?w.pop+'% ':''}rain${w.precip>=0.01?` (${w.precip}")`:''}`);
   if(w.temp!=null)bits.push(`${Math.round(w.temp)}°F`);
+  if(w.pts!=null&&w.pts<=-0.5)bits.push(`weather ${(+w.pts).toFixed(1)} pts on the total${w.pass_pct&&w.pass_pct<=-5?`, passing ${w.pass_pct}%`:''}`);
   return 'Forecast: '+bits.join(' · ');
 }
 const wxTag=w=>w&&w.flags&&w.flags.length?w.flags.map(f=>f==='wind'?'WIND':(f==='snow'?'SNOW':'RAIN')).join(' + '):'';
 function weatherUndersBlock(games){
   if(!S.wx||!S.wx.nfl)return '';
-  const fl=games.filter(g=>!('margin' in g)).map(g=>({g,w:wxFor('nfl',g.id)})).filter(x=>x.w&&x.w.flags&&x.w.flags.length);
+  const fl=games.filter(g=>!('margin' in g)).map(g=>({g,w:wxFor('nfl',g.id)})).filter(x=>x.w&&x.w.flags&&x.w.flags.length)
+    .sort((a,b)=>((a.w.pts!=null?a.w.pts:0)-(b.w.pts!=null?b.w.pts:0)));
   const gen=String(S.wx.generated||'').slice(5,16).replace('T',' ');
   let h=`<div class="pblock"><div class="pbh" style="background:var(--hl-fade);color:#0B1418">Weather unders · ${fl.length} game${fl.length===1?'':'s'}</div><div class="pbody">
-    <div class="note" style="margin:0 0 ${fl.length?8:0}px">Outdoor games forecast for rain/snow or 15+ mph wind. Since 2016 these went <b>190-135 to the under (58.5%)</b>, landing 2.3 pts under the closing total. Forecasts change — the flag refreshes with each data build (last ${esc(gen)} UTC).${fl.length?'':' Nothing flagged this week.'}</div>`;
+    <div class="note" style="margin:0 0 ${fl.length?8:0}px">Outdoor games forecast for rain/snow or 15+ mph wind, worst first. <b>Rain is the big one</b>: NFL games with 0.05"+ during the game scored about 6 pts below normal, the closing total only came down ~1.4, and they went <b>31-17 to the under</b>, 4.8 pts under the close (2016-25). Wind 25+ mph is similar; 15-25 mph the book mostly prices (54% under). <b>STRONG</b> = likely rain or 25+ mph; the points are already in our model total. Forecasts change — the flag refreshes with each data build (last ${esc(gen)} UTC).${fl.length?'':' Nothing flagged this week.'}</div>`;
   fl.forEach(({g,w})=>{
-    h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(g.away)} @ ${esc(g.home)}</b> · ${esc(wxTag(w))}<br><span style="color:var(--ink-soft);font-size:11px">${esc(wxLine(w))}</span></span>
+    h+=`<div class="tline"><span class="k" style="letter-spacing:.04em;text-transform:none;font-size:12px;color:var(--ink)"><b>${esc(g.away)} @ ${esc(g.home)}</b> · ${esc(wxTag(w))}${w.grade==='strong'?' · <b>STRONG</b>':''}${w.pts!=null&&w.pts<=-0.5?` · ${(+w.pts).toFixed(1)} pts`:''}<br><span style="color:var(--ink-soft);font-size:11px">${esc(wxLine(w))}</span></span>
       <span class="v" style="white-space:nowrap;margin-left:8px">${g.total!=null?'U '+g.total.toFixed(1):'—'}</span></div>`;
   });
   return h+`</div></div>`;
@@ -4815,7 +4843,10 @@ function nflTotalQualifiers(games){
     const ln=nflLines(g), tl=ln&&ln.total;
     const book=(tl&&tl.line!=null)?+tl.line:(g.total!=null?+g.total:null); if(book==null)return;
     const w=S.wx&&S.wx.nfl?wxFor('nfl',g.id):null;
-    const windy=!!(w&&w.flags&&w.flags.length);
+    // automatic under only for STRONG weather (likely rain, 25+ mph); milder
+    // weather is already in g.ptot via applyWx, so the model gap covers it.
+    // Files from before 2026-11-11 have no grade: fall back to the old flag.
+    const windy=!!(w&&w.flags&&w.flags.length&&(w.grade==null||w.grade==='strong'));
     const gap=g.ptot!=null?g.ptot-book:null;
     const big=gap!=null&&Math.abs(gap)>=5;
     if(!windy&&!big)return;
@@ -5059,10 +5090,14 @@ function todayCandidates(){
   const sched=g=>((S.games&&S.games.games)||[]).find(x=>nick(x.home)===nick(g.home)&&nick(x.away)===nick(g.away)&&Math.abs(Date.parse(String(x.date).slice(0,10)+'T18:00:00Z')-Date.parse(g.start))<2.5*864e5)||null;
   const gameOf={};
   nflGames.forEach(g=>{ const sg=sched(g); gameOf[g.home]=gameOf[g.away]={g,sg}; });
+  // rain or big wind: passing drops ~16% (2016-25), so passing-TD, catch and
+  // longest-catch OVERS are left off the list in those games
+  const wetPass=team=>{ const sg=(gameOf[team]||{}).sg, w=sg?wxFor('nfl',sg.id):null; return !!(w&&w.pass_pct!=null&&w.pass_pct<=-10); };
   // ---- NFL props from the Props board
   try{
     propBoard().forEach(r=>{
       if(r.ns||r.wild||r.outlier||r.pb<0.05)return;
+      if(r.mk==='ptd'&&r.side==='over'&&wetPass(r.gh))return;
       const t=Date.parse(r.start||''); if(isNaN(t)||t<=now||_etDay(t)!==day)return;
       const lab=PMK[r.mk].label, sideTxt=r.mk==='td'&&r.side==='over'&&Math.abs(r.line-0.5)<0.01?'':` ${r.side} ${r.line}`;
       const c=_cand({kind:'prop',who:r.E.name,team:r.E.team,mk:r.mk,line:r.line,side:r.side,odds:r.price,book:r.book,p:r.pb,fair:r.pf,
@@ -5080,6 +5115,7 @@ function todayCandidates(){
       ['rec','lng'].forEach(mk=>{
         (byM[mk]||[]).forEach(x=>{
           const side=x.side==='under'?'under':'over';
+          if(side==='over'&&wetPass(pl.team))return;
           const mq=marketProb(pid,mk,x.line,side,x.odds); if(!mq)return;
           const G=gameOf[pl.team].g, t=Date.parse(G.start);
           const c=_cand({kind:'prop',who:pl.name,team:pl.team,mk,line:x.line,side,odds:x.odds,book:x.book,p:mq.prob,fair:mq.q,
@@ -5332,7 +5368,7 @@ function nflTiles(g,line,nflGrade,fw){
       <button class="btn ghost" data-parlay="${esc(g.id)}" style="width:auto;margin-left:auto;padding:6px 12px;font-size:12px;border-radius:999px">+ Slip</button></div>
     <button class="tiles" data-pred="${esc(g.id)}" aria-expanded="${open}">
       ${tile('Spread',`<span style="${gs}">${line}</span>`,sideTxt?`<span style="color:var(--acc-text)">model ${sideTxt}</span>`:'model: no edge')}
-      ${tile('Total',g.total!=null?g.total.toFixed(1):'—',g.ptot!=null?`model ${g.ptot.toFixed(1)} <span style="color:${tg.c}">${tg.t}</span>`:null)}
+      ${tile('Total',g.total!=null?g.total.toFixed(1):'—',g.ptot!=null?`model ${g.ptot.toFixed(1)}${g.wxpts!=null&&Math.abs(g.wxpts)>=0.5?` <small>(wx ${(+g.wxpts).toFixed(1)})</small>`:''} <span style="color:${tg.c}">${tg.t}</span>`:null)}
       ${tile(`${esc(g.away)} points`,pts(mA,bk.a),`<span style="color:${ag.c}">${ag.t} vs book</span>`)}
       ${tile(`${esc(g.home)} points`,pts(mH,bk.h),`<span style="color:${hg.c}">${hg.t} vs book</span>`)}
       ${tile('Win chance',`${esc(wfav)} ${Math.round(wp*100)}%`,null,`<div class="bar"><i style="width:${Math.round(wp*100)}%"></i></div>`)}

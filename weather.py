@@ -20,6 +20,13 @@ WHY THIS ANGLE
   test used the wind measured at kickoff; this module re-checks it with
   Open-Meteo, the same source the live forecast uses.)
 
+POINTS (2026-11-11)
+  Each forecast game also gets `pts` (points weather takes off the total,
+  rain weighted by its chance), `p_rain`, `pass_pct` (expected change in
+  each team's passing yards) and `grade` (strong / mild). See
+  weather_points() for the numbers behind them. The app adds `pts` to our
+  model totals, which otherwise ignore weather.
+
 THRESHOLDS
   WIND    max sustained wind (10 m) over the game window >= 15 mph
   PRECIP  backtest: >= 0.05 in of rain, or any snow, during the game window
@@ -152,6 +159,63 @@ def window(frame, kickoff):
     return out
 
 
+# --------------------------------------------------------------------------
+# weather in POINTS (2026-11-11)
+# --------------------------------------------------------------------------
+# How much weather takes off a game's total, for a model that knows nothing
+# about weather (ours). Measured at the nearest airport for every outdoor
+# game, 2016-2025 NFL (1,500 games) and 2021-2025 FBS (3,312), against each
+# game's no-weather expectation:
+#   NFL rain >= 0.05 in during the game, wind under 15: 6.1 pts below normal
+#       (48 games). The closing total only came down 1.4, so these finished
+#       4.8 under it, 31-17. Used here at 5.0 -- trimmed for the small sample.
+#   NFL wind, dry: 15-20 mph -1.0, 20-25 -2.7, 25+ -9.0 (20 games) vs normal;
+#       the line prices 15-25 mph about right, not 25+.
+#   NFL snow: nothing without wind; snow WITH 15+ mph wind -7.7 vs normal.
+#   FBS rain >= 0.05: 2.6 below our model, line shades 0.7, 49-34 under.
+#   FBS wind: no steady effect (15-20 -2.0, 20-25 -0.4, 25+ +1.6), so none.
+#   Passing per team in NFL rain: -16% yards, -2.8 completions; rushing +11
+#   yds, +2.7 carries. Wind 20+: passing -12%.
+# Forecasts aren't certain, so rain counts in proportion to its chance.
+RAIN_PTS = {"nfl": -5.0, "cfb": -2.5}
+WIND_PTS_NFL = ([12, 17, 22, 27, 32], [0.0, -1.0, -2.5, -6.0, -8.0])
+PASS_RAIN = -0.16
+PASS_WIND = ([12, 17, 22, 27], [0.0, -0.03, -0.12, -0.15])
+
+
+def rain_chance(wx, forecast=False):
+    """Chance the game gets 0.05+ in of rain (or snow with 15+ mph wind)."""
+    if not wx:
+        return 0.0
+    if (wx.get("snow") or 0) > 0:
+        return 1.0 if wx["wind"] >= WIND_MPH else 0.0
+    pr = wx.get("precip") or 0.0
+    if not forecast:
+        return 1.0 if pr >= PRECIP_IN else 0.0
+    p = max((wx.get("pop") or 0) / 100.0, min(1.0, pr / 0.10))
+    return round(p, 2) if p >= 0.25 else 0.0
+
+
+def _blend(a, b):
+    """Rain and wind don't simply stack: the bigger one, plus half the other."""
+    lo, hi = min(a, b), max(a, b)
+    return lo + 0.5 * hi
+
+
+def weather_points(wx, lg="nfl", forecast=False):
+    """-> dict(pts, p_rain, pass_pct, grade) or None."""
+    if not wx:
+        return None
+    p = rain_chance(wx, forecast)
+    rain = RAIN_PTS[lg] * p
+    wind = float(np.interp(wx["wind"], *WIND_PTS_NFL)) if lg == "nfl" else 0.0
+    pss = _blend(PASS_RAIN * p, float(np.interp(wx["wind"], *PASS_WIND))) if lg == "nfl" else PASS_RAIN * 0.5 * p
+    strong = p >= 0.6 or (lg == "nfl" and wx["wind"] >= 25)
+    mild = p >= 0.3 or (lg == "nfl" and wx["wind"] >= WIND_MPH)
+    return dict(pts=round(_blend(rain, wind), 1) + 0.0, p_rain=p, pass_pct=round(100 * pss) + 0,
+                grade="strong" if strong else ("mild" if mild else ""))
+
+
 def flags(wx, forecast=False):
     if not wx:
         return []
@@ -207,6 +271,7 @@ def forecast(season, days=8):
     out = {"kind": "weather", "season": int(season),
            "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
            "thresholds": dict(wind_mph=WIND_MPH, precip_in=PRECIP_IN, pop_pct=POP_PCT),
+           "points": dict(rain=RAIN_PTS, wind_nfl=[list(WIND_PTS_NFL[0]), list(WIND_PTS_NFL[1])]),
            "nfl": {}, "cfb": {}}
 
     # NFL
@@ -221,6 +286,7 @@ def forecast(season, days=8):
         wx = window(fr, r.kick)
         if wx:
             wx["flags"] = flags(wx, forecast=True)
+            wx.update(weather_points(wx, "nfl", forecast=True))
             wx["kick"] = r.kick.strftime("%Y-%m-%dT%H:%MZ")
             out["nfl"][r.game_id] = wx
     for r, v in rows:
@@ -258,6 +324,7 @@ def forecast(season, days=8):
         wx = window(fr, kick)
         if wx:
             wx["flags"] = flags(wx, forecast=True)
+            wx.update(weather_points(wx, "cfb", forecast=True))
             out["cfb"][gid] = wx
     nf = sum(1 for x in out["nfl"].values() if x.get("flags"))
     cf = sum(1 for x in out["cfb"].values() if x.get("flags"))
