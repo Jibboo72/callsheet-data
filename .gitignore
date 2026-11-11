@@ -2,3 +2,6 @@ experts/out/
 experts/__pycache__/
 __pycache__/
 cache/
+
+# play-by-play downloads cached by local runs of the export scripts
+/pbp*.parquet
