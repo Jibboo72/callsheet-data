@@ -34,15 +34,20 @@ def build_export(season, week):
         pbp = load_pbp([season - 1, season])
     except Exception:
         pbp = load_pbp([season])
-    # ratings include each team's quarterback for its next game -- the same
-    # expected-starter rule export_games.py uses, so the two files agree
-    from export_games import expected_starters, espn_injury_rows
+    # ratings include each team's quarterback for its next game -- the SAME
+    # rule export_games.py uses (next_game_starters), so the Power table and
+    # the Sides numbers agree. Until 2026-11-11 this file only used the ESPN
+    # Out/Doubtful part, so a traded QB (Cousins LV -> MIN) stayed with his
+    # old team here while the Sides projection had already moved him.
+    from export_games import next_game_starters, espn_injury_rows, load_games
     try:
         rows = espn_injury_rows()
     except Exception:
         rows = []
+    g = load_games()
+    g = g[(g.season == season) & (g.game_type == "REG")]
     r, _ = build_ratings_qb(pbp, load_qb_plays(range(season - 3, season + 1)), season, week, CONFIG,
-                            lambda qb: expected_starters(qb, rows))
+                            lambda qb: next_game_starters(g, qb, rows))
 
     cols = ['rating', 'offense', 'defense', 'off_pass', 'off_rush',
             'def_pass', 'def_rush', 'special']

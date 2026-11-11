@@ -272,6 +272,41 @@ def expected_starters(qb, espn_rows=None):
     return out
 
 
+def next_game_starters(g, qb, espn_rows=None):
+    """{team: passer id} for each team's NEXT game. Shared by the Sides
+    projection (export_games) and the Power table (export_ratings) so the two
+    always agree.
+
+      1. nflverse lists the expected starter for upcoming games -- it caught
+         the 2026 deadline trade (Cousins LV -> MIN) a day before its own
+         roster files did. Only a team's very next game counts.
+      2. A team whose last starter is now listed as the next starter for a
+         DIFFERENT team has lost him (trade / release): it falls to its next
+         passer this season, else a replacement-level one.
+      3. ESPN Out / Doubtful moves a team to its next passer
+         (expected_starters).
+    Everyone else keeps whoever started his team's last game."""
+    up = g[g.home_score.isna()].sort_values("week")
+    nxt = {}
+    for _, u in up.iterrows():
+        for tm, q in ((u.home_team, u.get("home_qb_id")), (u.away_team, u.get("away_qb_id"))):
+            nxt.setdefault(tm, q if isinstance(q, str) and q else None)
+    st = {tm: q for tm, q in nxt.items() if q}
+    listed_for = {q: tm for tm, q in st.items()}
+    for tm, cur in qb["recent"].items():
+        if tm in st or not cur:
+            continue
+        other = listed_for.get(cur)
+        if other and other != tm:
+            alts = [q for q in qb["depth"].get(tm, []) if q != cur and listed_for.get(q, tm) == tm]
+            st[tm] = alts[0] if alts else "replacement"
+            print(f"QB: {qb['name'].get(cur, cur)} is now listed for {other}; {tm} -> "
+                  f"{qb['name'].get(st[tm], 'replacement-level passer')}", file=sys.stderr)
+    qb2 = dict(qb, recent={**qb["recent"], **st})
+    st.update(expected_starters(qb2, espn_rows))
+    return st
+
+
 def fit_scale_hfa(season):
     """
     Regress actual margin on the adjusted rating difference (ratings with
@@ -356,19 +391,7 @@ def build(season, cache_dir=None, prev_path=None):
     except Exception:
         espn_rows = []
     def _starters(qb):
-        st = {}
-        # nflverse lists the expected starter for a team's next game when known
-        for _, u in g[g.home_score.isna()].sort_values("week").iterrows():
-            for tm, q in ((u.home_team, u.get("home_qb_id")), (u.away_team, u.get("away_qb_id"))):
-                if tm not in st and isinstance(q, str) and q:
-                    st[tm] = q
-        nxt = {}
-        for _, u in g[g.home_score.isna()].sort_values("week").iterrows():
-            nxt.setdefault(u.home_team, u.get("home_qb_id")); nxt.setdefault(u.away_team, u.get("away_qb_id"))
-        st = {tm: q for tm, q in st.items() if nxt.get(tm) == q}      # only the NEXT game's listing
-        qb2 = dict(qb, recent={**qb["recent"], **st})
-        st.update(expected_starters(qb2, espn_rows))
-        return st
+        return next_game_starters(g, qb, espn_rows)
 
     ratings, qb_now = build_ratings_qb(pbp, qp, season, played_through + 1, CONFIG, _starters)
 

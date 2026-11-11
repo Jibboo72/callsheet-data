@@ -149,6 +149,79 @@ def availability(season, players):
     return out
 
 
+# ESPN's live team rosters (2026-11-11). nflverse's roster files trail real
+# moves by a day or more -- after the 2026 trade deadline they still had
+# Kirk Cousins on the Raiders while he was already the Vikings' listed
+# starter. A wrong team means a wrong game, opponent and pass defense for
+# every prop on that player, so each player's team is checked against ESPN
+# and moved when ESPN has him on exactly one other team.
+ESPN_TEAMS = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams"
+ESPN_ROSTER = ESPN_TEAMS + "/{id}/roster"
+ESPN_ABBR = {"WSH": "WAS", "LAR": "LA"}          # ESPN -> nflverse
+
+
+def _key(name):
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode().lower()
+    s = re.sub(r"[^a-z ]", "", s.replace("-", " "))
+    return " ".join(w for w in s.split() if w not in ("jr", "sr", "ii", "iii", "iv", "v"))
+
+
+def _get_json(url):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "callsheet-data (personal app)"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode())
+
+
+def espn_teams_now():
+    """{name key: {team, ...}} from ESPN's 32 live rosters, or {} if ESPN
+    can't be reached or answers for fewer than 30 teams (a partial read must
+    not move anyone)."""
+    try:
+        lg = _get_json(ESPN_TEAMS)["sports"][0]["leagues"][0]["teams"]
+    except Exception as e:
+        print(f"ESPN team list unavailable ({e}); teams from nflverse only", file=sys.stderr)
+        return {}
+    out, ok = {}, 0
+    for t in lg:
+        t = t.get("team") or {}
+        ab = ESPN_ABBR.get(t.get("abbreviation"), t.get("abbreviation"))
+        try:
+            d = _get_json(ESPN_ROSTER.format(id=t.get("id")))
+        except Exception as e:
+            print(f"ESPN roster {ab} unavailable ({e})", file=sys.stderr)
+            continue
+        ok += 1
+        for grp in d.get("athletes", []):
+            for a in grp.get("items", []):
+                if a.get("fullName"):
+                    out.setdefault(_key(a["fullName"]), set()).add(ab)
+    if ok < 30:
+        print(f"ESPN rosters: only {ok} teams read; not using them", file=sys.stderr)
+        return {}
+    print(f"ESPN rosters: {ok} teams, {len(out)} players", file=sys.stderr)
+    return out
+
+
+def apply_moves(players, espn):
+    """Move players whose ESPN team differs from nflverse's. Sets `team` to
+    ESPN's and `from` to the old team. Returns the list of moves."""
+    moves = []
+    for pid, p in players.items():
+        tms = espn.get(_key(p.get("name", "")))
+        if not tms or len(tms) != 1:
+            continue                                  # not found, or a name on two teams
+        new = next(iter(tms))
+        if p.get("team") and new != p["team"]:
+            moves.append((p["name"], p["team"], new))
+            p["from"], p["team"] = p["team"], new
+    for nm, a, b in moves:
+        print(f"  moved: {nm} {a} -> {b}", file=sys.stderr)
+    return moves
+
+
 def build(season):
     r = pd.read_csv(ROSTER.format(season=season), low_memory=False)
     r = r.dropna(subset=["gsis_id"]).drop_duplicates("gsis_id")
@@ -168,6 +241,9 @@ def build(season):
     av = availability(season, players)
     for gid, fields in av.items():
         players[gid].update(fields)
+    apply_moves(players, espn_teams_now())
+    # a player ESPN just moved isn't on nflverse's injury / snap files for his
+    # new team yet; his old status (ACT / snaps) still describes him
     return {"season": int(season), "kind": "roster",
             "count": len(players), "players": players}
 
