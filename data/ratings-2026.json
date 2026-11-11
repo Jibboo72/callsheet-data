@@ -200,6 +200,20 @@
    "team": "SEA"
   },
   {
+   "def_pass": 6.21,
+   "def_rush": 1.49,
+   "defense": 3.85,
+   "off_pass": -4.9,
+   "off_rush": -2.58,
+   "offense": -3.31,
+   "qb": "K.Cousins",
+   "qb_adj": 0.85,
+   "rank": 15,
+   "rating": 0.65,
+   "special": 0.12,
+   "team": "MIN"
+  },
+  {
    "def_pass": -4.32,
    "def_rush": -1.75,
    "defense": -3.03,
@@ -208,7 +222,7 @@
    "offense": 3.64,
    "qb": "D.Prescott",
    "qb_adj": 0.85,
-   "rank": 15,
+   "rank": 16,
    "rating": 0.55,
    "special": -0.06,
    "team": "DAL"
@@ -222,7 +236,7 @@
    "offense": -1.25,
    "qb": "A.Rodgers",
    "qb_adj": -1.13,
-   "rank": 16,
+   "rank": 17,
    "rating": -0.26,
    "special": 0.0,
    "team": "PIT"
@@ -236,7 +250,7 @@
    "offense": -2.99,
    "qb": "J.McCarthy",
    "qb_adj": -2.0,
-   "rank": 17,
+   "rank": 18,
    "rating": -1.94,
    "special": -0.06,
    "team": "NYG"
@@ -250,24 +264,10 @@
    "offense": -1.52,
    "qb": "M.Penix",
    "qb_adj": -0.66,
-   "rank": 18,
+   "rank": 19,
    "rating": -2.1,
    "special": -0.36,
    "team": "ATL"
-  },
-  {
-   "def_pass": 6.21,
-   "def_rush": 1.49,
-   "defense": 3.85,
-   "off_pass": -7.71,
-   "off_rush": -2.58,
-   "offense": -6.12,
-   "qb": "C.Wentz",
-   "qb_adj": -1.96,
-   "rank": 19,
-   "rating": -2.15,
-   "special": 0.12,
-   "team": "MIN"
   },
   {
    "def_pass": -2.26,
@@ -298,6 +298,20 @@
    "team": "WAS"
   },
   {
+   "def_pass": -1.47,
+   "def_rush": 0.42,
+   "defense": -0.52,
+   "off_pass": -3.39,
+   "off_rush": 0.38,
+   "offense": -2.63,
+   "qb": "T.Huntley",
+   "qb_adj": -2.24,
+   "rank": 22,
+   "rating": -3.27,
+   "special": -0.12,
+   "team": "BAL"
+  },
+  {
    "def_pass": -1.37,
    "def_rush": -0.62,
    "defense": -1.0,
@@ -306,7 +320,7 @@
    "offense": -2.22,
    "qb": "T.Shough",
    "qb_adj": -1.1,
-   "rank": 22,
+   "rank": 23,
    "rating": -3.6,
    "special": -0.38,
    "team": "NO"
@@ -320,7 +334,7 @@
    "offense": -2.09,
    "qb": "G.Minshew",
    "qb_adj": -1.47,
-   "rank": 23,
+   "rank": 24,
    "rating": -3.96,
    "special": -0.19,
    "team": "ARI"
@@ -334,10 +348,24 @@
    "offense": -1.22,
    "qb": "G.Smith",
    "qb_adj": -0.66,
-   "rank": 24,
+   "rank": 25,
    "rating": -4.05,
    "special": 0.22,
    "team": "NYJ"
+  },
+  {
+   "def_pass": 2.79,
+   "def_rush": -1.45,
+   "defense": 0.67,
+   "off_pass": -5.72,
+   "off_rush": -2.53,
+   "offense": -5.0,
+   "qb": "D.Watson",
+   "qb_adj": -1.75,
+   "rank": 26,
+   "rating": -4.26,
+   "special": 0.08,
+   "team": "CLE"
   },
   {
    "def_pass": -0.36,
@@ -348,52 +376,10 @@
    "offense": -3.69,
    "qb": "D.Jones",
    "qb_adj": -1.63,
-   "rank": 25,
+   "rank": 27,
    "rating": -4.39,
    "special": 0.22,
    "team": "IND"
-  },
-  {
-   "def_pass": -1.47,
-   "def_rush": 0.42,
-   "defense": -0.52,
-   "off_pass": -5.22,
-   "off_rush": 0.38,
-   "offense": -4.46,
-   "qb": "J.Fagnano",
-   "qb_adj": -4.07,
-   "rank": 26,
-   "rating": -5.1,
-   "special": -0.12,
-   "team": "BAL"
-  },
-  {
-   "def_pass": -5.34,
-   "def_rush": -1.55,
-   "defense": -3.45,
-   "off_pass": 0.56,
-   "off_rush": -4.26,
-   "offense": -1.87,
-   "qb": "K.Cousins",
-   "qb_adj": -0.03,
-   "rank": 27,
-   "rating": -5.15,
-   "special": 0.16,
-   "team": "LV"
-  },
-  {
-   "def_pass": 2.79,
-   "def_rush": -1.45,
-   "defense": 0.67,
-   "off_pass": -7.15,
-   "off_rush": -2.53,
-   "offense": -6.44,
-   "qb": "S.Sanders",
-   "qb_adj": -3.19,
-   "rank": 28,
-   "rating": -5.69,
-   "special": 0.08,
-   "team": "CLE"
   },
   {
    "def_pass": 0.09,
@@ -404,7 +390,7 @@
    "offense": -6.84,
    "qb": "J.Herbert",
    "qb_adj": -1.21,
-   "rank": 29,
+   "rank": 28,
    "rating": -6.76,
    "special": -0.06,
    "team": "LAC"
@@ -418,7 +404,7 @@
    "offense": -3.28,
    "qb": "M.Willis",
    "qb_adj": -1.43,
-   "rank": 30,
+   "rank": 29,
    "rating": -6.8,
    "special": -0.22,
    "team": "MIA"
@@ -432,7 +418,7 @@
    "offense": -4.56,
    "qb": "C.Ward",
    "qb_adj": -2.34,
-   "rank": 31,
+   "rank": 30,
    "rating": -7.73,
    "special": -0.13,
    "team": "TEN"
@@ -446,10 +432,24 @@
    "offense": -7.3,
    "qb": "J.Milton",
    "qb_adj": -2.72,
-   "rank": 32,
+   "rank": 31,
    "rating": -7.76,
    "special": 0.06,
    "team": "PHI"
+  },
+  {
+   "def_pass": -5.34,
+   "def_rush": -1.55,
+   "defense": -3.45,
+   "off_pass": -2.54,
+   "off_rush": -4.26,
+   "offense": -4.96,
+   "qb": "F.Mendoza",
+   "qb_adj": -3.12,
+   "rank": 32,
+   "rating": -8.24,
+   "special": 0.16,
+   "team": "LV"
   }
  ],
  "through_week": 10
