@@ -1754,6 +1754,25 @@ function tdCal(p,side){
   return side==='under'?1-q:q;
 }
 const noSkill=(mk,side)=>mk==='lrush'||(mk==='car'&&side==='under');
+/* Game script (2026-11-11). Teams that fall behind stop running and throw:
+   down 14+ at the half they average 23 second-half passes and 10 runs; up
+   14+ it is 12 passes and 17 runs (2016-25). In this season's saved picks,
+   rush-attempt UNDERS on underdogs of 3+ went 23-5 while the same bet on
+   favorites went 14-16; pass-TD unders 19-10 vs 13-11. Small samples, so
+   every rush-attempt / pass-TD under is tagged by its team's spread and
+   tracked on Props > Tracker > Game script before anything is sized up.
+   The one rule change: a rush-attempt under on an underdog is listed again
+   (it was hidden with the other no-skill unders), capped at tier B. */
+const SCRIPT_PTS=3, SCRIPT_MK={car:1,ptd:1};
+function scriptOf(gid,team){
+  const g=((S.games&&S.games.games)||[]).find(x=>x.id===gid);
+  if(!g||g.spread==null||!team)return '';
+  const f=g.home===team?+g.spread:(g.away===team?-g.spread:null);   // + = this team favored
+  if(f==null)return '';
+  return f<=-SCRIPT_PTS?'dog':(f>=SCRIPT_PTS?'fav':'even');
+}
+const scriptTxt=(mk,sc)=>sc==='dog'?(mk==='car'?'underdog — trailing teams run less':'underdog — pass-TD unders have held up')
+  :(sc==='fav'?(mk==='car'?'favorite — leaders keep running, this under has lost':'favorite — no script help'):'');
 const PMK_ORDER=['td','ptd','car','lrush','cyd'];
 const sfxStrip=s=>String(s||'').replace(/(jr|sr|iii|ii|iv)$/,'');
 
@@ -1838,17 +1857,19 @@ function propBoard(){
       const outlier=bi.length>=2&&imp<0.7*med;
       let tier='';
       const floor=mk==='td'?0.15:0.25;                  // no tiers on long shots
-      const ns=noSkill(mk,pr.side), wild=Math.abs(gap)>WILD_GAP;
+      const script=(SCRIPT_MK[mk]&&pr.side==='under')?scriptOf(E.gid,E.team):'';
+      const ns=noSkill(mk,pr.side)&&!(mk==='car'&&script==='dog'), wild=Math.abs(gap)>WILD_GAP;
       if(!outlier&&!ns&&!wild&&pb>=floor){
         if(hasFair&&Math.abs(gap)<=0.12&&n>=4&&ev>=0.05&&pm>imp&&pf>=imp)tier='A';
         else if(Math.abs(gap)<=0.15&&n>=3&&ev>=0.02&&pm>imp)tier='B';
+        if(tier==='A'&&mk==='car'&&pr.side==='under')tier='B';        // script picks: tracked first, not top tier
       }
       const id=E.pid+'|'+mk+'|'+pr.side+'|'+line;
       // value score = Kelly fraction: edge per dollar you could win. Raw EV %
       // ranks every +1500 long shot first (1 point of chance = 15% EV there);
       // this ranks by how much of the bankroll the edge is actually worth.
       const kelly=ev/(dec-1);
-      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pm0,pf,pb,ev,kelly,gap,tier,hasFair,outlier,ns,wild,longshot:pf<TD_LONG,start:g.start,gh:g.home,ga:g.away};
+      const row={E,mk,side:pr.side,line,price,book:bk.book,dec,imp,pm,pm0,pf,pb,ev,kelly,gap,tier,hasFair,outlier,ns,wild,script,longshot:pf<TD_LONG,start:g.start,gh:g.home,ga:g.away};
       if(!best[id]||row.ev>best[id].ev)best[id]=row;
     });
   });
@@ -1940,10 +1961,15 @@ function takePropSnaps(){
       S.propLog[k]={k,list,gid:r.E.gid,wk:Number(String(r.E.gid).split('_')[1])||null,date:r.E.date,pid:r.E.pid,name:r.E.name,
         team:r.E.team,opp:r.E.opp,mk:r.mk,side:r.side,line:r.line,odds:r.price,book:r.book,
         pm:+r.pm.toFixed(3),pf:+r.pf.toFixed(3),pb:+r.pb.toFixed(3),ev:+r.ev.toFixed(3),tier:r.tier,start:t0,res:null,u:null};
+      if(r.script)S.propLog[k].script=r.script;
     };
     Object.values(byGame).forEach(arr=>{
       arr.filter(r=>r.tier).sort((a,b)=>b.ev-a.ev).slice(0,5).forEach(r=>put(r,'ev'));
       arr.filter(r=>r.imp<=0.75&&!r.ns&&!r.wild).sort((a,b)=>b.pb-a.pb).slice(0,3).forEach(r=>put(r,'prob'));
+      // game-script tracker: every player's main-line rush-attempt / pass-TD under
+      const main={};
+      arr.filter(r=>r.script&&!r.wild&&!r.outlier).forEach(r=>{ const k=r.E.pid+'|'+r.mk; if(!main[k]||Math.abs(r.pf-0.5)<Math.abs(main[k].pf-0.5))main[k]=r; });
+      Object.values(main).forEach(r=>put(r,'script'));
     });
   }catch(e){}
 }
@@ -1977,11 +2003,24 @@ function propTrackerHtml(){
     return `<tr><td style="text-align:left;font-size:12px">${lab}</td><td class="n">${s.n?s.w+'-'+s.l:'—'}</td><td class="n">${s.n?pctS(s.hit)+'<div style="font-size:10px;color:var(--ink-soft)">exp '+pctS(s.exp)+'</div>':'—'}</td><td class="n" style="color:${s.u>0?'var(--win)':(s.u<0?'var(--loss)':'inherit')}">${s.n?(s.u>=0?'+':'')+s.u.toFixed(1)+'u':'—'}</td><td class="n">${s.pend||''}</td></tr>`;
   };
   const evs=all.filter(e=>e.list==='ev'), prs=all.filter(e=>e.list==='prob');
+  // game script: one row per distinct under, whichever list saved it
+  const scr={};
+  all.forEach(e=>{ if(!SCRIPT_MK[e.mk]||e.side!=='under')return; const sc=e.script||scriptOf(e.gid,e.team); if(!sc)return;
+    const k=[e.gid,e.pid,e.mk,e.line].join('|'); if(!scr[k]||(!scr[k].res&&e.res))scr[k]=Object.assign({},e,{script:sc}); });
+  const scrAll=Object.values(scr);
+  const scrRow=(mk,sc,lab)=>row(lab,scrAll.filter(e=>e.mk===mk&&e.script===sc));
+  const scriptBlock=scrAll.length?`<div class="pblock"><div class="pbh">Game script · unders by spread</div><div class="pbody">
+    <div class="note" style="margin:0 0 8px">Teams that fall behind stop running and throw. Down 14+ at the half they average 23 second-half passes and 10 runs; up 14+ it is 12 and 17 (2016-25). So rush-attempt and pass-TD unders are split by whether the player's team was an underdog or a favorite of ${SCRIPT_PTS}+ points. Graded 1 unit at the saved price; ${beNote}</div>
+    <table class="pow" style="width:100%;table-layout:fixed"><colgroup><col style="width:36%"><col style="width:14%"><col style="width:20%"><col style="width:17%"><col style="width:13%"></colgroup><thead><tr><th style="text-align:left">Under</th><th>W-L</th><th>Hit %</th><th>Units</th><th>Open</th></tr></thead><tbody>
+    ${scrRow('car','dog','Rush att · underdog')}${scrRow('car','even','Rush att · within '+SCRIPT_PTS)}${scrRow('car','fav','Rush att · favorite')}
+    ${scrRow('ptd','dog','Pass TDs · underdog')}${scrRow('ptd','even','Pass TDs · within '+SCRIPT_PTS)}${scrRow('ptd','fav','Pass TDs · favorite')}
+    </tbody></table></div></div>`:'';
   let html=`<div class="note" style="margin:0 0 10px">Every pick below was saved <b>before kickoff</b> and graded 1 unit at the saved price. Hit % is what actually happened; <b>exp</b> is what the blended probability said. Until a list has a few hundred graded picks, treat the numbers as noise. A pick whose player was inactive is a void and doesn't count.</div>
   <div class="pblock"><div class="pbh">Record</div><div class="pbody"><table class="pow" style="width:100%;table-layout:fixed"><colgroup><col style="width:36%"><col style="width:14%"><col style="width:20%"><col style="width:17%"><col style="width:13%"></colgroup><thead><tr><th style="text-align:left">List</th><th>W-L</th><th>Hit</th><th>Units</th><th>Open</th></tr></thead><tbody>
   ${row('Best EV · all',evs)}${row('&nbsp;&nbsp;Tier A',evs.filter(e=>e.tier==='A'))}${row('&nbsp;&nbsp;Tier B',evs.filter(e=>e.tier==='B'))}${row('Most likely',prs)}
   ${PMK_ORDER.map(m=>row('EV · '+PMK[m].label,evs.filter(e=>e.mk===m))).join('')}
   </tbody></table></div></div>`;
+  html+=scriptBlock;
   const rec=all.filter(e=>e.res).sort((a,b)=>b.start-a.start).slice(0,25);
   if(rec.length){
     html+=`<div class="pblock"><div class="pbh">Recent graded</div><div class="pbody">${rec.map(e=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--stock)"><span>${esc(e.name)} · ${esc(e.side==='under'?'U':'O')} ${e.line} ${esc(PMK[e.mk].short)} <span style="color:var(--ink-soft)">${fmtOdds(e.odds)}</span></span><b style="color:${e.res==='W'?'var(--win)':(e.res==='L'?'var(--loss)':'var(--ink-soft)')}">${e.res==='V'?'void':e.res+' ('+e.v+')'}</b></div>`).join('')}</div></div>`;
@@ -2022,7 +2061,7 @@ function renderPropsTab(host){
     const d=r.E.date.slice(5);
     html+=`<div class="pblock" style="margin-bottom:8px"><div class="pbody" style="padding:8px 10px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${esc(r.E.name)}</b>${tierChip(r.tier)}</div>
-      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}${r.ns?' · <span style="color:var(--ink-soft)">no proven model skill here — the EV is price shopping only</span>':''}${r.wild?' · <span style="color:var(--hl-long)">model 15+ pts off the book — usually the book knows something; not ranked</span>':''}${r.longshot&&r.mk==='td'&&r.side==='over'?' · <span style="color:var(--ink-soft)">long shot — model weight capped, untested at these prices</span>':''}</div>
+      <div class="note" style="margin:2px 0 6px">${esc(r.E.team)} vs ${esc(r.E.opp)} · ${esc(d)} · ${esc(r.E.pos)}${r.outlier?' · <span style="color:var(--loss)">price far off your other books — verify</span>':''}${r.script&&r.script!=='even'?` · <span style="color:${r.script==='dog'?'var(--win)':'var(--ink-soft)'}">${esc(scriptTxt(r.mk,r.script))}</span>`:''}${r.ns?' · <span style="color:var(--ink-soft)">no proven model skill here — the EV is price shopping only</span>':''}${r.wild?' · <span style="color:var(--hl-long)">model 15+ pts off the book — usually the book knows something; not ranked</span>':''}${r.longshot&&r.mk==='td'&&r.side==='over'?' · <span style="color:var(--ink-soft)">long shot — model weight capped, untested at these prices</span>':''}</div>
       <div class="stats" style="grid-template-columns:1.5fr 1fr 1fr 1fr">
         <div class="stat"><div class="n" style="font-size:14px">${esc(propPick(r))}</div><div class="l">Pick</div></div>
         <div class="stat"><div class="n" style="font-size:15px">${fmtOdds(r.price)}</div><div class="l">${esc(bookName(r.book))}</div></div>
@@ -3719,7 +3758,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-11 14:10 UTC';
+const BUILD_STAMP='2026-11-11 20:40 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4068,6 +4107,58 @@ function bankStats(wk){
     roi:staked?pl/staked:0,
     settled:w+l};
 }
+/* Bank by market (2026-11-11): the same real-money bets as the tiles, split
+   by what kind of bet they were, with the win % each one NEEDED at the
+   prices actually paid. Group parlays (5+ legs) are shown last and never
+   counted, like everywhere else. */
+function betMarketGroup(x){
+  const d=' '+String(x.desc||'').toLowerCase()+' ', m=x.market, k=x.kind;
+  if(isFunParlay(x))return 'Group parlays (5+ legs)';
+  if(x.rrMode||(k==='prop'&&!m))return 'Round robins / card batches';
+  if(k==='parlay')return 'Parlays (2-4 legs)';
+  const tt=/\stt\s|team total/.test(d);
+  if(k==='cfb')return tt?'College team totals':'College '+({side:'spreads',total:'totals',ml:'moneylines',td:'TD props'}[m]||'other');
+  if(k==='side'&&m!=='td'){
+    if(/\b1h\b|1st half|first half/.test(d))return 'NFL first half';
+    if(tt)return 'NFL team totals';
+    return 'NFL '+({side:'spreads',total:'totals',ml:'moneylines'}[m]||'other');
+  }
+  if(/first td/.test(d))return 'Props: first TD';
+  if(/2\+ (anytime )?td/.test(d))return 'Props: 2+ TDs';
+  if(/pass(ing)? td/.test(d))return 'Props: passing TDs';
+  if(/anytime td/.test(d)||m==='td')return 'Props: anytime TD';
+  if(/longest/.test(d))return 'Props: longest catch / rush';
+  if(/reception/.test(d))return 'Props: receptions';
+  if(/receiving y|rec y/.test(d))return 'Props: receiving yards';
+  if(/rush/.test(d)&&/att|carr/.test(d))return 'Props: rush attempts';
+  if(/rush/.test(d))return 'Props: rushing yards';
+  if(/pass/.test(d))return 'Props: passing yards';
+  return 'Props: other';
+}
+function bankMarketHtml(){
+  const by={};
+  (BANKKEY().bets||[]).forEach(x=>{
+    if(x.paper||!x.result)return;
+    const k=betMarketGroup(x), o=by[k]=by[k]||{k,w:0,l:0,p:0,st:0,ret:0,imp:0,ni:0,fun:isFunParlay(x)};
+    const st=Number(x.stake)||0; o.st+=st;
+    if(x.result==='W'){o.w++;o.ret+=payout(st,x.odds,x);} else if(x.result==='L')o.l++; else if(x.result==='P'){o.p++;o.ret+=st;}
+    const dc=toDec(x.odds); if(dc&&x.result!=='P'){o.imp+=1/dc;o.ni++;}
+  });
+  const rows=Object.values(by).sort((a,b)=>(a.fun-b.fun)||(b.st-a.st));
+  if(!rows.length)return '';
+  const tr=o=>{ const pl=o.ret-o.st, n=o.w+o.l, hit=n?o.w/n:null, need=o.ni?o.imp/o.ni:null;
+    const col=o.fun?'var(--ink-soft)':(pl>0?'var(--win)':(pl<0?'var(--loss)':'var(--ink)'));
+    return `<tr${o.fun?' style="opacity:.6"':''}><td style="text-align:left;font-size:12px;line-height:1.2">${esc(o.k)}${o.fun?'<div style="font-size:10px;color:var(--ink-soft)">not counted</div>':''}</td>
+      <td class="n" style="font-size:12px;white-space:nowrap">${o.w}-${o.l}${o.p?'-'+o.p:''}</td>
+      <td class="n" style="font-size:12px">${hit==null?'—':(100*hit).toFixed(0)+'%'}<div style="font-size:10px;color:var(--ink-soft)">need ${need==null?'—':(100*need).toFixed(0)+'%'}</div></td>
+      <td class="n" style="font-size:12px;color:${col}">${pl>=0?'+':'−'}${money(Math.abs(pl)).replace('$','')}<div style="font-size:10px;color:var(--ink-soft)">on $${Math.round(o.st).toLocaleString()}</div></td>
+      <td class="n" style="font-size:12px;color:${col}">${o.st?(100*pl/o.st).toFixed(0)+'%':'—'}</td></tr>`; };
+  return `<details style="margin:10px 0 0"${S.bankMktOpen?' open':''} id="bankMkt"><summary style="cursor:pointer;font-weight:700;font-size:13px">By market · all time</summary>
+    <div class="note" style="margin:6px 0 6px">Every settled real-money bet, by type. <b>Need</b> is the win % those bets had to hit at the prices you actually paid. Small samples swing a lot: under about 50 bets, a row is mostly luck.</div>
+    <table class="pow" style="width:100%;table-layout:fixed"><colgroup><col style="width:36%"><col style="width:15%"><col style="width:16%"><col style="width:20%"><col style="width:13%"></colgroup>
+    <thead><tr><th style="text-align:left">Market</th><th>W-L</th><th>Hit</th><th>P/L</th><th>ROI</th></tr></thead><tbody>${rows.map(tr).join('')}</tbody></table></details>`;
+}
+document.addEventListener('toggle',e=>{ if(e.target&&e.target.id==='bankMkt'){ S.bankMktOpen=e.target.open; save(); } },true);
 function paperStats(wk){
   const b=BANKKEY();
   let w=0,l=0,staked=0,ret=0,open=0;
@@ -5118,6 +5209,7 @@ function todayCandidates(){
       const c=_cand({kind:'prop',who:r.E.name,team:r.E.team,mk:r.mk,line:r.line,side:r.side,odds:r.price,book:r.book,p:r.pb,fair:r.pf,
         title:`${r.E.name} ${r.mk==='td'?'anytime TD':lab.toLowerCase()}${sideTxt}`,start:t,match:`${r.ga} @ ${r.gh}`,
         sg:(gameOf[r.gh]||{}).sg,key:`p|${mkey(r.E.name)}|${r.mk}|${r.side}|${r.line}`});
+      if(c&&r.script==='dog')c.note=scriptTxt(r.mk,'dog');
       if(c)out.push(c);
     });
   }catch(e){ console.error(e); }
@@ -5221,6 +5313,16 @@ function renderToday(){
   const seen=new Set(), top=[];
   for(const c of pool){ const gk=c.kind==='game'?c.key.replace(/\|[^|]+$/,''):null; if(gk&&seen.has(gk))continue; if(gk)seen.add(gk); top.push(c); if(top.length>=10)break; }
   const cutRows=all.filter(c=>cut.has(c.key));
+  // same-game exposure across the list and the open bets in the Bank
+  const gkOf=c=>String((c.kind==='prop'?(c.sg&&c.sg.id):c.gid)||c.match||'');
+  const dirOf=c=>c.kind==='prop'?(c.side==='under'?-1:1):(/\bunder\b/i.test(c.title)?-1:(/\bover\b/i.test(c.title)?1:0));
+  const openG=openBetsByGame();
+  // a one-game slate (Thursday night) gets one banner instead of the same line on every row
+  const oneGame=top.length>=2&&new Set(top.map(gkOf)).size===1;
+  const expo=c=>{ if(oneGame)return ''; const k=gkOf(c), d=dirOf(c); const g=top.filter(x=>gkOf(x)===k);
+    return exposureNote(g.length,d?g.filter(x=>dirOf(x)===d).length:0,openG[k]||0); };
+  const oneBanner=oneGame?(()=>{ const up=top.filter(x=>dirOf(x)>0).length, dn=top.filter(x=>dirOf(x)<0).length, op=openG[gkOf(top[0])]||0;
+    return `<div class="note" style="margin:0 0 8px;color:var(--hl-long);font-weight:600">⚠ Every pick below is on one game${Math.max(up,dn)>=2?`, and ${Math.max(up,dn)} lean the same way — they win or lose together`:''}. Pick your best one or two and size them as one bet${op?`; you already have ${op} open bet${op===1?'':'s'} on it`:''}.</div>`; })():'';
   const pc=x=>`${(x*100).toFixed(0)}%`;
   const evc=v=>v>0.005?'var(--win)':(v<-0.005?'var(--loss)':'var(--ink-soft)');
   const row=(c,i,isCut)=>{
@@ -5231,6 +5333,7 @@ function renderToday(){
         <div style="font-weight:700;font-size:15px">${esc(c.title)}</div>
         <div class="what">${esc(c.kind==='prop'?c.match:(c.type+(c.lg==='cfb'?' · college':'')))} · ${esc(_etTime(c.start))} · <b>${fmtAm(+c.odds)}</b>${c.book?' '+esc(bookName(c.book)):''}${c.assumed?' (assumed — check your book)':''}</div>
         <div class="what">Chance ${pc(c.p)} · book fair ${pc(c.fair)} · <span style="color:${evc(c.ev)};font-weight:700">${c.ev>=0?'+':''}${(c.ev*100).toFixed(1)}% EV</span>${c.note?' · '+esc(c.note):''}${c.mk==='rec'||c.mk==='lng'?' · <span style="color:var(--ink-soft)">receiver model, untested vs closing prices</span>':''}${jump?' <span style="color:var(--acc-text);font-weight:700">· Bet it ›</span>':''}</div>
+        ${!isCut&&expo(c)?`<div class="what" style="color:var(--hl-long);font-weight:600">⚠ ${esc(expo(c))}</div>`:''}
       </div>
       <button class="btn ${isCut?'':'ghost'}" data-tcut="${esc(c.key)}" data-tback="${isCut?1:0}" style="width:auto;flex:none;padding:5px 10px;font-size:12px">${isCut?'Add back':'Cut'}</button>
     </div>`;
@@ -5242,7 +5345,7 @@ function renderToday(){
       ?'Ranked by expected value across every prop, spread, total and team total on games that haven’t kicked off, priced −250 to +500, props on their main lines. One prop per player.'
       :'Ranked by chance to hit, among bets priced −250 to +500 (props on main lines) and within 5% of break-even. One prop per player.'}
       ${all.length} bets on ${nGames} games considered.</div>
-    ${top.length?top.map((c,i)=>row(c,i,false)).join(''):`<div class="note" style="margin:0">${all.length?'Nothing qualifies right now.':'No games left today with prices loaded — refresh data on game day.'}</div>`}
+    ${oneBanner}${top.length?top.map((c,i)=>row(c,i,false)).join(''):`<div class="note" style="margin:0">${all.length?'Nothing qualifies right now.':'No games left today with prices loaded — refresh data on game day.'}</div>`}
   </div></div>
   ${cutRows.length?`<div class="pblock" style="margin-bottom:14px"><div class="pbh">Cut · ${cutRows.length}</div><div class="pbody">${cutRows.map(c=>row(c,0,true)).join('')}</div></div>`:''}
   <div class="note">Spreads, totals and team totals count, but the side model added nothing to the closing line in testing (NFL and college), so they use the book’s own price and only rank when that price is better than the market. College team-total fades use their 2021–25 record. College lines are shown at −110. Props use the same book-anchored chances as the Props board.</div>`;
@@ -5261,6 +5364,33 @@ document.addEventListener('click',e=>{
   }
 });
 
+/* Same-game exposure (2026-11-11). Bets on one game are not separate bets:
+   the two quarterbacks' yards and TDs move together (+0.12 / +0.15) and both
+   track the game total (0.53), so a QB over, his receiver's over and the
+   game over are one opinion placed three times. Anything leaning the same
+   way in one game should be sized as ONE bet. Direction: overs / anytime TD
+   = more scoring (+1), unders = less (-1), spreads and moneylines = 0. */
+function openBetsByGame(){
+  const out={}, add=id=>{ if(id)out[String(id)]=(out[String(id)]||0)+1; };
+  const byName={};
+  ((S.props&&S.props.players)||[]).forEach(p=>{ if(p&&p.name&&p.gid)byName[mkey(p.name)]=p.gid; });
+  (BANKKEY().bets||[]).forEach(x=>{
+    if(x.paper||x.result)return;
+    const ids=new Set();
+    if(x.game)ids.add(String(x.game));
+    (x.legs||[]).forEach(l=>{ if(l.game)ids.add(String(l.game)); else if(l.who&&byName[mkey(l.who)])ids.add(byName[mkey(l.who)]); });
+    if(!ids.size&&x.pickWho&&byName[mkey(x.pickWho)])ids.add(byName[mkey(x.pickWho)]);
+    ids.forEach(add);
+  });
+  return out;
+}
+function exposureNote(n,same,open){
+  const bits=[];
+  if(same>=2)bits.push(`${same} picks here lean the same way — they win or lose together, size them as one bet`);
+  else if(n>=2)bits.push(`${n} picks on this game`);
+  if(open)bits.push(`${open} open bet${open===1?'':'s'} already on this game`);
+  return bits.join(' · ');
+}
 const PRED_OPEN={};
 function pnCdf(z){ const t=1/(1+0.2316419*Math.abs(z)), d=0.3989423*Math.exp(-z*z/2), p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274)))); return z>0?1-p:p; }
 const pnOrd=n=>{ const s=['th','st','nd','rd'],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
@@ -5831,6 +5961,7 @@ function renderBank(){
         <div class="stat"><div class="n">${b.bets.length}</div><div class="l">${thisWeek?`Logged wk ${S.week}`:'Total logged'}</div></div>
       </div>
       ${s.funSt?`<div class="note" style="margin:8px 0 0">Group parlays (5+ legs): ${s.funPL>=0?'+':''}${money(s.funPL).replace('$','')} on ${money(s.funSt)} — in the balance, left out of P/L, ROI, record and every rating.</div>`:''}
+      ${bankMarketHtml()}
       <div style="height:10px"></div>
       <div class="seg" style="grid-template-columns:1fr 1fr">
         <button class="sgbtn" data-paper="0" aria-selected="${!b.paper}">Real money</button>
@@ -7897,7 +8028,20 @@ function renderShot(){
     </div></div>`;
   }).join('');
   const n=SHOT.items.filter(x=>x.inc).length;
-  el.innerHTML=head+(SHOT.err?`<div class="note" style="color:var(--loss)">${esc(SHOT.err)}</div>`:'')+rows+
+  // same-game exposure across the tickets being added and the open Bank bets
+  let expoHtml='';
+  try{
+    const byG={}, openG=openBetsByGame();
+    SHOT.items.filter(x=>x.inc&&!x.result).forEach(it=>it.legs.forEach(l=>{
+      if(!l.game)return;
+      const sd=l.type==='prop'?l.side:(l.raw&&(l.raw.kind==='total'||l.raw.kind==='team_total')?l.raw.side:'');
+      const d=sd==='under'?-1:(sd==='over'||sd==='atleast'?1:0);
+      const o=byG[l.game]=byG[l.game]||{match:l.match||l.game,n:0,up:0,dn:0}; o.n++; if(d>0)o.up++; if(d<0)o.dn++;
+    }));
+    const msgs=Object.entries(byG).map(([gid,o])=>{ const t=exposureNote(o.n,Math.max(o.up,o.dn),openG[gid]||0); return (o.n>=2||openG[gid])&&t?`<b>${esc(o.match)}</b>: ${esc(t)}`:''; }).filter(Boolean);
+    if(msgs.length)expoHtml=`<div class="pblock" style="margin-bottom:12px;border-color:var(--hl-long)"><div class="pbody"><div class="note" style="margin:0;color:var(--hl-long);font-weight:600">⚠ Same-game exposure</div><div class="note" style="margin:4px 0 0">${msgs.join('<br>')}</div></div></div>`;
+  }catch(e){}
+  el.innerHTML=head+(SHOT.err?`<div class="note" style="color:var(--loss)">${esc(SHOT.err)}</div>`:'')+expoHtml+rows+
     `<div class="shotfoot"><button class="btn" data-shotadd${n?'':' disabled'}>Add ${n} bet${n===1?'':'s'}</button></div>`;
 }
 function shotSync(){
