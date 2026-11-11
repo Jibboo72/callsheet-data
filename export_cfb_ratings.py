@@ -230,7 +230,19 @@ def sgo_lines(season, sched):
         sp = (L.get("spread") or {}).get("home")
         tt = L.get("team_total") or {}
         th, ta = (tt.get("away"), tt.get("home")) if flip else (tt.get("home"), tt.get("away"))
-        rows.append(dict(game_id=int(r.game_id),
+        # prices (American odds as ints), home/away as OUR schedule has them
+        def _o(v):
+            try:
+                return int(str(v).replace("+", ""))
+            except (TypeError, ValueError):
+                return None
+        S_, T_ = L.get("spread") or {}, L.get("total") or {}
+        sh, sa = _o(S_.get("home_odds")), _o(S_.get("away_odds"))
+        px = dict(sh=sa if flip else sh, sa=sh if flip else sa, o=_o(T_.get("over")), u=_o(T_.get("under")),
+                  tho=_o((th or {}).get("over")), thu=_o((th or {}).get("under")),
+                  tao=_o((ta or {}).get("over")), tau=_o((ta or {}).get("under")))
+        px = {k: v for k, v in px.items() if v is not None}
+        rows.append(dict(game_id=int(r.game_id), px=px or None,
                          line_spread=(-sp if flip else sp) if sp is not None else np.nan,
                          open_spread=np.nan,
                          line_total=(L.get("total") or {}).get("line", np.nan),
@@ -371,6 +383,8 @@ def build(season):
                 v = L.get(k, None)
                 if v is not None and not pd.isna(v):
                     g[k] = round(float(v), 1)
+            if isinstance(L.get("px", None), dict) and L["px"]:
+                g["px"] = L["px"]                      # SGO prices (since 2026-11-11)
             g["edge"] = round(abs(g["pem"] - g["line"]), 1)
             # side the model takes against the number
             g["pick"] = "home" if g["pem"] < g["line"] else ("away" if g["pem"] > g["line"] else "")
@@ -627,6 +641,8 @@ def _game_rec(r, m, lmap, fbs_side=False):
             v = L.get(k, None)
             if v is not None and not pd.isna(v):
                 g[k] = round(float(v), 1)
+        if isinstance(L.get("px", None), dict) and L["px"]:
+            g["px"] = L["px"]                          # SGO prices (since 2026-11-11)
         g["edge"] = round(abs(g["pem"] - g["line"]), 1)
         g["pick"] = "home" if g["pem"] < g["line"] else ("away" if g["pem"] > g["line"] else "")
     if r.played:

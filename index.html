@@ -1419,7 +1419,7 @@ function renderRoster(){
    played). Book team totals aren't kept once a game is played, so the app
    freezes each game's numbers (S.snap) every time it loads data before
    kickoff, and team totals are graded from those — tracking starts the day
-   you first load them. Break-even at -110 is 52.4%. */
+   you first load them. Break-even at -110 is 52.4%, at -115 53.5% (beCol). */
 /* kickoff time for the snapshot rule: NFL from the odds pull's start stamp,
    college from the ratings file's date + Eastern kick time */
 function kickMs(lg,g){
@@ -1448,12 +1448,16 @@ function takeSnaps(){
     if(S.cfbr&&Array.isArray(S.cfbr.games)) S.cfbr.games.forEach(g=>{
       if(g.fcs||g.hs!=null||g.pem==null)return;
       if(g.tt_home==null&&g.tt_away==null&&g.line_total==null&&g.line==null)return;
-      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,ptr:g.pem_total_raw,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away},g.date,kickMs('cfb',g));
+      put('cfb:'+g.id,{pem:g.pem,ps:g.pem_score,pt:g.pem_total,ptr:g.pem_total_raw,l:g.line,lt:g.line_total,th:g.tt_home,ta:g.tt_away,px:g.px||null},g.date,kickMs('cfb',g));
     });
     if(S.games&&Array.isArray(S.games.games)) S.games.games.forEach(g=>{
       if(('margin' in g)||g.ptot==null||g.proj==null)return;
       const ln=nflLines(g), tt=ln&&ln.team_total;
-      put('nfl:'+g.id,{pem:g.proj,pt:g.ptot,l:g.spread,lt:g.total,th:tt&&tt.home?tt.home.line:null,ta:tt&&tt.away?tt.away.line:null},g.date,kickMs('nfl',g));
+      const n_=v=>{ const x=parseInt(v,10); return isFinite(x)?x:undefined; }, sp=ln&&ln.spread, to=ln&&ln.total;
+      const px={sh:n_(sp&&sp.home_odds),sa:n_(sp&&sp.away_odds),o:n_(to&&to.over),u:n_(to&&to.under),
+        tho:n_(tt&&tt.home&&tt.home.over),thu:n_(tt&&tt.home&&tt.home.under),tao:n_(tt&&tt.away&&tt.away.over),tau:n_(tt&&tt.away&&tt.away.under)};
+      Object.keys(px).forEach(k=>{ if(px[k]===undefined)delete px[k]; });
+      put('nfl:'+g.id,{pem:g.proj,pt:g.ptot,l:g.spread,lt:g.total,th:tt&&tt.home?tt.home.line:null,ta:tt&&tt.away?tt.away.line:null,px:Object.keys(px).length?px:null},g.date,kickMs('nfl',g));
     });
     const keys=Object.keys(S.snap); if(keys.length>2500){ keys.sort((a,b)=>String(S.snap[a].d).localeCompare(String(S.snap[b].d))).slice(0,keys.length-2500).forEach(k=>delete S.snap[k]); }
   }catch(e){}
@@ -1512,7 +1516,7 @@ function scoreTable(items,gk,label){
     const xs=items.filter(x=>x[gk]!=null&&x[gk]>=min&&(min>0||x[gk]>0));
     const w=xs.filter(x=>x.res==='W').length,l=xs.filter(x=>x.res==='L').length,p=xs.filter(x=>x.res==='P').length;
     const pc=(w+l)?w/(w+l):null;
-    const col=pc==null?'var(--ink-soft)':(w+l>=15?(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)')):'var(--ink-soft)');
+    const col=beCol(pc,w+l,15);
     h+=`<tr><td style="text-align:left">${lab}${min===1?' <span style="font-size:10px;color:var(--ink-soft)">(past noise)</span>':''}</td><td class="n">${w}-${l}${p?'-'+p:''}</td><td class="n" style="color:${col};font-weight:${w+l>=15?700:400}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</td></tr>`;
   });
   return h+`</tbody></table>`;
@@ -1536,6 +1540,16 @@ const FADE_START='2026-10-17', FADE_GAP=5;
    been 47%. The NFL rule is now FOLLOW the model, restarted from that date so
    it is still a forward test. College game totals backtested at 47% for the
    model at 5+ (fade 53%), so college keeps the fade from its original date. */
+/* Juice (2026-11-11). 52.4% is break-even only at -110; books now hang
+   -113 to -120 on a lot of sides and totals. Records are colored against
+   -115 (53.5%): green clears it, plain text is between -110 and -115
+   break-even, red is under 47.6%. Snapshots save the prices too (px), so the
+   trackers can show units at the price that was actually on the board. */
+const BE_JUICE=-115, BE_STD=0.524, BE_REAL=115/215;
+const beCol=(pc,n,min)=>pc==null||(min&&n<min)?'var(--ink-soft)':(pc>=BE_REAL?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+const beNote='Break-even is 52.4% at −110, 53.5% at −115, 54.1% at −118. Green clears −115.';
+const unitWin=o=>{ o=+o; if(!isFinite(o)||o===0)o=-110; return o>0?o/100:100/(-o); };
+function unitsOf(rows){ let u=0,priced=0; rows.forEach(r=>{ if(r.odds!=null)priced++; if(r.res==='W')u+=unitWin(r.odds); else if(r.res==='L')u-=1; }); return {u,priced}; }
 const TOT_RULE={nfl:{follow:true,start:'2026-10-24'},cfb:{follow:false,start:FADE_START},
   /* 2026-11-08 split rule, from the 2021-25 breakdown: at 5+ points off, the
      raw model's own side went 44% in conference games and 40% in late
@@ -1563,7 +1577,7 @@ function fadeRows(lg,key){
     let follow=!!rule.follow, why='';
     if(rule.split){ const m=meta[id]; if(!m)return; follow=!m.conf&&m.wk<8; why=follow?'early non-conf · follow':(m.conf?'conference · fade':'late season · fade'); }
     const over=follow?gap>0:gap<0;
-    const r={id,date:sn.d,name:names[id]||id,model:pt,book:sn.lt,bet:over?'Over':'Under',why};
+    const r={id,date:sn.d,name:names[id]||id,model:pt,book:sn.lt,bet:over?'Over':'Under',why,odds:sn.px?(over?sn.px.o:sn.px.u):null};
     if(res[id]!=null){ const a=res[id]; r.actual=a; r.res=a===sn.lt?'P':(over===(a>sn.lt)?'W':'L'); out.done.push(r); }
     else out.open.push(r);
   });
@@ -1575,7 +1589,7 @@ function fadeBlock(lg,key){
   const f=fadeRows(lg,key);
   const w=f.done.filter(x=>x.res==='W').length, l=f.done.filter(x=>x.res==='L').length, p=f.done.filter(x=>x.res==='P').length;
   const n=w+l, pc=n?w/n:null;
-  const col=pc==null||n<30?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+  const col=beCol(pc,n,30);
   const mark=r=>r==='W'?'<span style="color:var(--win);font-weight:700">W</span>':(r==='L'?'<span style="color:var(--loss);font-weight:700">L</span>':'<span style="color:var(--ink-soft)">P</span>');
   const rule=TOT_RULE[key||lg]||TOT_RULE.cfb;
   let h=`<div class="pblock"><div class="pbh">${rule.split?'Split rule tracker':(rule.follow?'Totals tracker · follow the model':'Fade tracker')} · total, ${FADE_GAP}+ pts from the book</div><div class="pbody">
@@ -1587,7 +1601,7 @@ function fadeBlock(lg,key){
     <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
       <div class="stat"><div class="n">${w}-${l}${p?'-'+p:''}</div><div class="l">W-L-P</div></div>
       <div class="stat"><div class="n" style="color:${col}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</div><div class="l">Win %</div></div>
-      <div class="stat"><div class="n">${n}<span style="font-size:11px;color:var(--ink-soft)"> / 100</span></div><div class="l">Graded</div></div>
+      ${(()=>{ const U=unitsOf(f.done); return `<div class="stat"><div class="n" style="color:${n?(U.u>0?'var(--win)':(U.u<0?'var(--loss)':'var(--ink)')):'var(--ink-soft)'}">${n?(U.u>0?'+':'')+U.u.toFixed(1):'—'}</div><div class="l">Units · ${n} of 100 graded${f.done.length?`<br><span style="font-size:9px;text-transform:none;letter-spacing:0">${U.priced} of ${f.done.length} at the saved price, rest at −110</span>`:''}</div></div>`; })()}
     </div>`;
   if(f.open.length){
     h+=`<div class="lab" style="margin:10px 0 4px">Flagged now · ${f.open.length}</div>`;
@@ -1628,7 +1642,7 @@ function scoreWeeklyBlock(lg,rows){
     ?[['line','Spread'],['tot','Total'],['tt','Team tot'],['ttf','TT fade'],['tf','Tot fade'],['sp','Split']]
     :[['line','Spread'],['tot','Total'],['tt','Team tot'],['tf','Tot rule']];
   const fmt=c=>{ const n=c.w+c.l; if(!n&&!c.p)return '<span style="color:var(--ink-soft)">—</span>';
-    const pc=n?c.w/n:null, col=pc==null?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+    const pc=n?c.w/n:null, col=beCol(pc,n,0);
     return `<div style="font-weight:700;white-space:nowrap">${c.w}-${c.l}</div><div style="font-size:10px;color:${col};font-weight:700;white-space:nowrap">${pc==null?'':(pc*100).toFixed(0)+'%'}${c.p?` <span style="color:var(--ink-soft);font-weight:400">${c.p}p</span>`:''}</div>`; };
   const tot={}; cols.forEach(([k])=>{ tot[k]={w:0,l:0,p:0}; wks.forEach(w=>{ ['w','l','p'].forEach(f=>tot[k][f]+=W[w][k][f]); }); });
   const cw=Math.floor(84/cols.length);
@@ -1654,7 +1668,7 @@ function renderScorecard(host){
     host.innerHTML=html+`<div class="empty" style="border:2px solid var(--ink);background:var(--stock-2)">No graded games yet. Tap <b>Refresh all data</b> on the Roster tab.</div>`;
     return;
   }
-  html+=`<div class="note" style="margin:0 0 10px">${rows.length} played games with a model number and a book line. Each is graded as a bet on the side the model likes: it wins, loses or pushes against the result. Break-even at −110 is 52.4%. Gaps under 1 point are inside the noise (home-field convention, rounding), so read the tiers, not the All row. Rows under 15 games stay grey.</div>`;
+  html+=`<div class="note" style="margin:0 0 10px">${rows.length} played games with a model number and a book line. Each is graded as a bet on the side the model likes: it wins, loses or pushes against the result. ${beNote} Gaps under 1 point are inside the noise (home-field convention, rounding), so read the tiers, not the All row. Rows under 15 games stay grey.</div>`;
   html+=scoreWeeklyBlock(lg,rows);
   // line
   const lineItems=rows.filter(r=>r.lres).map(r=>({lg:r.lg,res:r.lres}));
@@ -2182,6 +2196,7 @@ function cfbTTFadeTracker(){
     const sn=S.snap[k], id=k.slice(4), g=G[id]; if(!g||!sn||String(sn.d||'')<TTF_START)return;
     cfbTTPicks(g,sn).forEach(p=>{
       const r=Object.assign({id,date:sn.d,name:cfbAb(g.away)+' @ '+cfbAb(g.home)},p);
+      if(sn.px){ const o=p.bet==='Over'; r.odds=p.sd==='h'?(o?sn.px.tho:sn.px.thu):(o?sn.px.tao:sn.px.tau); }
       if(g.hs!=null&&g.as_!=null){ const a=p.sd==='h'?g.hs:g.as_; r.actual=a; r.res=a===p.book?'P':((p.bet==='Over')===(a>p.book)?'W':'L'); out.done.push(r); }
       else out.open.push(r);
     });
@@ -2193,13 +2208,13 @@ function cfbTTFadeBlock(){
   const f=cfbTTFadeTracker();
   const w=f.done.filter(x=>x.res==='W').length, l=f.done.filter(x=>x.res==='L').length, p=f.done.filter(x=>x.res==='P').length;
   const n=w+l, pc=n?w/n:null;
-  const col=pc==null||n<30?'var(--ink-soft)':(pc>=0.524?'var(--win)':(pc<0.476?'var(--loss)':'var(--ink)'));
+  const col=beCol(pc,n,30);
   let h=`<div class="pblock"><div class="pbh">Team-total fade tracker · ${TTF_GAP}+ pts</div><div class="pbody">
     <div class="note" style="margin:0 0 8px">Fixed in advance: when the model's college team total is ${TTF_GAP}+ points off the book, bet the other side. Backtest 2021–25 about 55%; graded here from ${TTF_START} on with numbers saved before kickoff. Needs 100+ graded before it means much.</div>
     <div class="stats" style="grid-template-columns:1fr 1fr 1fr">
       <div class="stat"><div class="n">${w}-${l}${p?'-'+p:''}</div><div class="l">W-L-P</div></div>
       <div class="stat"><div class="n" style="color:${col}">${pc==null?'—':(pc*100).toFixed(1)+'%'}</div><div class="l">Win %</div></div>
-      <div class="stat"><div class="n">${n}<span style="font-size:11px;color:var(--ink-soft)"> / 100</span></div><div class="l">Graded</div></div>
+      ${(()=>{ const U=unitsOf(f.done); return `<div class="stat"><div class="n" style="color:${n?(U.u>0?'var(--win)':(U.u<0?'var(--loss)':'var(--ink)')):'var(--ink-soft)'}">${n?(U.u>0?'+':'')+U.u.toFixed(1):'—'}</div><div class="l">Units · ${n} of 100 graded${f.done.length?`<br><span style="font-size:9px;text-transform:none;letter-spacing:0">${U.priced} of ${f.done.length} at the saved price, rest at −110</span>`:''}</div></div>`; })()}
     </div>`;
   if(f.done.length){
     h+=`<div class="lab" style="margin:10px 0 4px">Graded</div>`;
@@ -2554,7 +2569,7 @@ function crowdTracker(){
   const anyBets=B.with.W+B.with.L+B.vs.W+B.vs.L>0;
   const ex=S.experts;
   return `<details class="pblock" style="margin-bottom:14px"><summary class="pbh" style="cursor:pointer">Model vs the expert crowd · ${fmt(R.mVsHeavy).replace(/ <span.*$/,'')} fading 70%+</summary><div class="pbody">
-    <div class="note" style="margin:0 0 8px">${ex.n_experts} published experts through week ${ex.through_week}, graded ATS against the board's spread. Tracking only — break-even is 52.4%, and a few dozen games can't prove anything yet.</div>
+    <div class="note" style="margin:0 0 8px">${ex.n_experts} published experts through week ${ex.through_week}, graded ATS against the board's spread. Tracking only — break-even is 52.4% at −110 (53.5% at −115), and a few dozen games can't prove anything yet.</div>
     <div class="lab" style="margin:2px 0">Your model's side</div>
     ${row('All model sides',R.model)}
     ${row('With the crowd',R.mWith)}
@@ -3704,7 +3719,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-11 13:30 UTC';
+const BUILD_STAMP='2026-11-11 14:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -5067,8 +5082,8 @@ function cardBetHasPicks(x){
      the side model added nothing to the closing line (fit 2021-26, no
      look-ahead), so these only rank when a price beats the market. NFL
      totals keep a 10% model nudge (the one place it showed a little).
-   - College spreads / totals: same, at an assumed -110 (no college prices
-     in the app). College team-total fades use their own record: about 55%
+   - College spreads / totals: same, at the real DraftKings price when the
+     college odds feed had one (g.px), else an assumed -110. College team-total fades use their own record: about 55%
      at 5+ points, 57% at 7+ in 2021-25, shrunk to 54% / 55.5% because the
      rule was found looking back.
    Value = EV %. Probability = chance to hit among bets within 5% of
@@ -5157,25 +5172,30 @@ function todayCandidates(){
       add({type:'Team total',title:`${team} team total under ${tt.line}`,odds:tt.under,book:tt.book,p:1-po,fair:1-po,key:`g|${g.id}|tt${sd}|u`});
     });
   });
-  // ---- College (lines from the ratings file, priced at -110)
+  // ---- College (lines from the ratings file; real prices when the odds
+  //      feed had them (g.px, since 2026-11-11), else assumed -110)
   ((S.cfbr&&S.cfbr.games)||[]).forEach(g=>{
     if(g.hs!=null||g.fcs)return;
     const t=kickTs(Object.assign({fromRatings:true},g),'cfb'); if(!isFinite(t)||t<=now||_etDay(t)!==day)return;
     const match=`${g.away} @ ${g.home}`, base={kind:'game',lg:'cfb',start:t,match,gid:g.id,odds:-110,book:'',assumed:true};
     const add=o=>{ const c=_cand(Object.assign({},base,o)); if(c)out.push(c); };
+    const X=g.px||{}, pr=(a,b)=>{ const q=(a!=null&&b!=null)?_vigFree(a,b):null; return q==null?0.5:q; };
+    const at=o=>o!=null?{odds:o,assumed:false,book:'DK'}:{};
     if(g.line!=null){
-      const hl=+g.line, fm=n=>n>0?'+'+n:(n===0?'pk':String(n));
-      add({type:'Spread',title:`${g.home} ${fm(hl)}`,p:0.5,fair:0.5,key:`c|${g.id}|spread|h`});
-      add({type:'Spread',title:`${g.away} ${fm(-hl)}`,p:0.5,fair:0.5,key:`c|${g.id}|spread|a`});
+      const hl=+g.line, fm=n=>n>0?'+'+n:(n===0?'pk':String(n)), q=pr(X.sh,X.sa);
+      add(Object.assign({type:'Spread',title:`${g.home} ${fm(hl)}`,p:q,fair:q,key:`c|${g.id}|spread|h`},at(X.sh)));
+      add(Object.assign({type:'Spread',title:`${g.away} ${fm(-hl)}`,p:1-q,fair:1-q,key:`c|${g.id}|spread|a`},at(X.sa)));
     }
     if(g.line_total!=null){
-      add({type:'Total',title:`${match} over ${g.line_total}`,p:0.5,fair:0.5,key:`c|${g.id}|tot|o`});
-      add({type:'Total',title:`${match} under ${g.line_total}`,p:0.5,fair:0.5,key:`c|${g.id}|tot|u`});
+      const q=pr(X.o,X.u);
+      add(Object.assign({type:'Total',title:`${match} over ${g.line_total}`,p:q,fair:q,key:`c|${g.id}|tot|o`},at(X.o)));
+      add(Object.assign({type:'Total',title:`${match} under ${g.line_total}`,p:1-q,fair:1-q,key:`c|${g.id}|tot|u`},at(X.u)));
     }
     try{ cfbTTPicks(g,null).forEach(f=>{
       const p=Math.abs(f.gap)>=7?0.555:0.54;
-      add({type:'Team total',title:`${f.team} team total ${f.bet.toLowerCase()} ${f.book.toFixed(1)}`,p,fair:0.5,fade:true,
-        note:`TT fade: model ${f.model.toFixed(1)} is ${Math.abs(f.gap).toFixed(1)} off${f.imp?' (book TT implied)':''}`,key:`c|${g.id}|tt${f.sd}|${f.bet[0]}`});
+      const o=f.bet==='Over'?(f.sd==='h'?X.tho:X.tao):(f.sd==='h'?X.thu:X.tau);
+      add(Object.assign({type:'Team total',title:`${f.team} team total ${f.bet.toLowerCase()} ${f.book.toFixed(1)}`,p,fair:0.5,fade:true,
+        note:`TT fade: model ${f.model.toFixed(1)} is ${Math.abs(f.gap).toFixed(1)} off${f.imp?' (book TT implied)':''}`,key:`c|${g.id}|tt${f.sd}|${f.bet[0]}`},at(o)));
     }); }catch(e){}
   });
   return out;
