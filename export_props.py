@@ -121,6 +121,11 @@ def player_games(pbp, pos):
                   spread=("spread_line", "first"), total=("total_line", "first"))
              .reset_index())
 
+    # two-point tries are not carries, targets or yards in the box score, so
+    # no book counts them (2026-11-13: about 70 "carries" a season were)
+    if "two_point_attempt" in d.columns:
+        d = d[d.two_point_attempt != 1]
+
     # --- rushing
     ru = d[(d.rush_attempt == 1) & d.rusher_player_id.notna()].copy()
     ru["yds"] = ru.rushing_yards.fillna(ru.yards_gained).fillna(0)
@@ -657,14 +662,26 @@ def backtest(pg, carries, train_season, test_season):
     if len(tr) < 500 or len(te) < 100:
         return None
     M = fit_models(tr, carries[carries.season == train_season] if "season" in carries else carries)
-    cs = {}
-    for pid, g in carries.groupby("pid"):
-        y = g.yds.values
-        cs[pid] = (len(y), {t: int((y >= t).sum()) for t in Q_THR})
+    # each player's carries in game order, so a game is scored on the carries
+    # he had BEFORE it. Until 2026-11-13 this used every carry in the file,
+    # including the game being scored and the ones after it, which flattered
+    # the longest-rush backtest (2026 log loss 0.634 with the peek, 0.642 without).
+    by = {}
+    if "t" in carries:
+        for pid, g in carries.sort_values("t").groupby("pid"):
+            by[pid] = (g.t.values, g.yds.values)
+
+    def before(pid, t):
+        if pid not in by:
+            return None
+        tt, yy = by[pid]
+        y = yy[:int(np.searchsorted(tt, t, side="left"))]
+        return (len(y), {q: int((y >= q).sum()) for q in Q_THR})
+
     P = {"atd": ([], []), "ptd": ([], []), "car": ([], []), "lrush": ([], []), "combo": ([], [])}
     LRC = ([], [])
     for _, r in te.iterrows():
-        o = predict_row(M, r.to_dict(), cs.get(r.pid))
+        o = predict_row(M, r.to_dict(), before(r.pid, r.t))
         P["atd"][0].append(o["atd"]); P["atd"][1].append(r.td)
         if "ptd" in o:
             pm = np.array(o["ptd"])
@@ -718,10 +735,13 @@ def mkey(s):
 
 def carries_table(pbp, pos):
     ru = pbp[(pbp.rush_attempt == 1) & pbp.rusher_player_id.notna()].copy()
+    if "two_point_attempt" in ru.columns:
+        ru = ru[ru.two_point_attempt != 1]
     ru["yds"] = ru.rushing_yards.fillna(ru.yards_gained).fillna(0)
     ru["pid"] = ru.rusher_player_id
     ru["pos"] = ru.pid.map(pos).map(POS_GROUP)
-    return ru[["season", "pid", "pos", "yds"]].dropna()
+    ru["t"] = ru.season * 100 + ru.week          # same game clock as player_games
+    return ru[["season", "t", "pid", "pos", "yds"]].dropna()
 
 
 def main():
