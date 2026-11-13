@@ -691,22 +691,31 @@ def fit_ngs_phase(tw, teams, value_col, weight_col, alpha, as_of_season, as_of_w
 # --------------------------------------------------------------------------
 
 def special_teams_rating(pbp, teams, as_of_season, as_of_week, cfg=CONFIG):
+    """Special teams EPA per play, both sides of every kick.
+
+    Each special-teams play is credited to the team with possession (the
+    kicking team on punts and field goals, the receiving team on kickoffs)
+    AND charged to the team across from it. Until 2026-11-13 only the
+    possession side counted, so a team's punt and kick coverage, its return
+    defense and its block units were never rated -- half the plays.
+    Walk-forward, counting both sides: miss vs the final margin 13.564 ->
+    13.550 on 2017-21 and 12.550 -> 12.533 on 2022-26 (better in both).
+    """
     st = special_teams_plays(pbp)
     st = st[(st["season"] < as_of_season) |
             ((st["season"] == as_of_season) & (st["week"] < as_of_week))]
     if len(st) == 0:
         return pd.Series(0.0, index=teams)
     w = play_weights(st, as_of_season, as_of_week, cfg)
-    st = st.assign(_w=w)
-    # EPA credited to the team with possession; kicking team on FG/punt/KO
-    num = st.groupby("posteam").apply(
-        lambda g: np.average(g["epa"], weights=g["_w"]) if g["_w"].sum() > 0 else 0.0
-    )
-    cnt = st.groupby("posteam")["_w"].sum()
-    # shrink toward 0 based on sample
-    shrunk = num * (cnt / (cnt + 250.0))
-    out = shrunk.reindex(teams).fillna(0.0)
-    return out - out.mean()
+    st = st.assign(_w=w, _we=w * st["epa"].values)
+
+    def side(col):
+        # weighted mean EPA, shrunk toward 0 by 250 plays of "average"
+        g = st[st[col].notna()].groupby(col)[["_we", "_w"]].sum()
+        v = (g["_we"] / (g["_w"] + 250.0)).reindex(teams).fillna(0.0)
+        return v - v.mean()
+
+    return side("posteam") - side("defteam")
 
 
 # --------------------------------------------------------------------------
