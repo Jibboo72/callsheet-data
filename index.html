@@ -1647,7 +1647,7 @@ function scoreWeeklyBlock(lg,rows){
   const tot={}; cols.forEach(([k])=>{ tot[k]={w:0,l:0,p:0}; wks.forEach(w=>{ ['w','l','p'].forEach(f=>tot[k][f]+=W[w][k][f]); }); });
   const cw=Math.floor(84/cols.length);
   let h=`<div class="pblock"><div class="pbh">By week · model record</div><div class="pbody">
-    <div class="note" style="margin:0 0 8px">Each market graded as a bet on the model’s side, gaps of 1+ point (smaller is noise). ${lg==='cfb'?'TT fade and Tot fade are the fixed rules below (bet against the model when it’s 5+ off); Split fades it in conference and late-season games and follows it in early non-conference ones (from Nov 8). College model totals are pulled about halfway to average from Nov 8; the fade rules keep using the raw number they were tested on.':'Tot rule is the fixed totals rule below (follow the model when it’s 5+ off).'} Team totals start from when the app began saving them. Green 52.4%+ (break-even at −110), red under 47.6%; “p” = pushes.</div>
+    <div class="note" style="margin:0 0 8px">Each market graded as a bet on the model’s side, gaps of 1+ point (smaller is noise). ${lg==='cfb'?'TT fade and Tot fade are the fixed rules below (bet against the model when it’s 5+ off); Split fades it in conference and late-season games and follows it in early non-conference ones (from Nov 8). College model totals are pulled about halfway to average from Nov 8; the fade rules keep using the raw number they were tested on.':'Tot rule tracks the model’s side when its total is 5+ off the book. It stopped being a qualifier Nov 13 (reran at 49% on 2021–25); the column stays so you can watch it. NFL model totals are pulled 30% toward average from Nov 13.'} Team totals start from when the app began saving them. Green 52.4%+ (break-even at −110), red under 47.6%; “p” = pushes.</div>
     <table class="pow" style="width:100%;table-layout:fixed;font-size:12px"><colgroup><col style="width:16%">${cols.map(()=>`<col style="width:${cw}%">`).join('')}</colgroup>
     <thead><tr><th style="text-align:left;letter-spacing:0">Wk</th>${cols.map(([,l])=>`<th style="letter-spacing:0;font-size:10px">${l}</th>`).join('')}</tr></thead><tbody>`;
   wks.forEach((w,i)=>{
@@ -3758,7 +3758,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-11 20:40 UTC';
+const BUILD_STAMP='2026-11-13 14:32 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -4934,12 +4934,13 @@ function nflQualifiers(games,wk){
   });
   return h+nflTotalQualifiers(games)+`</div></div>`;
 }
-/* Totals that pass the tested rules (2021-25 walk-forward, NFL):
+/* Totals that pass the tested rules (NFL):
      - the Weather unders flag (outdoor, rain/snow or 15+ mph wind): under.
        190-135 (58.5%) since 2016; wind 15+ alone went 53-34 (61%) 2021-25
-     - model total 5+ off the book's: 111-97 (53%) on the model's side, its
-       unders better than its overs (25-18 vs 86-79) -- unders 1 unit, overs
-       a half-unit lean
+   Dropped 2026-11-13: "model total 5+ off the book's". Its 111-97 (53%) was
+   scored on an older model; rerun on the current one it is 72-75 (49%) for
+   2021-25 and 55-66 (45.5%) for 2017-21, so the model total alone no longer
+   makes a qualifier (the Scorecard's Tot rule column keeps tracking it).
    Team totals against the model tested flat (50-51%) and aren't listed. */
 function nflTotalQualifiers(games){
   const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
@@ -4955,18 +4956,16 @@ function nflTotalQualifiers(games){
     const windy=!!(w&&w.flags&&w.flags.length&&(w.grade==null||w.grade==='strong'));
     const gap=g.ptot!=null?g.ptot-book:null;
     const big=gap!=null&&Math.abs(gap)>=5;
-    if(!windy&&!big)return;
-    let side,units,why=[];
-    if(windy){ side='Under'; units=1; why.push('weather: '+wxTag(w)); if(big&&gap<0)why.push(`model ${g.ptot.toFixed(1)}`); }
-    else if(gap<0){ side='Under'; units=1; why.push(`model ${g.ptot.toFixed(1)} vs ${book}`); }
-    else { side='Over'; units=0.5; why.push(`model ${g.ptot.toFixed(1)} vs ${book} · lean`); }
-    if(windy&&big&&gap>0)why.push(`model says over (${g.ptot.toFixed(1)}) — weather rule wins`);
+    if(!windy)return;                 // the model total alone no longer qualifies (see above)
+    let side='Under',units=1,why=['weather: '+wxTag(w)];
+    if(big&&gap<0)why.push(`model ${g.ptot.toFixed(1)}`);
+    if(big&&gap>0)why.push(`model says over (${g.ptot.toFixed(1)}) — weather rule wins`);
     const price=tl?(side==='Under'?tl.under:tl.over):null;
     rows.push({g,side,book,price,units,why:why.join(' · '),src:tl&&tl.line!=null?'DK':'consensus',k:(windy?10:0)+Math.abs(gap||0)});
   });
   rows.sort((a,b)=>b.k-a.k);
   let h=`<div class="lab" style="margin:10px 0 2px">Totals</div>`;
-  if(!rows.length) return h+`<div class="note" style="margin:0">No totals qualify right now (an outdoor weather flag — rain/snow or 15+ mph wind — or the model total 5+ off the book).</div>`;
+  if(!rows.length) return h+`<div class="note" style="margin:0">No totals qualify right now (needs an outdoor weather flag — likely rain/snow or 25+ mph wind). The model total alone stopped qualifying Nov 13: 5+ off the book reran at 49%.</div>`;
   rows.forEach(r=>{
     h+=`<div class="row" style="display:block;padding:7px 0;border-bottom:1px dashed color-mix(in srgb,var(--ink) 30%,transparent)">
       <div style="font-family:var(--fb);font-weight:700;font-size:15px">${r.side} ${r.book}${r.price?` <span style="font-weight:400;font-size:12px">${esc(String(r.price))} ${r.src}</span>`:` <span style="font-weight:400;font-size:12px">${r.src}</span>`} · <span style="color:var(--win)">${r.units} unit${r.units===1?'':'s'}</span></div>
@@ -5182,7 +5181,10 @@ function cardBetHasPicks(x){
    props only on main lines (book fair 35-65%) -- alt lines like receptions
    over 0.5 at -900 or under 0.5 at +450 are filler.
    Cuts are kept per day (S.todayCut) and can be put back. */
-const TD_K={nflTot:0.10, sdSide:13.5, sdTot:13};
+// nflTot: how far the model total moves a total's win chance. 0 since 2026-11-13:
+// fit on 2017-21 and 2022-26 the weight came out zero-to-negative both times
+// (-0.06, -0.13), so the old +0.10 was showing edge on totals that isn't there.
+const TD_K={nflTot:0, sdSide:13.5, sdTot:13};
 const _todayET=()=>new Date().toLocaleDateString('en-CA',{timeZone:'America/New_York'});
 const _etDay=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'America/New_York'});
 const _etTime=t=>new Date(t).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});

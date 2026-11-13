@@ -234,6 +234,14 @@ def espn_discounts(season, before_week):
 
 CALIB_SEASONS = 3           # completed seasons the scale / home field are fit on
 
+# How far the model total is pulled toward an average game. Walk-forward
+# 2021-25 the raw totals were spread too wide: actual scoring moved 0.69
+# points for each point the model moved. Pulling 30% of the way in: miss vs
+# the final total 14.14 -> ~14.0 on 2017-21 and 13.41 -> ~13.38 on 2022-26
+# (closing total 13.58 / 13.05). Since 2026-11-13; frozen past games keep
+# the number they were shown at.
+TOTAL_PULL = 0.30
+
 
 def week_starters(g, week):
     """{team: passer id} for the quarterbacks who started that week's games
@@ -538,7 +546,10 @@ def build(season, cache_dir=None, prev_path=None):
                 c0, co, cd, ch = pts_coef
                 hp = c0 + co * float(R.loc[h, "offense"]) + cd * float(R.loc[a, "defense"]) + (0.0 if neutral else ch)
                 ap = c0 + co * float(R.loc[a, "offense"]) + cd * float(R.loc[h, "defense"])
-                ptot = round(hp + ap, 1)
+                # pulled TOTAL_PULL of the way to an average game: the raw
+                # number is spread too wide (see TOTAL_PULL)
+                base = 2 * c0 + ch
+                ptot = round(base + (1.0 - TOTAL_PULL) * ((hp + ap) - base), 1)
 
         # games.csv spread_line is from the HOME perspective, positive =
         # home favored. Keep that convention throughout.

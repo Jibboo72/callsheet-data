@@ -520,6 +520,19 @@ def sigmoid(z):
     return 1 / (1 + np.exp(-z))
 
 
+def recal(surv, cal):
+    """Apply a backtest correction (logit a + b*z) to a list of P(X >= line)
+    values and keep it from rising. Certainties (0 or 1) are left alone."""
+    if not cal:
+        return list(surv)
+    out = []
+    for p in surv:
+        if 0.001 < p < 0.999:
+            p = 1 / (1 + math.exp(-(cal[0] + cal[1] * math.log(p / (1 - p)))))
+        out.append(p)
+    return np.minimum.accumulate(np.array(out)).tolist()
+
+
 def fit_models(pg, carries):
     """pg: player-game rows with form attached (training period only).
        carries: DataFrame [pid, pos, yds] one row per carry (training period)."""
@@ -591,7 +604,15 @@ def predict_row(M, row, car_stats=None):
         mu_car = float(math.exp(beta[0] + (car_X(pd.DataFrame([row])) @ beta[1:])[0]))
         r = M["car_r"].get(g) or M["car_r"].get("RB") or 20.0
         pm = nb_pmf(mu_car, r, CAR_MAX)
-        out["car"] = [round(v, ROUND) for v in pm]
+        if M.get("car_cal"):
+            # P(carries >= L) corrected, then turned back into P(carries = k)
+            sv = np.cumsum(pm[::-1])[::-1].tolist()
+            sv[0] = 1.0                              # P(carries >= 0) is certain
+            sv = recal(sv, M["car_cal"])
+            pc = np.array(sv) - np.array(sv[1:] + [0.0])
+            out["car"] = [round(float(v), ROUND) for v in pc]
+        else:
+            out["car"] = [round(v, ROUND) for v in pm]
         out["car_mu"] = round(mu_car, 2)
         # longest rush: mix over carries, per-carry big-run chance shrunk to position
         n_c, hits = car_stats if car_stats else (0, {})
@@ -635,7 +656,8 @@ def predict_row(M, row, car_stats=None):
         th = var / mu
         rng = np.random.default_rng(zlib.crc32(str(row.get("pid")).encode()))
         s = rng.gamma(k, th, 6000)
-        out["combo"] = [round(float((s >= x).mean()), ROUND) for x in COMBO_X]
+        out["combo"] = [round(float(v), ROUND) for v in
+                        recal([float((s >= x).mean()) for x in COMBO_X], M.get("combo_cal"))]
         out["combo_mu"] = round(mu, 1)
     return out
 
@@ -680,6 +702,7 @@ def backtest(pg, carries, train_season, test_season):
 
     P = {"atd": ([], []), "ptd": ([], []), "car": ([], []), "lrush": ([], []), "combo": ([], [])}
     LRC = ([], [])
+    CARC, COMC = ([], []), ([], [])      # carries / yards at three lines each, for the corrections
     for _, r in te.iterrows():
         o = predict_row(M, r.to_dict(), before(r.pid, r.t))
         P["atd"][0].append(o["atd"]); P["atd"][1].append(r.td)
@@ -691,6 +714,8 @@ def backtest(pg, carries, train_season, test_season):
             pm = np.array(o["car"])
             L = int(math.floor(o["car_mu"])) + 1
             P["car"][0].append(pm[L:].sum()); P["car"][1].append(float(r.car >= L))
+            for LL in {max(L - 2, 1), L, L + 2}:
+                CARC[0].append(pm[LL:].sum()); CARC[1].append(float(r.car >= LL))
             s = np.array(o["lrush"])
             L = int(np.argmin(abs(s - .5))) + 1
             P["lrush"][0].append(s[L - 1]); P["lrush"][1].append(float(r.lrush >= L))
@@ -701,6 +726,8 @@ def backtest(pg, carries, train_season, test_season):
             s = np.array(o["combo"])
             x = min(int(round(o["combo_mu"] / 5)), len(s) - 1)
             P["combo"][0].append(s[x]); P["combo"][1].append(float(r.combo >= COMBO_X[x]))
+            for xx in {max(x - 3, 1), x, min(x + 3, len(s) - 1)}:
+                COMC[0].append(s[xx]); COMC[1].append(float(r.combo >= COMBO_X[xx]))
     res = {k: _brier(*v) for k, v in P.items()}
     # anytime-TD calibration by predicted chance: long shots are where a small
     # overrating turns into a big (fake) EV, so check them on their own
@@ -715,6 +742,16 @@ def backtest(pg, carries, train_season, test_season):
     if len(p) > 200:
         b = irls_logit(np.log(p / (1 - p))[:, None], np.array(LRC[1]), l2=1.0)
         res["_lrush_cal"] = [float(b[0]), float(b[1])]
+    # Carries and rush+rec yards get the same kind of correction (2026-11-13).
+    # Two seasons running the model said "over" too often on carries (44% said,
+    # 40-43% happened at its own middle line) and too rarely on yards (37-38%
+    # said, 39-40% happened). Fit on 2025 and applied to 2026: log loss
+    # 0.6238 -> 0.6201 (carries), 0.6147 -> 0.6139 (yards).
+    for key, (pp, aa2) in (("_car_cal", CARC), ("_combo_cal", COMC)):
+        p = np.clip(np.array(pp, float), 0.02, 0.98)
+        if len(p) > 200:
+            b = irls_logit(np.log(p / (1 - p))[:, None], np.array(aa2), l2=1.0)
+            res[key] = [float(b[0]), float(b[1])]
     return res
 
 
@@ -814,6 +851,9 @@ def main():
     M = fit_models(pgf, carries)
     if calib and calib.get("_lrush_cal"):
         M["lrush_cal"] = calib.pop("_lrush_cal")
+    for k in ("car_cal", "combo_cal"):
+        if calib and calib.get("_" + k):
+            M[k] = calib.pop("_" + k)
     cs = {}
     recent = carries[carries.season >= season - 1]
     for pid, g in recent.groupby("pid"):
