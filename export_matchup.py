@@ -50,9 +50,19 @@ def pace_and_tendency(pbp, season, upto_week):
 
 
 def build_export(season, week):
-    pbp = load_pbp([season])
+    # this season plus last season's plays (last season at CONFIG's
+    # prior_season_weight) -- the same inputs export_ratings.py and
+    # export_games.py use. Until 2026-11-13 this file loaded the current
+    # season alone, so a receiver card's pass-defense rank could sit up to
+    # 5 places from the Power tab's for the same team. 2017-26 walk-forward:
+    # the two-season number tracks the next game's pass EPA allowed better
+    # in every stretch of the season (-0.139 vs -0.131 overall).
+    try:
+        pbp = load_pbp([season - 1, season])
+    except Exception:
+        pbp = load_pbp([season])
     r = build_ratings(pbp, season, week, CONFIG)
-    pace = pace_and_tendency(pbp, season, week)
+    pace = pace_and_tendency(pbp, season, week)      # pace: this season only
 
     df = r.join(pace, how='left')
 

@@ -4,7 +4,7 @@ This is the master map. Each of the other repos has a short `DATA_MAP.md` that
 points back here. **Update this file in the same commit** whenever a data file,
 workflow schedule, or cross-app link changes.
 
-Last checked: 2026-11-10.
+Last checked: 2026-11-13.
 
 ## The apps
 
@@ -45,13 +45,13 @@ renaming a file breaks every app that reads it.
 
 | File | What's in it | Written by | When (UTC cron) | Read by |
 |---|---|---|---|---|
-| `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals; since 2026-11-10 team ratings include the quarterback (`teams[].qb`, `qb_adj`; games carry `qb_home` / `qb_away`) and past games' projections are never rewritten | `export_games.py` (build.yml) | Tue 10:17, Thu 18:37, Sat 09:23 + 12:41, Sun 09:17 + 12:47 | Call Sheet, SportsMF |
+| `games-2026.json` | NFL schedule, spreads/totals, model projection (`proj`, `ptot`), injuries, finals; since 2026-11-10 team ratings include the quarterback (`teams[].qb`, `qb_adj`; games carry `qb_home` / `qb_away`) and past games' projections are never rewritten; since 2026-11-13 a partly played week's remaining games use the live quarterback rules (ESPN Out / Doubtful) too | `export_games.py` (build.yml) | Tue 10:17, Thu 18:37, Sat 09:23 + 12:41, Sun 09:17 + 12:47 | Call Sheet, SportsMF |
 | `ratings-2026.json` | NFL power ratings (`rating`, `offense`, `off_pass` include the quarterback adjustment; `qb`, `qb_adj` say who and how much — next game's starter by the same `next_game_starters` rule as `games-2026.json`, since 2026-11-11) | `export_ratings.py` (build.yml) | build.yml | Call Sheet, SportsMF |
-| `matchup.json` | NFL matchup grades (pass/rush D) | `export_matchup.py` (build.yml) | build.yml | Call Sheet |
+| `matchup.json` | NFL matchup grades (pass/rush D; built on this season plus last season's plays since 2026-11-13, the same inputs as `ratings-2026.json`) | `export_matchup.py` (build.yml) | build.yml | Call Sheet |
 | `props-2026.json` | Player prop distributions (ATD with `tdu` TD-usage block, pass TDs, carries, longest rush, rush+rec yds), backtest calib (incl. `atd_bins`, anytime-TD calibration by predicted chance, used by the app to correct TD chances), recent results | `export_props.py` (build.yml) — also pulls nflverse depth charts and ffopportunity expected yards (both free, optional) | build.yml | Call Sheet |
 | `receivers-2026.json`, `receivers-2025.json` | Receiver game logs (incl. per-game `xtd`) | `build_receivers.py` (build.yml) | build.yml | Call Sheet |
 | `roster-2026.json` | Roster, status, injury report, snaps; `team` checked against ESPN's live rosters (a moved player carries `from` = old team, since 2026-11-11) | `export_roster.py` (build.yml) | build.yml | Call Sheet (and `export_props.py`, which takes each player's team from it) |
-| `def_history.json` | Weekly defense ranks | `export_def_history.py` (build.yml) | build.yml | `build_receivers.py` only |
+| `def_history.json` | Weekly defense ranks (two seasons of plays since 2026-11-13, like `matchup.json`) | `export_def_history.py` (build.yml) | build.yml | `build_receivers.py` only |
 | `odds-2026.json` | NFL odds + player props from SportsGameOdds (`lines`, `props`, `start`) | `pull_odds.py` (odds.yml) | Wed 10:13, Fri 19:53 | Call Sheet, SportsMF |
 | `closing-2026.json` | Last pregame prices per game (lines, team totals, NFL props), captured 0–50 min before kickoff; pruned after 21 days | `close_odds.py` (close.yml) | every 20 min in game windows (see Gotchas) | Call Sheet (stores closing line value on each bet as `clvp`) |
 | `cfb-2026.json` | College schedule + finals (`kick` is **UTC**) | `export_cfb.py` (build.yml) | build.yml | Call Sheet |

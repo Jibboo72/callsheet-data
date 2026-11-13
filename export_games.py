@@ -483,12 +483,29 @@ def build(season, cache_dir=None, prev_path=None):
     # A played game must be projected from ratings built BEFORE it, not from
     # today's ratings (which already contain its result) — otherwise every
     # past projection looks psychic and the Scorecard flatters the model.
+    def _week_starters(w):
+        """Starters for week w's ratings. A week that is only partly played
+        (Thursday night done, Sunday still to come) keeps the live rules for
+        the teams that haven't kicked off: before 2026-11-13 those games fell
+        back to nflverse's listed starter alone, so a quarterback ESPN ruled
+        Out or Doubtful after Thursday was still in Sunday's projection (and
+        the Power table, which did move him, disagreed with the Sides card)."""
+        ws = week_starters(g, w)
+        gw = g[g.week == w]
+        pend = set(gw[gw.home_score.isna()].home_team) | set(gw[gw.home_score.isna()].away_team)
+        if not pend:
+            return ws
+        def pick(qb):
+            nx = next_game_starters(g, qb, espn_rows)
+            return {**ws, **{t: q for t, q in nx.items() if t in pend}}
+        return pick
+
     wk_ratings = {}
     if played_through:
         for w in range(1, played_through + 1):
             try:
                 wk_ratings[w] = build_ratings_qb(pbp, qp, season, w, CONFIG,
-                                                 week_starters(g, w))[0]
+                                                 _week_starters(w))[0]
             except Exception as e:
                 print(f"warning: week {w} pre-game ratings failed ({e}); "
                       f"using current ratings for it", file=sys.stderr)

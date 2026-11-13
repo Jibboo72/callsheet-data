@@ -26,8 +26,12 @@ FIRST_RATED_WEEK = 4
 
 
 def build(season):
-    pbp = load_pbp([season])
-    reg = pbp[pbp.season_type == "REG"]
+    # two seasons, like every other ratings export (see export_matchup.py)
+    try:
+        pbp = load_pbp([season - 1, season])
+    except Exception:
+        pbp = load_pbp([season])
+    reg = pbp[(pbp.season == season) & (pbp.season_type == "REG")]
     last = int(reg.week.max())
 
     weeks = {}
