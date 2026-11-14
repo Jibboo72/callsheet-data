@@ -3758,7 +3758,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-13 14:32 UTC';
+const BUILD_STAMP='2026-11-14 16:02 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
@@ -5707,6 +5707,9 @@ function renderSides(){
     + (cfb?`<nav class="tabs" style="margin:-6px 0 14px">
       ${[['all','All'],['fbs','FBS'],['fcs','FCS']].map(([k,l])=>`<button data-cfbdiv="${k}" aria-selected="${(S.cfbDiv||'all')===k}">${l}</button>`).join('')}
     </nav>`:'')
+    + `<nav class="tabs" style="margin:-6px 0 14px">
+      ${[['time','Kickoff order'],['edge','Biggest edge']].map(([k,l])=>`<button data-sidessort="${k}" aria-selected="${(S.sidesSort||'time')===k}">${l}</button>`).join('')}
+    </nav>`
     + (isClosed(S.week)?`<div class="flag" style="margin-bottom:14px">Week ${S.week} is closed. Placing a new bet here will ask you to confirm first — grading and removing still work normally.</div>`:'');
   const all=GM().map(g=>withFinal(cfb?'cfb':'nfl',g));
   if(!all.length){
@@ -5734,6 +5737,17 @@ function renderSides(){
   // played at the bottom, most recent first — not oldest-first from September
   const todayIso=(()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
   const isPast=g=>('margin' in g)||String(g.date||'')<todayIso;
+  // "Biggest edge" order: the model's disagreement with the line, largest
+  // first, either side -- the same Edge number each card shows (college: the
+  // ratings' edge; NFL and FCS: projection vs spread). Games with no line or
+  // no model number go after them; days already played stay at the bottom.
+  const byEdge=(S.sidesSort==='edge')&&!q;
+  const edgeOf=g=>{
+    if(cfb&&S.cfbr){ const cg=(S.cfbr.games||[]).find(x=>x.id===String(g.id));
+      if(cg&&!cg.fcs){ const ce=cfbEdge(cg); return ce?ce.edge:null; } }
+    return (g.proj!=null&&g.spread!=null)?Math.abs(g.proj-g.spread):null;
+  };
+  const EDGE={}; if(byEdge) base.forEach(g=>{ EDGE[g.id]=edgeOf(g); });
   const games=base.slice().sort((a,b)=>{
     if(q){
       const pa=isPast(a)?1:0, pb=isPast(b)?1:0;
@@ -5747,6 +5761,11 @@ function renderSides(){
     const da=gameDay(a,lgk), db=gameDay(b,lgk);
     const pa=da<todayIso?1:0, pb=db<todayIso?1:0;
     if(pa!==pb)return pa-pb;
+    if(byEdge&&!pa){
+      const ea=EDGE[a.id], eb=EDGE[b.id];
+      if((ea==null)!==(eb==null))return ea==null?1:-1;
+      if(ea!=null&&eb!=null&&ea!==eb)return eb-ea;
+    }
     const dd=da.localeCompare(db);
     if(dd)return pa?-dd:dd;
     // same day: real kickoff order. College schedule kicks are UTC, so a
@@ -6596,6 +6615,8 @@ document.getElementById('sidesBoard').addEventListener('click',e=>{
   }
   const dv=e.target.closest('[data-cfbdiv]');
   if(dv){ S.cfbDiv=dv.dataset.cfbdiv; save(); renderSides(); return; }
+  const so=e.target.closest('[data-sidessort]');
+  if(so){ S.sidesSort=so.dataset.sidessort; save(); renderSides(); return; }
   const lg=e.target.closest('[data-lg]');
   if(lg){ S.league=lg.dataset.lg; save(); renderSides(); return; }
 
