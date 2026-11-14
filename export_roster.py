@@ -242,6 +242,20 @@ def build(season):
     for gid, fields in av.items():
         players[gid].update(fields)
     apply_moves(players, espn_teams_now())
+    # (after ESPN's team moves, so a traded player matches his new team)
+    # news overrides (data/overrides.json): Out / Doubtful / Questionable set
+    # this week's designation, Active clears it, so props skip or keep players
+    # the same way the game projections do
+    from overrides import load as load_overrides, key as okey
+    ov = {(o["team"], o["key"]): o["status"] for o in load_overrides()
+          if o["status"] in ("Out", "Doubtful", "Questionable", "Active")}
+    if ov:
+        for p in players.values():
+            st = ov.get((p.get("team", ""), okey(p.get("name", ""))))
+            if st == "Active":
+                p.pop("is", None)
+            elif st:
+                p["is"] = st
     # a player ESPN just moved isn't on nflverse's injury / snap files for his
     # new team yet; his old status (ACT / snaps) still describes him
     return {"season": int(season), "kind": "roster",

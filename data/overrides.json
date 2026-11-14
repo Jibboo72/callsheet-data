@@ -1,0 +1,7 @@
+{
+  "note": "News overrides from X. Out / Doubtful / Questionable / Active / Starting (QB). Expires after 'expires' (UTC date) or 4 days after 'posted'. See overrides.py.",
+  "entries": [
+    {"team": "MIN", "player": "Kirk Cousins", "position": "QB", "status": "Starting",
+     "source": "Adam Schefter", "posted": "2026-11-13T21:08:00Z", "expires": "2026-11-16"}
+  ]
+}

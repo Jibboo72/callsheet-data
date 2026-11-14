@@ -167,7 +167,14 @@ def _espn_status(inj):
 
 def espn_injury_rows():
     """Current injury designations from ESPN's public feed, as rows of
-    (team, name key, position, status). Empty list on any failure."""
+    (team, name key, position, status), with data/overrides.json laid on top
+    (news that broke before ESPN updated -- see overrides.py)."""
+    from overrides import apply_to_injury_rows
+    return apply_to_injury_rows(_espn_injury_rows_raw())
+
+
+def _espn_injury_rows_raw():
+    """ESPN's feed alone. Empty list on any failure."""
     try:
         req = urllib.request.Request(ESPN_INJ, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -312,6 +319,9 @@ def next_game_starters(g, qb, espn_rows=None):
                   f"{qb['name'].get(st[tm], 'replacement-level passer')}", file=sys.stderr)
     qb2 = dict(qb, recent={**qb["recent"], **st})
     st.update(expected_starters(qb2, espn_rows))
+    # 4. a "Starting" override (data/overrides.json) beats all of the above
+    from overrides import qb_starters
+    st.update(qb_starters(qb))
     return st
 
 
