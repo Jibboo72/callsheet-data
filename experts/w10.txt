@@ -1,0 +1,341 @@
+# Week 10 2026. Sat Nov 14 run. WAS-NYG played Thu Nov 12 (final 24-21 added). NE-DET in Munich: DET designated home.
+# CBS: grid page not found; per-game expert tables from the CBS Week 10 Picks Hub (Nov 13) treated as ATS (rows carry spreads; Dubin matches his ATS column). No WAS-NYG; LAC-BAL unreadable.
+# CAR-NO: BR and Athlon quote Panthers -1.5 while others have Saints -2.5: sides kept, lines dropped (also SBD early NO +1.5). NFL.com WAS-NYG left out (pick sides unreadable). ESPN: no WAS-NYG; Seth Walder not a picker (Aaron Schatz, not tracked).
+# Skipped: RotoWire BtB (Whalen already in via staff grid).
+game WAS-NYG 2026-11-12 24 21
+game NE-DET 2026-11-15
+game KC-ATL 2026-11-15
+game HOU-CLE 2026-11-15
+game MIN-GB 2026-11-15
+game MIA-IND 2026-11-15
+game CAR-NO 2026-11-15
+game BUF-NYJ 2026-11-15
+game JAX-TEN 2026-11-15
+game LAR-ARI 2026-11-15
+game SEA-LV 2026-11-15
+game SF-DAL 2026-11-15
+game PIT-CIN 2026-11-15
+game LAC-BAL 2026-11-16
+
+# RotoWire - NFL Staff Picks: Week 10 (BetMGM lines, updated 2026-11-11)
+# All 14 games read verbatim from the picks table. Season ATS records (thru Wk 9): Erickson 60-72-4, Pianowski 65-67-4, Whalen 61-71-4, Coventry 61-71-4, Hartitz 66-66-4.
+grp WAS-NYG WAS 2 | jeff-erickson:NYG scott-pianowski:NYG nick-whalen:WAS jim-coventry:WAS ian-hartitz:NYG
+grp NE-DET NE 3 | jeff-erickson:DET scott-pianowski:NE nick-whalen:DET jim-coventry:DET ian-hartitz:DET
+grp KC-ATL KC -3.5 | jeff-erickson:KC scott-pianowski:KC nick-whalen:KC jim-coventry:KC ian-hartitz:KC
+grp HOU-CLE HOU -4.5 | jeff-erickson:CLE scott-pianowski:CLE nick-whalen:CLE jim-coventry:HOU ian-hartitz:HOU
+grp MIN-GB MIN 3.5 | jeff-erickson:GB scott-pianowski:MIN nick-whalen:MIN jim-coventry:MIN ian-hartitz:GB
+grp MIA-IND MIA 4 | jeff-erickson:IND scott-pianowski:MIA nick-whalen:IND jim-coventry:MIA ian-hartitz:MIA
+grp CAR-NO CAR 2.5 | jeff-erickson:NO scott-pianowski:CAR nick-whalen:CAR jim-coventry:CAR ian-hartitz:CAR
+grp BUF-NYJ BUF -8 | jeff-erickson:NYJ scott-pianowski:NYJ nick-whalen:NYJ jim-coventry:NYJ ian-hartitz:BUF
+grp JAX-TEN JAX -10.5 | jeff-erickson:JAX scott-pianowski:TEN nick-whalen:JAX jim-coventry:JAX ian-hartitz:JAX
+grp LAR-ARI LAR -9.5 | jeff-erickson:LAR scott-pianowski:LAR nick-whalen:ARI jim-coventry:LAR ian-hartitz:LAR
+grp SEA-LV SEA -6.5 | jeff-erickson:SEA scott-pianowski:SEA nick-whalen:SEA jim-coventry:SEA ian-hartitz:SEA
+grp SF-DAL SF -4 | jeff-erickson:DAL scott-pianowski:SF nick-whalen:SF jim-coventry:SF ian-hartitz:SF
+grp PIT-CIN PIT 3.5 | jeff-erickson:PIT scott-pianowski:PIT nick-whalen:PIT jim-coventry:PIT ian-hartitz:PIT
+grp LAC-BAL LAC 4.5 | jeff-erickson:BAL scott-pianowski:BAL nick-whalen:LAC jim-coventry:BAL ian-hartitz:BAL
+
+# Bleacher Report - Moe Moton et al. (FanDuel lines as of Wed Nov 11 4pm ET, article Nov 12, 2026)
+# All 14 games read; picks copied from the page's Predictions lists. Season ATS: Moton 74-60-2, Hanford 64-70-2, Knox 64-70-2, Davenport 61-73-2, Gagnon 59-75-2, Sobleski 59-75-2, O'Donnell 58-76-2
+grp WAS-NYG NYG -1.5 | kris-knox:WAS gary-davenport:NYG brad-gagnon:NYG ian-hanford:NYG wes-odonnell:NYG moe-moton:NYG brent-sobleski:NYG
+grp NE-DET DET -2.5 | brad-gagnon:NE wes-odonnell:NE gary-davenport:DET ian-hanford:DET kris-knox:DET moe-moton:DET brent-sobleski:DET
+grp MIN-GB GB -3 | kris-knox:MIN moe-moton:MIN gary-davenport:GB brad-gagnon:GB ian-hanford:GB wes-odonnell:GB brent-sobleski:GB
+grp HOU-CLE HOU -4.5 | gary-davenport:HOU brad-gagnon:HOU kris-knox:HOU moe-moton:HOU wes-odonnell:HOU brent-sobleski:HOU ian-hanford:CLE
+grp KC-ATL KC -3.5 | gary-davenport:KC ian-hanford:KC kris-knox:KC moe-moton:KC wes-odonnell:KC brent-sobleski:KC brad-gagnon:ATL
+grp MIA-IND IND -2.5 | gary-davenport:MIA brad-gagnon:MIA ian-hanford:MIA kris-knox:IND moe-moton:IND wes-odonnell:IND brent-sobleski:IND
+grp JAX-TEN JAX -9.5 | gary-davenport:JAX ian-hanford:JAX kris-knox:JAX moe-moton:JAX wes-odonnell:JAX brent-sobleski:JAX brad-gagnon:TEN
+grp CAR-NO | brad-gagnon:CAR ian-hanford:CAR moe-moton:CAR wes-odonnell:CAR gary-davenport:NO kris-knox:NO brent-sobleski:NO
+grp BUF-NYJ BUF -7.5 | gary-davenport:BUF ian-hanford:BUF moe-moton:BUF wes-odonnell:BUF brad-gagnon:NYJ kris-knox:NYJ brent-sobleski:NYJ
+grp LAR-ARI LAR -7.5 | gary-davenport:LAR brad-gagnon:LAR ian-hanford:LAR kris-knox:LAR moe-moton:LAR wes-odonnell:LAR brent-sobleski:LAR
+grp SEA-LV SEA -6.5 | gary-davenport:SEA brad-gagnon:SEA kris-knox:SEA moe-moton:SEA wes-odonnell:SEA brent-sobleski:SEA ian-hanford:LV
+grp SF-DAL SF -4.5 | gary-davenport:SF brad-gagnon:SF ian-hanford:SF kris-knox:SF wes-odonnell:SF moe-moton:DAL brent-sobleski:DAL
+grp PIT-CIN CIN -3.5 | gary-davenport:PIT brad-gagnon:PIT ian-hanford:PIT moe-moton:PIT wes-odonnell:PIT kris-knox:CIN brent-sobleski:CIN
+grp LAC-BAL BAL -5.5 | brad-gagnon:LAC ian-hanford:LAC wes-odonnell:LAC brent-sobleski:LAC gary-davenport:BAL kris-knox:BAL moe-moton:BAL
+
+# Yahoo Sports - Frank Schwab (lines as quoted in article, Nov 12, 2026)
+# All 14 games read; opening of article (Vikings-Packers intro) cut off but pick line "Packers -3 is the pick" readable. Season to date: 62-71-2 (last week 9-6)
+pick frank-schwab MIN-GB GB -3
+pick frank-schwab WAS-NYG WAS 2.5
+pick frank-schwab NE-DET NE 2.5
+pick frank-schwab HOU-CLE HOU -4.5
+pick frank-schwab JAX-TEN TEN 10.5
+pick frank-schwab MIA-IND IND -3.5
+pick frank-schwab BUF-NYJ NYJ 8
+pick frank-schwab CAR-NO CAR 2.5
+pick frank-schwab KC-ATL KC -3.5
+pick frank-schwab LAR-ARI ARI 9.5
+pick frank-schwab SEA-LV SEA -6.5
+pick frank-schwab SF-DAL SF -4.5
+pick frank-schwab PIT-CIN PIT 3.5
+pick frank-schwab LAC-BAL BAL -4.5
+
+# Athlon Sports - Craig Ellenport (lines as shown in article, 2026-11-12)
+# All 14 games read; picks verbatim (table layout restructured by fetcher). No season records published. No score predictions.
+# Note: Athlon shows Panthers -1.5 at Saints; RotoWire/Covers have Saints -2.5. Kept as quoted. Athlon SEA -3.5 vs others -6.5, also as quoted.
+grp WAS-NYG WAS 2.5 | cory-bonini:WAS luke-easterling:NYG craig-ellenport:NYG doug-farrar:NYG
+grp NE-DET NE 2.5 | cory-bonini:DET luke-easterling:NE craig-ellenport:DET doug-farrar:DET
+grp BUF-NYJ BUF -8.5 | cory-bonini:BUF luke-easterling:BUF craig-ellenport:BUF doug-farrar:NYJ
+grp KC-ATL KC -3.5 | cory-bonini:KC luke-easterling:KC craig-ellenport:KC doug-farrar:KC
+grp MIA-IND MIA 2.5 | cory-bonini:IND luke-easterling:MIA craig-ellenport:MIA doug-farrar:MIA
+grp JAX-TEN JAX -10.5 | cory-bonini:TEN luke-easterling:JAX craig-ellenport:JAX doug-farrar:JAX
+grp MIN-GB MIN 4.5 | cory-bonini:MIN luke-easterling:GB craig-ellenport:GB doug-farrar:MIN
+grp CAR-NO | cory-bonini:CAR luke-easterling:CAR craig-ellenport:CAR doug-farrar:NO
+grp HOU-CLE HOU -4.5 | cory-bonini:HOU luke-easterling:HOU craig-ellenport:HOU doug-farrar:HOU
+grp LAR-ARI LAR -9.5 | cory-bonini:LAR luke-easterling:LAR craig-ellenport:LAR doug-farrar:ARI
+grp SEA-LV SEA -3.5 | cory-bonini:SEA luke-easterling:SEA craig-ellenport:SEA doug-farrar:SEA
+grp SF-DAL SF -4.5 | cory-bonini:SF luke-easterling:SF craig-ellenport:SF doug-farrar:SF
+grp PIT-CIN PIT 3.5 | cory-bonini:CIN luke-easterling:CIN craig-ellenport:PIT doug-farrar:CIN
+grp LAC-BAL LAC 5.5 | cory-bonini:LAC luke-easterling:BAL craig-ellenport:LAC doug-farrar:BAL
+
+# Covers - Chris Vasile (Covers lines as quoted, updated 2026-11-12)
+# All 14 games read; picks verbatim from section headers. No explicit score predictions (only margin talk), so no score lines.
+pick chris-vasile WAS-NYG NYG -2.5
+pick chris-vasile NE-DET DET -2.5
+pick chris-vasile MIN-GB GB -3.5
+pick chris-vasile MIA-IND IND -3.5
+pick chris-vasile JAX-TEN JAX -10.5
+pick chris-vasile BUF-NYJ BUF -7.5
+pick chris-vasile CAR-NO NO -2.5
+pick chris-vasile KC-ATL ATL 3.5
+pick chris-vasile HOU-CLE CLE 5.5
+pick chris-vasile SEA-LV SEA -6.5
+pick chris-vasile LAR-ARI ARI 9.5
+pick chris-vasile SF-DAL SF -4.5
+pick chris-vasile PIT-CIN CIN -3.5
+pick chris-vasile LAC-BAL LAC 4.5
+
+# Fantasy Alarm - Bryan Derr (DraftKings, 2026-11-11)
+# All 14 games read verbatim from picks table. BAL pick: body text says -4, table says -4.5 (table used).
+pick bryan-derr WAS-NYG NYG -2.5
+pick bryan-derr NE-DET DET -2.5
+pick bryan-derr BUF-NYJ NYJ 8.5
+pick bryan-derr CAR-NO CAR 2.5
+pick bryan-derr HOU-CLE HOU -4.5
+pick bryan-derr JAX-TEN JAX -10.5
+pick bryan-derr KC-ATL KC -3.5
+pick bryan-derr MIA-IND MIA 3.5
+pick bryan-derr MIN-GB MIN 3.5
+pick bryan-derr LAR-ARI ARI 9.5
+pick bryan-derr SEA-LV SEA -6.5
+pick bryan-derr SF-DAL SF -3.5
+pick bryan-derr PIT-CIN PIT 3.5
+pick bryan-derr LAC-BAL BAL -4.5
+
+# Sports Betting Dime - Sascha Paruk / SBD A.I. prediction model (Novig, 2026-11-09)
+# All 14 games read verbatim from table (picks inferred from the spread entry shown). Skipped the separate Zach Reger SBD ATS article (human author, not the model).
+pick sbd-model WAS-NYG WAS 1.5
+pick sbd-model NE-DET NE 2.5
+pick sbd-model KC-ATL KC -3.5
+pick sbd-model BUF-NYJ NYJ 7.5
+pick sbd-model MIA-IND MIA 2.5
+pick sbd-model MIN-GB MIN 3.5
+pick sbd-model CAR-NO NO
+pick sbd-model JAX-TEN TEN 9.5
+pick sbd-model HOU-CLE CLE 4.5
+pick sbd-model SEA-LV LV 3.5
+pick sbd-model LAR-ARI ARI 7.5
+pick sbd-model SF-DAL SF -4.5
+pick sbd-model PIT-CIN PIT 3.5
+pick sbd-model LAC-BAL LAC 5.5
+
+# Sports Illustrated - Iain MacMillan (DraftKings, 2026-11-12)
+# All 14 games verbatim from "Pick:" lines.
+pick iain-macmillan WAS-NYG NYG -2.5
+pick iain-macmillan NE-DET NE 2.5
+pick iain-macmillan KC-ATL KC -3
+pick iain-macmillan HOU-CLE HOU -4.5
+pick iain-macmillan MIN-GB GB -3
+pick iain-macmillan JAX-TEN JAX -10.5
+pick iain-macmillan MIA-IND IND -3.5
+pick iain-macmillan CAR-NO CAR 2.5
+pick iain-macmillan BUF-NYJ NYJ 8.5
+pick iain-macmillan SEA-LV LV 6.5
+pick iain-macmillan LAR-ARI ARI 9.5
+pick iain-macmillan SF-DAL DAL 4.5
+pick iain-macmillan PIT-CIN CIN -3.5
+pick iain-macmillan LAC-BAL LAC 4.5
+
+# FanSided - Cody Williams (no sportsbook named, 2026-11-11)
+# Verbatim from picks table; 14/14 games. Season ATS record entering Week 10: 62-73-3 (SU 83-56).
+pick cody-williams WAS-NYG NYG -1.5
+pick cody-williams NE-DET DET -2.5
+pick cody-williams MIN-GB MIN 3.5
+pick cody-williams HOU-CLE CLE 4.5
+pick cody-williams KC-ATL KC -3.5
+pick cody-williams MIA-IND IND -3.5
+pick cody-williams JAX-TEN JAX -10.5
+pick cody-williams CAR-NO CAR 2.5
+pick cody-williams BUF-NYJ BUF -7.5
+pick cody-williams LAR-ARI ARI 9.5
+pick cody-williams SEA-LV LV 6.5
+pick cody-williams SF-DAL SF -4.5
+pick cody-williams PIT-CIN CIN -3.5
+pick cody-williams LAC-BAL BAL -4.5
+
+# Sportsbook Review - Gary Pearson (no sportsbook named, "latest NFL odds", 2026-11-11)
+# Verbatim from picks table; 14/14 games. SF line shown -4 in table, -3.5 in heading (table used). No personal season record published.
+pick gary-pearson SF-DAL SF -4
+pick gary-pearson SEA-LV SEA -3.5
+pick gary-pearson LAR-ARI LAR -8.5
+pick gary-pearson WAS-NYG WAS 2.5
+pick gary-pearson NE-DET DET -2.5
+pick gary-pearson KC-ATL KC -3.5
+pick gary-pearson BUF-NYJ BUF -7
+pick gary-pearson MIA-IND IND -2.5
+pick gary-pearson JAX-TEN TEN 10.5
+pick gary-pearson HOU-CLE CLE 5
+pick gary-pearson MIN-GB GB -4.5
+pick gary-pearson CAR-NO CAR 1.5
+pick gary-pearson PIT-CIN PIT 3.5
+pick gary-pearson LAC-BAL BAL -5
+
+# PhillyVoice - Jimmy Kempski (lines as quoted in article, Thu 2026-11-12)
+# Only ATS pick made: "Picks against the spread: Commanders (+2.5)." Author said he may add more before Sunday (not present at fetch). Straight-up picks for other games not included (not ATS). No survivor pick in text, no score predictions.
+pick jimmy-kempski WAS-NYG WAS 2.5
+
+# The Ringer - Anthony Dabbundo (odds as quoted, Thu 2026-11-12)
+# Spread bets only. Skipped totals/team totals/props, plus "Games I'm Considering" leans not placed as bets (Saints -1 or better, Cowboys +4.5).
+pick anthony-dabbundo WAS-NYG WAS 1.5
+pick anthony-dabbundo PIT-CIN PIT 3.5
+
+# CBS Sports - expert panel (SportsLine consensus lines, Week 10 Picks Hub article Nov 13, 2026)
+# The /nfl/picks/experts/against-the-spread/10/ grid page did not come up in search; used the per-game expert tables in the Week 10 Picks Hub instead. Tables have no ATS/SU header; treated as ATS because each row label carries a spread and Dubin's picks match his separately published ATS picks. Missing: WAS-NYG (no table), LAC-BAL (cells unreadable). No season records shown.
+grp NE-DET DET -3 | pete-prisco:DET jared-dubin:DET ryan-wilson:DET john-breech:DET tyler-sullivan:DET dave-richard:DET jamey-eisenberg:DET
+grp BUF-NYJ BUF -8.5 | pete-prisco:BUF jared-dubin:BUF ryan-wilson:BUF john-breech:NYJ tyler-sullivan:BUF dave-richard:BUF jamey-eisenberg:BUF
+grp CAR-NO NO -2.5 | pete-prisco:NO jared-dubin:CAR ryan-wilson:CAR john-breech:CAR tyler-sullivan:CAR dave-richard:NO jamey-eisenberg:NO
+grp HOU-CLE HOU -4.5 | pete-prisco:CLE jared-dubin:HOU ryan-wilson:HOU john-breech:HOU tyler-sullivan:CLE dave-richard:HOU jamey-eisenberg:HOU
+grp JAX-TEN JAX -10.5 | pete-prisco:JAX jared-dubin:JAX ryan-wilson:JAX john-breech:JAX tyler-sullivan:JAX dave-richard:JAX jamey-eisenberg:JAX
+grp KC-ATL KC -3.5 | pete-prisco:KC jared-dubin:KC ryan-wilson:KC john-breech:KC tyler-sullivan:KC dave-richard:ATL jamey-eisenberg:KC
+grp MIA-IND IND -3.5 | pete-prisco:MIA jared-dubin:IND ryan-wilson:MIA john-breech:IND tyler-sullivan:IND dave-richard:IND jamey-eisenberg:IND
+grp MIN-GB GB -3.5 | pete-prisco:GB jared-dubin:MIN ryan-wilson:MIN john-breech:MIN tyler-sullivan:MIN dave-richard:MIN jamey-eisenberg:MIN
+grp LAR-ARI LAR -9.5 | pete-prisco:ARI jared-dubin:LAR ryan-wilson:LAR john-breech:ARI tyler-sullivan:LAR dave-richard:ARI jamey-eisenberg:ARI
+grp SEA-LV SEA -6.5 | pete-prisco:SEA jared-dubin:SEA ryan-wilson:SEA john-breech:SEA tyler-sullivan:SEA dave-richard:LV jamey-eisenberg:SEA
+grp SF-DAL SF -3.5 | pete-prisco:SF jared-dubin:SF ryan-wilson:SF john-breech:SF tyler-sullivan:SF dave-richard:SF jamey-eisenberg:SF
+grp PIT-CIN CIN -3.5 | pete-prisco:CIN jared-dubin:PIT ryan-wilson:CIN john-breech:PIT tyler-sullivan:PIT dave-richard:PIT jamey-eisenberg:PIT
+
+# ProFootballTalk - Mike Florio (score predictions, no line, 2026-11-12)
+# All 14 games verbatim. Season record stated: 87-48-1 (straight up).
+score mike-florio WAS-NYG NYG 23 17
+score mike-florio NE-DET NE 23 20
+score mike-florio KC-ATL KC 27 17
+score mike-florio HOU-CLE HOU 20 16
+score mike-florio MIN-GB MIN 24 20
+score mike-florio MIA-IND IND 17 7
+score mike-florio CAR-NO NO 27 20
+score mike-florio BUF-NYJ BUF 30 17
+score mike-florio JAX-TEN JAX 24 13
+score mike-florio LAR-ARI LAR 17 13
+score mike-florio SEA-LV SEA 16 9
+score mike-florio SF-DAL SF 31 20
+score mike-florio PIT-CIN CIN 27 23
+score mike-florio LAC-BAL BAL 14 6
+
+# NFL.com - NFL.com editors (Bergman, Cersosimo, Filice, Kownack, Parr) (no line source; page undated, editor update Fri 2026-11-13)
+# Winners read from team logos beside scores (WebFetch). WAS-NYG omitted: page marks all 5 picks "Incorrect pick" though they split WAS/NYG (WAS won), so winner attribution for that game is unreliable.
+score bobby-kownack NE-DET NE 27 26
+score brooke-cersosimo NE-DET DET 28 24
+score dan-parr NE-DET DET 27 23
+score gennaro-filice NE-DET DET 31 21
+score jeremy-bergman NE-DET DET 30 23
+score bobby-kownack KC-ATL KC 28 21
+score brooke-cersosimo KC-ATL KC 26 23
+score dan-parr KC-ATL KC 26 21
+score gennaro-filice KC-ATL KC 31 19
+score jeremy-bergman KC-ATL ATL 31 27
+score bobby-kownack HOU-CLE HOU 28 20
+score brooke-cersosimo HOU-CLE HOU 23 20
+score dan-parr HOU-CLE HOU 23 15
+score gennaro-filice HOU-CLE HOU 26 17
+score jeremy-bergman HOU-CLE HOU 23 20
+score bobby-kownack MIN-GB GB 24 23
+score brooke-cersosimo MIN-GB GB 24 22
+score dan-parr MIN-GB GB 21 17
+score gennaro-filice MIN-GB GB 22 16
+score jeremy-bergman MIN-GB GB 20 16
+score bobby-kownack MIA-IND IND 10 6
+score brooke-cersosimo MIA-IND IND 16 13
+score dan-parr MIA-IND IND 20 16
+score gennaro-filice MIA-IND IND 20 9
+score jeremy-bergman MIA-IND IND 17 16
+score bobby-kownack CAR-NO CAR 30 27
+score brooke-cersosimo CAR-NO CAR 26 23
+score dan-parr CAR-NO CAR 24 22
+score gennaro-filice CAR-NO NO 21 20
+score jeremy-bergman CAR-NO CAR 24 21
+score bobby-kownack BUF-NYJ BUF 35 21
+score brooke-cersosimo BUF-NYJ BUF 30 20
+score dan-parr BUF-NYJ BUF 31 23
+score gennaro-filice BUF-NYJ BUF 30 23
+score jeremy-bergman BUF-NYJ BUF 31 23
+score bobby-kownack JAX-TEN JAX 42 17
+score brooke-cersosimo JAX-TEN JAX 34 16
+score dan-parr JAX-TEN JAX 31 19
+score gennaro-filice JAX-TEN JAX 35 17
+score jeremy-bergman JAX-TEN JAX 27 17
+score bobby-kownack LAR-ARI LAR 21 7
+score brooke-cersosimo LAR-ARI LAR 25 17
+score dan-parr LAR-ARI LAR 24 14
+score gennaro-filice LAR-ARI LAR 19 13
+score jeremy-bergman LAR-ARI LAR 20 10
+score bobby-kownack SEA-LV SEA 20 13
+score brooke-cersosimo SEA-LV SEA 23 20
+score dan-parr SEA-LV SEA 21 14
+score gennaro-filice SEA-LV SEA 24 10
+score jeremy-bergman SEA-LV SEA 16 13
+score bobby-kownack SF-DAL SF 35 30
+score brooke-cersosimo SF-DAL SF 32 24
+score dan-parr SF-DAL SF 31 27
+score gennaro-filice SF-DAL SF 34 24
+score jeremy-bergman SF-DAL SF 49 30
+score bobby-kownack PIT-CIN CIN 21 17
+score brooke-cersosimo PIT-CIN CIN 28 26
+score dan-parr PIT-CIN CIN 26 23
+score gennaro-filice PIT-CIN CIN 23 20
+score jeremy-bergman PIT-CIN CIN 27 23
+score bobby-kownack LAC-BAL BAL 17 10
+score brooke-cersosimo LAC-BAL BAL 20 14
+score dan-parr LAC-BAL BAL 21 14
+score gennaro-filice LAC-BAL BAL 19 17
+score jeremy-bergman LAC-BAL BAL 23 13
+
+# ESPN - staff (ESPN BET lines as quoted in article, 2026-11-13)
+# Verbatim. 13 games; WAS-NYG has no preview/picks. Seth Walder is NOT a picker this week (third picker is Aaron Schatz, not in id list -> omitted).
+# Lines quoted: DET -2.5, BUF -8.5, NO -2.5, JAX -10.5, KC -3, IND -3.5, GB -3, HOU -4.5, SEA -6.5, LAR -9.5, SF -3.5, CIN -3.5, BAL -4.5
+score pamela-maldonado NE-DET DET 28 23
+score eric-moody NE-DET DET 31 24
+score espn-fpi NE-DET DET 0.7 0
+score pamela-maldonado BUF-NYJ BUF 30 20
+score eric-moody BUF-NYJ BUF 34 20
+score espn-fpi BUF-NYJ BUF 9.4 0
+score pamela-maldonado CAR-NO CAR 27 24
+score eric-moody CAR-NO NO 24 21
+score espn-fpi CAR-NO NO 0.1 0
+score pamela-maldonado JAX-TEN JAX 31 17
+score eric-moody JAX-TEN JAX 30 17
+score espn-fpi JAX-TEN JAX 10.1 0
+score pamela-maldonado KC-ATL KC 24 23
+score eric-moody KC-ATL KC 27 20
+score espn-fpi KC-ATL KC 7.8 0
+score pamela-maldonado MIA-IND IND 23 17
+score eric-moody MIA-IND IND 23 13
+score espn-fpi MIA-IND IND 9.2 0
+score pamela-maldonado MIN-GB GB 20 17
+score eric-moody MIN-GB GB 24 20
+score espn-fpi MIN-GB GB 1.4 0
+score pamela-maldonado HOU-CLE HOU 24 16
+score eric-moody HOU-CLE HOU 24 13
+score espn-fpi HOU-CLE HOU 7.3 0
+score pamela-maldonado SEA-LV SEA 24 16
+score eric-moody SEA-LV SEA 27 17
+score espn-fpi SEA-LV SEA 6.4 0
+score pamela-maldonado LAR-ARI LAR 23 16
+score eric-moody LAR-ARI LAR 27 17
+score espn-fpi LAR-ARI LAR 11.5 0
+score pamela-maldonado SF-DAL SF 31 28
+score eric-moody SF-DAL SF 31 27
+score espn-fpi SF-DAL SF 3.5 0
+score pamela-maldonado PIT-CIN PIT 27 24
+score eric-moody PIT-CIN CIN 28 24
+score espn-fpi PIT-CIN CIN 5.4 0
+score pamela-maldonado LAC-BAL BAL 20 17
+score eric-moody LAC-BAL BAL 23 16
+score espn-fpi LAC-BAL LAC 1.2 0

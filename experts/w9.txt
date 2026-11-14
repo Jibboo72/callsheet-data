@@ -1,21 +1,21 @@
 # Week 9 2026. Sat Nov 7 run. JAX-BAL played Thu Nov 5 (score added with week-10 run). CIN-ATL in Madrid: ATL designated home (schedule lists CIN at ATL).
 # Skipped: CBS (grid page blocked/unreadable), SBR (byline Mike Spector, best bets only), RotoWire BtB (Whalen already in via staff grid).
 # Covers / Fantasy Alarm picks read from a page summary (second half of page), not verbatim. ESPN TB-CHI and BUF-MIN not read verbatim: left out; ESPN had no JAX-BAL picks.
-game JAX-BAL 2026-11-05
-game CIN-ATL 2026-11-08
-game LAR-WAS 2026-11-08
-game DEN-CAR 2026-11-08
-game DET-MIA 2026-11-08
-game CLE-NO 2026-11-08
-game DAL-IND 2026-11-08
-game NYJ-KC 2026-11-08
-game NYG-PHI 2026-11-08
-game HOU-LAC 2026-11-08
-game ARI-SEA 2026-11-08
-game GB-NE 2026-11-08
-game LV-SF 2026-11-08
-game TB-CHI 2026-11-08
-game BUF-MIN 2026-11-09
+game JAX-BAL 2026-11-05 33 10
+game CIN-ATL 2026-11-08 34 17
+game LAR-WAS 2026-11-08 20 13
+game DEN-CAR 2026-11-08 26 21
+game DET-MIA 2026-11-08 19 9
+game CLE-NO 2026-11-08 22 23
+game DAL-IND 2026-11-08 27 23
+game NYJ-KC 2026-11-08 12 35
+game NYG-PHI 2026-11-08 19 11
+game HOU-LAC 2026-11-08 44 22
+game ARI-SEA 2026-11-08 3 17
+game GB-NE 2026-11-08 45 27
+game LV-SF 2026-11-08 17 38
+game TB-CHI 2026-11-08 24 27
+game BUF-MIN 2026-11-09 23 6
 
 # RotoWire staff picks (BetMGM)
 grp JAX-BAL JAX -10 | jeff-erickson:JAX scott-pianowski:JAX nick-whalen:BAL jim-coventry:JAX ian-hartitz:JAX
