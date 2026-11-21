@@ -1,0 +1,331 @@
+# Week 11 2026. Fri Nov 20 run. IND-HOU played Thu Nov 19 (score to be added with week-12 run). MIN-SF in Mexico City: SF designated home.
+# Byes: ATL, CLE, GB, LAR, NE, SEA.
+# CBS: grid page not found; used the Week 11 expert-picks article (Nov 20) per-game tables (12 games, no IND-HOU) treated as ATS (rows carry spreads; Dubin's picks match his separately labelled ATS picks in the Nov 19 Dubin/Dajani article, which supplies his IND-HOU pick). Tables read via page summary, not verbatim.
+# Partially summary-read (page truncated): Covers, Fantasy Alarm, PFT, NFL.com (8 games), ESPN (8 games). ESPN has no IND-HOU.
+# Skipped: RotoWire BtB (Whalen already in via staff grid). Not tracked: Jordan Dajani (CBS).
+game IND-HOU 2026-11-19
+game MIA-BUF 2026-11-22
+game BAL-CAR 2026-11-22
+game NO-CHI 2026-11-22
+game TEN-DAL 2026-11-22
+game TB-DET 2026-11-22
+game ARI-KC 2026-11-22
+game JAX-NYG 2026-11-22
+game NYJ-LAC 2026-11-22
+game LV-DEN 2026-11-22
+game PIT-PHI 2026-11-22
+game MIN-SF 2026-11-22
+game CIN-WAS 2026-11-23
+
+# RotoWire - NFL Staff Picks: Week 11 (BetMGM, updated 2026-11-18)
+# All 13 games. Season ATS records (thru Wk 10): Erickson 66-80-4, Pianowski 73-73-4, Whalen 71-75-4, Coventry 71-75-4, Hartitz 75-71-4.
+grp IND-HOU IND 12.5 | jeff-erickson:IND scott-pianowski:HOU nick-whalen:HOU jim-coventry:IND ian-hartitz:HOU
+grp MIA-BUF MIA 16.5 | jeff-erickson:MIA scott-pianowski:MIA nick-whalen:MIA jim-coventry:BUF ian-hartitz:BUF
+grp BAL-CAR BAL 2.5 | jeff-erickson:BAL scott-pianowski:BAL nick-whalen:CAR jim-coventry:BAL ian-hartitz:CAR
+grp NO-CHI NO 11.5 | jeff-erickson:CHI scott-pianowski:CHI nick-whalen:CHI jim-coventry:NO ian-hartitz:CHI
+grp TEN-DAL TEN 8 | jeff-erickson:TEN scott-pianowski:TEN nick-whalen:TEN jim-coventry:TEN ian-hartitz:TEN
+grp TB-DET TB 7 | jeff-erickson:TB scott-pianowski:TB nick-whalen:TB jim-coventry:TB ian-hartitz:DET
+grp ARI-KC ARI 16 | jeff-erickson:KC scott-pianowski:ARI nick-whalen:KC jim-coventry:KC ian-hartitz:KC
+grp PIT-PHI PIT -4.5 | jeff-erickson:PIT scott-pianowski:PHI nick-whalen:PIT jim-coventry:PIT ian-hartitz:PIT
+grp NYJ-LAC NYJ 3.5 | jeff-erickson:NYJ scott-pianowski:NYJ nick-whalen:NYJ jim-coventry:NYJ ian-hartitz:NYJ
+grp JAX-NYG JAX -6 | jeff-erickson:NYG scott-pianowski:JAX nick-whalen:JAX jim-coventry:JAX ian-hartitz:JAX
+grp LV-DEN LV 10 | jeff-erickson:DEN scott-pianowski:LV nick-whalen:LV jim-coventry:DEN ian-hartitz:DEN
+grp MIN-SF MIN 3 | jeff-erickson:MIN scott-pianowski:SF nick-whalen:MIN jim-coventry:SF ian-hartitz:MIN
+grp CIN-WAS CIN -6.5 | jeff-erickson:CIN scott-pianowski:CIN nick-whalen:CIN jim-coventry:CIN ian-hartitz:CIN
+
+# Bleacher Report (FanDuel lines as of Wed Nov 18 4pm ET, article Nov 19, 2026)
+# All 13 games, read in full. ATS standings: Moton 81-67-2, Knox 74-74-2, Hanford 73-75-2, Davenport 69-79-2, Sobleski 67-81-2, Gagnon 65-83-2, O'Donnell 65-83-2
+grp IND-HOU HOU -11.5 | gary-davenport:IND brad-gagnon:IND ian-hanford:HOU kris-knox:HOU moe-moton:HOU wes-odonnell:HOU brent-sobleski:HOU
+grp NO-CHI CHI -11.5 | gary-davenport:NO brad-gagnon:NO moe-moton:NO wes-odonnell:NO ian-hanford:CHI kris-knox:CHI brent-sobleski:CHI
+grp BAL-CAR CAR -1.5 | gary-davenport:BAL ian-hanford:BAL kris-knox:BAL moe-moton:BAL brent-sobleski:BAL brad-gagnon:CAR wes-odonnell:CAR
+grp MIA-BUF BUF -16.5 | brad-gagnon:MIA moe-moton:MIA wes-odonnell:MIA gary-davenport:BUF ian-hanford:BUF kris-knox:BUF brent-sobleski:BUF
+grp TEN-DAL DAL -7.5 | ian-hanford:TEN kris-knox:TEN gary-davenport:DAL brad-gagnon:DAL moe-moton:DAL wes-odonnell:DAL brent-sobleski:DAL
+grp ARI-KC KC -15.5 | gary-davenport:ARI brad-gagnon:KC ian-hanford:KC kris-knox:KC moe-moton:KC wes-odonnell:KC brent-sobleski:KC
+grp TB-DET DET -6.5 | brad-gagnon:TB ian-hanford:TB kris-knox:TB moe-moton:TB wes-odonnell:TB gary-davenport:DET brent-sobleski:DET
+grp PIT-PHI PIT -4.5 | gary-davenport:PIT brad-gagnon:PIT ian-hanford:PIT kris-knox:PIT moe-moton:PIT wes-odonnell:PIT brent-sobleski:PHI
+grp NYJ-LAC LAC -2.5 | gary-davenport:NYJ wes-odonnell:NYJ brad-gagnon:LAC ian-hanford:LAC kris-knox:LAC moe-moton:LAC brent-sobleski:LAC
+grp LV-DEN DEN -9.5 | brad-gagnon:LV ian-hanford:LV brent-sobleski:LV gary-davenport:DEN kris-knox:DEN moe-moton:DEN wes-odonnell:DEN
+grp JAX-NYG JAX -5.5 | gary-davenport:JAX kris-knox:JAX moe-moton:JAX wes-odonnell:JAX brent-sobleski:JAX brad-gagnon:NYG ian-hanford:NYG
+grp MIN-SF SF -3 | gary-davenport:MIN kris-knox:MIN brad-gagnon:SF ian-hanford:SF moe-moton:SF wes-odonnell:SF brent-sobleski:SF
+grp CIN-WAS CIN -5.5 | gary-davenport:CIN ian-hanford:CIN kris-knox:CIN wes-odonnell:CIN brent-sobleski:CIN brad-gagnon:WAS moe-moton:WAS
+
+# Yahoo Sports - Frank Schwab (lines as quoted, Nov 19, 2026). All 13 games. Season to date: 68-80-2 (last week 5-9)
+pick frank-schwab IND-HOU IND 12.5
+pick frank-schwab MIA-BUF MIA 16.5
+pick frank-schwab BAL-CAR CAR -2.5
+pick frank-schwab NO-CHI CHI -10.5
+pick frank-schwab TEN-DAL TEN 7.5
+pick frank-schwab TB-DET TB 7
+pick frank-schwab ARI-KC ARI 15.5
+pick frank-schwab JAX-NYG JAX -6
+pick frank-schwab NYJ-LAC NYJ 3
+pick frank-schwab LV-DEN LV 10
+pick frank-schwab PIT-PHI PIT -4.5
+pick frank-schwab MIN-SF MIN 3
+pick frank-schwab CIN-WAS WAS 6.5
+
+# Athlon Sports (lines as shown, 2026-11-19). All 13 games. No season records.
+grp IND-HOU IND 10.5 | cory-bonini:HOU luke-easterling:HOU craig-ellenport:HOU doug-farrar:IND
+grp NO-CHI NO 10 | cory-bonini:NO luke-easterling:CHI craig-ellenport:CHI doug-farrar:CHI
+grp MIA-BUF MIA 16.5 | cory-bonini:BUF luke-easterling:BUF craig-ellenport:MIA doug-farrar:BUF
+grp ARI-KC ARI 16.5 | cory-bonini:KC luke-easterling:KC craig-ellenport:KC doug-farrar:ARI
+grp TEN-DAL TEN 7.5 | cory-bonini:DAL luke-easterling:DAL craig-ellenport:DAL doug-farrar:TEN
+grp TB-DET TB 5.5 | cory-bonini:DET luke-easterling:DET craig-ellenport:DET doug-farrar:DET
+grp BAL-CAR BAL 2.5 | cory-bonini:CAR luke-easterling:CAR craig-ellenport:CAR doug-farrar:CAR
+grp PIT-PHI PIT -4.5 | cory-bonini:PIT luke-easterling:PIT craig-ellenport:PIT doug-farrar:PIT
+grp NYJ-LAC NYJ 3 | cory-bonini:LAC luke-easterling:LAC craig-ellenport:LAC doug-farrar:NYJ
+grp LV-DEN LV 10 | cory-bonini:DEN luke-easterling:DEN craig-ellenport:LV doug-farrar:DEN
+grp JAX-NYG JAX -6.5 | cory-bonini:JAX luke-easterling:JAX craig-ellenport:NYG doug-farrar:JAX
+grp MIN-SF MIN 3 | cory-bonini:MIN luke-easterling:SF craig-ellenport:MIN doug-farrar:MIN
+grp CIN-WAS CIN -4.5 | cory-bonini:CIN luke-easterling:CIN craig-ellenport:CIN doug-farrar:CIN
+
+# Covers - Chris Vasile (Kalshi lines, updated 2026-11-20). 13 games; second half of page read via summary.
+pick chris-vasile IND-HOU IND 13.5
+pick chris-vasile TB-DET DET -7.5
+pick chris-vasile MIA-BUF MIA 16.5
+pick chris-vasile NO-CHI CHI -10.5
+pick chris-vasile ARI-KC KC -16.5
+pick chris-vasile PIT-PHI PHI 4.5
+pick chris-vasile BAL-CAR CAR -2.5
+pick chris-vasile TEN-DAL TEN 7.5
+pick chris-vasile NYJ-LAC LAC -3.5
+pick chris-vasile LV-DEN DEN -10.5
+pick chris-vasile JAX-NYG NYG 6.5
+pick chris-vasile MIN-SF SF -3.5
+pick chris-vasile CIN-WAS CIN -6.5
+
+# Fantasy Alarm - Bryan Derr (DraftKings, 2026-11-18). 13 games; picks read via page summary.
+pick bryan-derr IND-HOU IND 12.5
+pick bryan-derr ARI-KC KC -15.5
+pick bryan-derr BAL-CAR CAR -2.5
+pick bryan-derr MIA-BUF MIA 16.5
+pick bryan-derr NO-CHI NO 11.5
+pick bryan-derr PIT-PHI PIT -4.5
+pick bryan-derr TB-DET DET -7
+pick bryan-derr TEN-DAL TEN 7.5
+pick bryan-derr NYJ-LAC NYJ 3.5
+pick bryan-derr JAX-NYG JAX -6
+pick bryan-derr LV-DEN LV 10
+pick bryan-derr MIN-SF MIN 3
+pick bryan-derr CIN-WAS CIN -6.5
+
+# Sports Betting Dime - Sascha Paruk / SBD A.I. model (Novig, 2026-11-15). 13 games verbatim from table.
+pick sbd-model IND-HOU IND 9.5
+pick sbd-model BAL-CAR BAL 1.5
+pick sbd-model TEN-DAL DAL -7.5
+pick sbd-model ARI-KC ARI 15.5
+pick sbd-model PIT-PHI PIT -4.5
+pick sbd-model NO-CHI NO 9.5
+pick sbd-model TB-DET DET -5.5
+pick sbd-model MIA-BUF BUF -16.5
+pick sbd-model NYJ-LAC NYJ 3.5
+pick sbd-model JAX-NYG NYG 6.5
+pick sbd-model LV-DEN LV 7.5
+pick sbd-model MIN-SF SF -3.5
+pick sbd-model CIN-WAS WAS 4.5
+
+# Sports Illustrated - Iain MacMillan (2026-11-19). 13 games from "Pick:" lines. No season record.
+pick iain-macmillan IND-HOU HOU -12.5
+pick iain-macmillan MIA-BUF BUF -16.5
+pick iain-macmillan BAL-CAR CAR -2.5
+pick iain-macmillan NO-CHI CHI -11.5
+pick iain-macmillan TEN-DAL DAL -7.5
+pick iain-macmillan TB-DET TB 7
+pick iain-macmillan ARI-KC ARI 15.5
+pick iain-macmillan JAX-NYG JAX -5.5
+pick iain-macmillan NYJ-LAC NYJ 3
+pick iain-macmillan LV-DEN DEN -9.5
+pick iain-macmillan PIT-PHI PIT -4.5
+pick iain-macmillan MIN-SF MIN 3
+pick iain-macmillan CIN-WAS CIN -6.5
+
+# FanSided - Cody Williams (FanDuel, 2026-11-17). 13 games. ATS record entering Week 11: 71-78-3 (last week 9-5).
+pick cody-williams IND-HOU IND 11.5
+pick cody-williams MIA-BUF BUF -16.5
+pick cody-williams BAL-CAR CAR -2.5
+pick cody-williams NO-CHI CHI -11.5
+pick cody-williams TEN-DAL DAL -7.5
+pick cody-williams TB-DET TB 6.5
+pick cody-williams ARI-KC KC -15.5
+pick cody-williams JAX-NYG JAX -5.5
+pick cody-williams NYJ-LAC NYJ 3.5
+pick cody-williams LV-DEN LV 9.5
+pick cody-williams PIT-PHI PIT -4.5
+pick cody-williams MIN-SF MIN 3
+pick cody-williams CIN-WAS CIN -5.5
+
+# Sportsbook Review - Gary Pearson (no book named, 2026-11-18). 13 games. No personal season record.
+pick gary-pearson IND-HOU IND 12.5
+pick gary-pearson MIA-BUF MIA 16.5
+pick gary-pearson BAL-CAR CAR -1.5
+pick gary-pearson NO-CHI NO 11.5
+pick gary-pearson TEN-DAL TEN 7.5
+pick gary-pearson TB-DET DET -6.5
+pick gary-pearson ARI-KC KC -15.5
+pick gary-pearson JAX-NYG JAX -5.5
+pick gary-pearson NYJ-LAC LAC -3.5
+pick gary-pearson LV-DEN DEN -9.5
+pick gary-pearson PIT-PHI PIT -4.5
+pick gary-pearson MIN-SF MIN 3
+pick gary-pearson CIN-WAS WAS 6.5
+
+# PhillyVoice - Jimmy Kempski (Nov 19, 2026). "Picks against the spread: Colts (+13.5), Steelers (-4.5), Saints (+12), Titans (+8.5), Jaguars (-5.5), 49ers (-3)." 2026 ATS: 25-25-2.
+pick jimmy-kempski IND-HOU IND 13.5
+pick jimmy-kempski PIT-PHI PIT -4.5
+pick jimmy-kempski NO-CHI NO 12
+pick jimmy-kempski TEN-DAL TEN 8.5
+pick jimmy-kempski JAX-NYG JAX -5.5
+pick jimmy-kempski MIN-SF SF -3
+
+# The Ringer - Anthony Dabbundo (Nov 19, 2026). Full-game spread bets only (skipped 1Q/2H spreads, totals, "considering"). Column 39-35 on season.
+pick anthony-dabbundo IND-HOU HOU -12.5
+pick anthony-dabbundo LV-DEN DEN -9.5
+pick anthony-dabbundo MIN-SF MIN 3
+
+# CBS Sports - expert panel (SportsLine consensus lines, article Nov 20, 2026). 12 games (no IND-HOU); read via page summary. Dubin IND-HOU from the Nov 19 Dubin/Dajani ATS article (DraftKings).
+pick jared-dubin IND-HOU IND 12.5
+grp ARI-KC KC -16.5 | pete-prisco:KC jared-dubin:KC ryan-wilson:ARI john-breech:KC tyler-sullivan:ARI dave-richard:KC jamey-eisenberg:KC
+grp BAL-CAR CAR -2.5 | pete-prisco:BAL jared-dubin:BAL ryan-wilson:CAR john-breech:BAL tyler-sullivan:CAR dave-richard:CAR jamey-eisenberg:CAR
+grp MIA-BUF BUF -16.5 | pete-prisco:MIA jared-dubin:BUF ryan-wilson:MIA john-breech:MIA tyler-sullivan:BUF dave-richard:BUF jamey-eisenberg:MIA
+grp NO-CHI CHI -11.5 | pete-prisco:NO jared-dubin:NO ryan-wilson:NO john-breech:CHI tyler-sullivan:NO dave-richard:CHI jamey-eisenberg:CHI
+grp TB-DET DET -6.5 | pete-prisco:TB jared-dubin:DET ryan-wilson:DET john-breech:TB tyler-sullivan:DET dave-richard:TB jamey-eisenberg:TB
+grp TEN-DAL DAL -8 | pete-prisco:DAL jared-dubin:TEN ryan-wilson:TEN john-breech:DAL tyler-sullivan:TEN dave-richard:TEN jamey-eisenberg:TEN
+grp PIT-PHI PIT -4.5 | pete-prisco:PIT jared-dubin:PIT ryan-wilson:PIT john-breech:PIT tyler-sullivan:PHI dave-richard:PHI jamey-eisenberg:PIT
+grp NYJ-LAC LAC -3.5 | pete-prisco:LAC jared-dubin:LAC ryan-wilson:NYJ john-breech:NYJ tyler-sullivan:NYJ dave-richard:LAC jamey-eisenberg:NYJ
+grp JAX-NYG JAX -6 | pete-prisco:JAX jared-dubin:JAX ryan-wilson:JAX john-breech:JAX tyler-sullivan:JAX dave-richard:NYG jamey-eisenberg:NYG
+grp LV-DEN DEN -10 | pete-prisco:DEN jared-dubin:LV ryan-wilson:LV john-breech:DEN tyler-sullivan:DEN dave-richard:DEN jamey-eisenberg:DEN
+grp MIN-SF SF -3 | pete-prisco:SF jared-dubin:SF ryan-wilson:MIN john-breech:SF tyler-sullivan:MIN dave-richard:SF jamey-eisenberg:SF
+grp CIN-WAS CIN -6.5 | pete-prisco:WAS jared-dubin:CIN ryan-wilson:CIN john-breech:CIN tyler-sullivan:CIN dave-richard:CIN jamey-eisenberg:WAS
+
+# ProFootballTalk - Mike Florio (score predictions, 2026-11-19). 13 games, read via page summary. Season (SU): 96-53-1.
+score mike-florio IND-HOU HOU 23 16
+score mike-florio MIA-BUF BUF 30 13
+score mike-florio BAL-CAR BAL 20 17
+score mike-florio NO-CHI CHI 27 20
+score mike-florio TEN-DAL TEN 30 27
+score mike-florio TB-DET DET 24 17
+score mike-florio ARI-KC KC 34 10
+score mike-florio PIT-PHI PIT 16 12
+score mike-florio NYJ-LAC LAC 24 21
+score mike-florio LV-DEN DEN 27 16
+score mike-florio JAX-NYG JAX 30 20
+score mike-florio MIN-SF MIN 24 20
+score mike-florio CIN-WAS CIN 30 21
+
+# NFL.com editors (page undated, ~Nov 18-19). MIA-BUF, BAL-CAR, NO-CHI, TEN-DAL, TB-DET verbatim; other 8 games via page summary.
+score jeremy-bergman MIA-BUF BUF 34 17
+score brooke-cersosimo MIA-BUF BUF 33 18
+score gennaro-filice MIA-BUF BUF 26 13
+score bobby-kownack MIA-BUF BUF 35 14
+score dan-parr MIA-BUF BUF 28 10
+score jeremy-bergman BAL-CAR BAL 23 20
+score brooke-cersosimo BAL-CAR CAR 25 20
+score gennaro-filice BAL-CAR BAL 23 20
+score bobby-kownack BAL-CAR BAL 21 20
+score dan-parr BAL-CAR CAR 24 21
+score jeremy-bergman NO-CHI CHI 40 17
+score brooke-cersosimo NO-CHI CHI 42 24
+score gennaro-filice NO-CHI CHI 42 17
+score bobby-kownack NO-CHI CHI 38 24
+score dan-parr NO-CHI CHI 30 17
+score jeremy-bergman TEN-DAL DAL 31 23
+score brooke-cersosimo TEN-DAL DAL 28 23
+score gennaro-filice TEN-DAL DAL 30 24
+score bobby-kownack TEN-DAL DAL 33 30
+score dan-parr TEN-DAL DAL 35 28
+score jeremy-bergman TB-DET DET 20 16
+score brooke-cersosimo TB-DET DET 25 21
+score gennaro-filice TB-DET DET 24 19
+score bobby-kownack TB-DET DET 23 14
+score dan-parr TB-DET DET 20 12
+score jeremy-bergman ARI-KC KC 34 13
+score brooke-cersosimo ARI-KC KC 46 23
+score gennaro-filice ARI-KC KC 34 10
+score bobby-kownack ARI-KC KC 40 20
+score dan-parr ARI-KC KC 32 10
+score jeremy-bergman PIT-PHI PIT 14 10
+score brooke-cersosimo PIT-PHI PIT 22 18
+score gennaro-filice PIT-PHI PIT 22 14
+score bobby-kownack PIT-PHI PIT 21 12
+score dan-parr PIT-PHI PIT 21 16
+score jeremy-bergman NYJ-LAC NYJ 18 16
+score brooke-cersosimo NYJ-LAC LAC 20 18
+score gennaro-filice NYJ-LAC NYJ 17 16
+score bobby-kownack NYJ-LAC LAC 17 16
+score dan-parr NYJ-LAC LAC 23 17
+score jeremy-bergman JAX-NYG JAX 27 17
+score brooke-cersosimo JAX-NYG JAX 26 22
+score gennaro-filice JAX-NYG JAX 27 16
+score bobby-kownack JAX-NYG JAX 31 23
+score dan-parr JAX-NYG JAX 25 19
+score jeremy-bergman LV-DEN DEN 23 9
+score brooke-cersosimo LV-DEN DEN 24 15
+score gennaro-filice LV-DEN DEN 34 17
+score bobby-kownack LV-DEN DEN 24 16
+score dan-parr LV-DEN DEN 27 13
+score jeremy-bergman MIN-SF SF 17 16
+score brooke-cersosimo MIN-SF MIN 24 23
+score gennaro-filice MIN-SF MIN 24 23
+score bobby-kownack MIN-SF SF 21 17
+score dan-parr MIN-SF SF 24 23
+score jeremy-bergman CIN-WAS CIN 31 20
+score brooke-cersosimo CIN-WAS CIN 29 24
+score gennaro-filice CIN-WAS CIN 35 23
+score bobby-kownack CIN-WAS CIN 45 35
+score dan-parr CIN-WAS CIN 33 29
+score jeremy-bergman IND-HOU HOU 27 17
+score brooke-cersosimo IND-HOU HOU 34 24
+score gennaro-filice IND-HOU HOU 33 16
+score bobby-kownack IND-HOU HOU 28 17
+score dan-parr IND-HOU HOU 26 13
+
+# ESPN - staff (DraftKings lines as quoted, 2026-11-20). 12 games (no IND-HOU). ARI-KC, BAL-CAR, MIA-BUF, NO-CHI verbatim; other 8 via page summary.
+# Lines quoted: BUF -16.5, CAR -2.5, CHI -11.5, DAL -8.5, DET -7, KC -15.5, JAX -6, LAC -3, DEN -10, PIT -4.5, SF -3, CIN -6.5
+score pamela-maldonado MIA-BUF BUF 31 17
+score eric-moody MIA-BUF BUF 31 14
+score seth-walder MIA-BUF BUF 33 9
+score espn-fpi MIA-BUF BUF 16.5 0
+score pamela-maldonado BAL-CAR CAR 23 17
+score eric-moody BAL-CAR CAR 24 20
+score seth-walder BAL-CAR CAR 27 24
+score espn-fpi BAL-CAR CAR 4.9 0
+score pamela-maldonado NO-CHI CHI 27 20
+score eric-moody NO-CHI CHI 30 17
+score seth-walder NO-CHI CHI 34 20
+score espn-fpi NO-CHI CHI 7.9 0
+score pamela-maldonado TEN-DAL DAL 34 24
+score eric-moody TEN-DAL DAL 34 23
+score seth-walder TEN-DAL DAL 30 27
+score espn-fpi TEN-DAL DAL 8.5 0
+score pamela-maldonado TB-DET DET 27 21
+score eric-moody TB-DET DET 27 23
+score seth-walder TB-DET DET 30 20
+score espn-fpi TB-DET DET 2.9 0
+score pamela-maldonado ARI-KC KC 27 10
+score eric-moody ARI-KC KC 30 10
+score seth-walder ARI-KC KC 26 20
+score espn-fpi ARI-KC KC 12 0
+score pamela-maldonado JAX-NYG JAX 27 20
+score eric-moody JAX-NYG JAX 30 20
+score seth-walder JAX-NYG JAX 29 16
+score espn-fpi JAX-NYG JAX 8.9 0
+score pamela-maldonado NYJ-LAC LAC 24 20
+score eric-moody NYJ-LAC LAC 23 17
+score seth-walder NYJ-LAC LAC 23 20
+score espn-fpi NYJ-LAC LAC 5.4 0
+score pamela-maldonado LV-DEN DEN 27 13
+score eric-moody LV-DEN DEN 27 13
+score seth-walder LV-DEN DEN 24 20
+score espn-fpi LV-DEN DEN 10.9 0
+score pamela-maldonado PIT-PHI PHI 20 17
+score eric-moody PIT-PHI PIT 23 16
+score seth-walder PIT-PHI PIT 25 18
+score espn-fpi PIT-PHI PIT 3.6 0
+score pamela-maldonado MIN-SF MIN 23 20
+score eric-moody MIN-SF SF 24 20
+score seth-walder MIN-SF MIN 24 23
+score espn-fpi MIN-SF SF 3.4 0
+score pamela-maldonado CIN-WAS CIN 31 23
+score eric-moody CIN-WAS CIN 31 23
+score seth-walder CIN-WAS CIN 30 17
+score espn-fpi CIN-WAS CIN 7.2 0

@@ -3,19 +3,19 @@
 # CAR-NO: BR and Athlon quote Panthers -1.5 while others have Saints -2.5: sides kept, lines dropped (also SBD early NO +1.5). NFL.com WAS-NYG left out (pick sides unreadable). ESPN: no WAS-NYG; Seth Walder not a picker (Aaron Schatz, not tracked).
 # Skipped: RotoWire BtB (Whalen already in via staff grid).
 game WAS-NYG 2026-11-12 24 21
-game NE-DET 2026-11-15
-game KC-ATL 2026-11-15
-game HOU-CLE 2026-11-15
-game MIN-GB 2026-11-15
-game MIA-IND 2026-11-15
-game CAR-NO 2026-11-15
-game BUF-NYJ 2026-11-15
-game JAX-TEN 2026-11-15
-game LAR-ARI 2026-11-15
-game SEA-LV 2026-11-15
-game SF-DAL 2026-11-15
-game PIT-CIN 2026-11-15
-game LAC-BAL 2026-11-16
+game NE-DET 2026-11-15 10 35
+game KC-ATL 2026-11-15 35 13
+game HOU-CLE 2026-11-15 24 27
+game MIN-GB 2026-11-15 30 10
+game MIA-IND 2026-11-15 22 24
+game CAR-NO 2026-11-15 20 17
+game BUF-NYJ 2026-11-15 31 12
+game JAX-TEN 2026-11-15 40 23
+game LAR-ARI 2026-11-15 34 6
+game SEA-LV 2026-11-15 21 13
+game SF-DAL 2026-11-15 46 40
+game PIT-CIN 2026-11-15 18 38
+game LAC-BAL 2026-11-16 23 20
 
 # RotoWire - NFL Staff Picks: Week 10 (BetMGM lines, updated 2026-11-11)
 # All 14 games read verbatim from the picks table. Season ATS records (thru Wk 9): Erickson 60-72-4, Pianowski 65-67-4, Whalen 61-71-4, Coventry 61-71-4, Hartitz 66-66-4.
