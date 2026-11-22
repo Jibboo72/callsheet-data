@@ -354,20 +354,6 @@
    "team": "NE"
   },
   {
-   "def_pass": -3.85,
-   "def_rush": -0.13,
-   "defense": -1.99,
-   "off_pass": -3.53,
-   "off_rush": -0.22,
-   "offense": -2.56,
-   "qb": "G.Minshew",
-   "qb_adj": -1.37,
-   "rank": 26,
-   "rating": -4.72,
-   "special": -0.17,
-   "team": "ARI"
-  },
-  {
    "def_pass": 0.45,
    "def_rush": -0.46,
    "defense": -0.0,
@@ -376,7 +362,7 @@
    "offense": -5.12,
    "qb": "A.Richardson",
    "qb_adj": -2.09,
-   "rank": 27,
+   "rank": 26,
    "rating": -5.02,
    "special": 0.1,
    "team": "IND"
@@ -390,10 +376,24 @@
    "offense": -5.23,
    "qb": "J.Herbert",
    "qb_adj": -1.07,
-   "rank": 28,
+   "rank": 27,
    "rating": -5.07,
    "special": -0.03,
    "team": "LAC"
+  },
+  {
+   "def_pass": -3.85,
+   "def_rush": -0.13,
+   "defense": -1.99,
+   "off_pass": -4.34,
+   "off_rush": -0.22,
+   "offense": -3.37,
+   "qb": "J.Johnson",
+   "qb_adj": -2.19,
+   "rank": 28,
+   "rating": -5.53,
+   "special": -0.17,
+   "team": "ARI"
   },
   {
    "def_pass": -5.87,
