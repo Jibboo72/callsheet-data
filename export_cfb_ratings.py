@@ -414,6 +414,36 @@ def build(season):
             if g["conf_game"]:
                 rec[me]["cw" if won else "cl"] += 1
             rec[me]["opp"].append(op)
+    # ---- power = what the spreads use (2026-11-22) --------------------------
+    # The game projections add the play-by-play layer (success rate + fumble
+    # luck) on top of the scores model; the rankings used to show the scores
+    # model alone, so the table and the spreads could disagree. Now each FBS
+    # team's `net` is its neutral-field margin vs an average FBS team AS THE
+    # PROJECTIONS SEE IT:  c0 * scores net + c2 * success-rate net + c3 * fumble
+    # luck (cfb_pbp.COEF for that week's group), shifted so the FBS average
+    # matches the scores model. The scores-only number is kept as `snet`.
+    # Off / Def stay the scores model's split, so they no longer sum to Net.
+    def power_at(wk, tbl):
+        if layer is None:
+            return tbl["net"].copy()
+        c = cfb_pbp.COEF[cfb_pbp.group(int(wk))]
+        sr = layer.sr_net(int(wk))
+        pw = tbl["net"].copy()
+        for t in fbs.index:
+            pw[t] = (c[0] * float(tbl.loc[t, "net"]) + c[2] * sr.get(t, 0.0)
+                     + c[3] * layer.fum_luck(t, wk))
+        idx = [t for t in fbs.index if t in pw.index]
+        pw[idx] += float(tbl.loc[idx, "net"].mean()) - float(pw[idx].mean())
+        return pw
+    try:
+        pw_now = power_at(next_wk, T)
+    except Exception as e:
+        print(f"power: play-by-play layer failed ({e}); scores-only net", file=sys.stderr)
+        layer, pw_now = None, T["net"].copy()
+    T["snet"] = T["net"]
+    T["net"] = pw_now
+    fbs["snet"] = fbs["net"]
+    fbs["net"] = pw_now.reindex(fbs.index)
     net_all = T["net"]
     # Resume ("earned"): wins minus the wins a top-10-calibre team (the average
     # of the teams ranked 8-12) would expect against the same games at the same
@@ -434,8 +464,12 @@ def build(season):
     trend = {t: [] for t in fbs.index}
     for wk in played_wks[1:] + [through + 1]:
         mt = (fits.get(wk) or cur)["teams"].set_index("team")
+        try:
+            pw = power_at(wk, mt)
+        except Exception:
+            pw = mt["net"]
         for t in fbs.index:
-            trend[t].append(round(float(mt.loc[t, "net"]), 1))
+            trend[t].append(round(float(pw.get(t, mt.loc[t, "net"])), 1))
 
     # ---- season simulation -------------------------------------------------
     sim = simulate(sched, cur, fbs, conf_of, div_of, rec, cfg)
@@ -458,7 +492,8 @@ def build(season):
             logo=i.get("logo", ""), mascot=i.get("mascot", ""),
             conf=conf_of.get(t, ""), cdiv=div_of.get(t, ""),
             rank=int(r["rank"]), off=round(float(r.off), 1), deff=round(float(-r["def"]), 1),
-            net=round(float(r.net), 1), off_rank=int(r.off_rank), def_rank=int(r.def_rank),
+            net=round(float(r.net), 1), snet=round(float(r.snet), 1),
+            off_rank=int(r.off_rank), def_rank=int(r.def_rank),
             w=rec[t]["w"], l=rec[t]["l"], cw=rec[t]["cw"], cl=rec[t]["cl"],
             sos=round(sos, 1), rsos=round(rsos, 1), res=round(res[t], 2), trend=trend[t],
             scar=round(float(T.loc[t, "scar"]), 2) if "scar" in T.columns else 0.0,

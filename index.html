@@ -2380,7 +2380,7 @@ function cfbRankings(d){
   const hasRes=d.teams.some(t=>t.res!=null);
   const COLS=[['net','Net'],['off','Off'],['deff','Def'],['sos','SOS']].concat(hasRes?[['res','Earn']]:[]);
   const fcs=CFBSRC()==='fcs';
-  let html=cfbConfSelect(d,fcs?'All FCS':'All FBS')+`<div class="note" style="margin:0 0 10px">Points better than an average ${fcs?'FCS':'FBS'} team on a neutral field, opponent-adjusted${fcs?' across every Division I game they play':''}. Net = Off + Def; Def is flipped so higher is better. Rating gap + ${d.model.hfa} for home field = projected spread. SOS = average Net of opponents played.${hasRes?` <b>Net is how good a team is</b> (it sets the spreads); <b>Earned is what its record has earned</b>: wins above what a top-10 team would expect against the same schedule. Tap Earned to rank by résumé.`:''}${fcs&&d.fbs_avg!=null?` On this scale an average FBS team is ${sgn1(d.fbs_avg)}.`:''} Tap a team for its page.</div>
+  let html=cfbConfSelect(d,fcs?'All FCS':'All FBS')+`<div class="note" style="margin:0 0 10px">Points better than an average ${fcs?'FCS':'FBS'} team on a neutral field, opponent-adjusted${fcs?' across every Division I game they play':''}. ${d.teams.some(t=>t.snet!=null)?'Net is the number the spreads use: the score-based rating plus play-by-play (success rate, fumble luck). Off and Def are the score-based split, so they no longer add up to Net exactly; Def is flipped so higher is better.':'Net = Off + Def; Def is flipped so higher is better.'} Rating gap + ${d.model.hfa} for home field = projected spread. SOS = average Net of opponents played.${hasRes?` <b>Net is how good a team is</b> (it sets the spreads); <b>Earned is what its record has earned</b>: wins above what a top-10 team would expect against the same schedule. Tap Earned to rank by résumé.`:''}${fcs&&d.fbs_avg!=null?` On this scale an average FBS team is ${sgn1(d.fbs_avg)}.`:''} Tap a team for its page.</div>
   <table class="pow"><thead><tr>
     <th data-cfbsort="net">#</th><th data-cfbsort="team">Team</th><th class="n" data-cfbsort="rec">Rec</th>
     ${COLS.map(([c,l])=>`<th class="n" data-cfbsort="${c}" ${c===k?'data-on="1"':''}>${l}</th>`).join('')}
@@ -3758,7 +3758,7 @@ const WEEK1_START='2026-09-08';
 /* Bump this on every upload — it's the only way to tell from the live app
    whether you're looking at this file or a cached older one. Shown at the
    very bottom of every tab. */
-const BUILD_STAMP='2026-11-14 16:02 UTC';
+const BUILD_STAMP='2026-11-23 02:10 UTC';
 
 /* A home-screen web-clip on iOS can keep running a cached copy of this
    page indefinitely without ever re-checking the server on its own —
