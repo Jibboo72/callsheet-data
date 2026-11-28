@@ -3,19 +3,19 @@
 # CBS: grid page not found; used the Week 11 expert-picks article (Nov 20) per-game tables (12 games, no IND-HOU) treated as ATS (rows carry spreads; Dubin's picks match his separately labelled ATS picks in the Nov 19 Dubin/Dajani article, which supplies his IND-HOU pick). Tables read via page summary, not verbatim.
 # Partially summary-read (page truncated): Covers, Fantasy Alarm, PFT, NFL.com (8 games), ESPN (8 games). ESPN has no IND-HOU.
 # Skipped: RotoWire BtB (Whalen already in via staff grid). Not tracked: Jordan Dajani (CBS).
-game IND-HOU 2026-11-19
-game MIA-BUF 2026-11-22
-game BAL-CAR 2026-11-22
-game NO-CHI 2026-11-22
-game TEN-DAL 2026-11-22
-game TB-DET 2026-11-22
-game ARI-KC 2026-11-22
-game JAX-NYG 2026-11-22
-game NYJ-LAC 2026-11-22
-game LV-DEN 2026-11-22
-game PIT-PHI 2026-11-22
-game MIN-SF 2026-11-22
-game CIN-WAS 2026-11-23
+game IND-HOU 2026-11-19 3 26
+game MIA-BUF 2026-11-22 9 26
+game BAL-CAR 2026-11-22 33 35
+game NO-CHI 2026-11-22 13 21
+game TEN-DAL 2026-11-22 30 51
+game TB-DET 2026-11-22 21 31
+game ARI-KC 2026-11-22 7 34
+game JAX-NYG 2026-11-22 18 23
+game NYJ-LAC 2026-11-22 27 24
+game LV-DEN 2026-11-22 24 38
+game PIT-PHI 2026-11-22 16 19
+game MIN-SF 2026-11-22 10 35
+game CIN-WAS 2026-11-23 20 22
 
 # RotoWire - NFL Staff Picks: Week 11 (BetMGM, updated 2026-11-18)
 # All 13 games. Season ATS records (thru Wk 10): Erickson 66-80-4, Pianowski 73-73-4, Whalen 71-75-4, Coventry 71-75-4, Hartitz 75-71-4.
